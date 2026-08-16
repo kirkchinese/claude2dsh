@@ -48,8 +48,12 @@ function genericResult(title: string, summary: string): { card: 'generic'; title
   return { card: 'generic', title, content: [{ type: 'text', text: summary }] }
 }
 
-function importResultView(_args: unknown, value: unknown): { card: 'generic'; title: string; content: { type: 'text'; text: string }[] } {
-  const report = value as { imported?: number; alreadyImported?: number; appended?: number; skipped?: number; failed?: number; total?: number }
+function importResultView(_args: unknown, value: { content: { type: string; text?: string }[] }): { card: 'generic'; title: string; content: { type: 'text'; text: string }[] } {
+  let report: { imported?: number; alreadyImported?: number; appended?: number; skipped?: number; failed?: number } = {}
+  const raw = value.content.find((block) => block.type === 'text')?.text
+  if (raw !== undefined) {
+    try { report = JSON.parse(raw) as typeof report } catch { /* raw text stays fallback */ }
+  }
   return genericResult('Claude Code import', `imported=${report.imported ?? 0} already=${report.alreadyImported ?? 0} appended=${report.appended ?? 0} skipped=${report.skipped ?? 0} failed=${report.failed ?? 0}`)
 }
 
@@ -305,8 +309,16 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
           dryRun: process.env.CLAUDE2DSH_TEST_SYNC_DRY_RUN === '1',
         }, resolveDshHome())
       }
+      let presenters: Record<string, unknown> | undefined
+      if (process.env.CLAUDE2DSH_TEST_PRESENTERS === '1') {
+        const importDef = ready.tools.get('claude2dsh_import')
+        presenters = {
+          importCall: importDef?.presentCall?.({ path: '/tmp/sample.jsonl' }),
+          importResult: importDef?.presentResult?.({}, { content: [{ type: 'text', text: JSON.stringify(report.items[0] ?? { imported: 0, alreadyImported: 0, appended: 0, skipped: 0, failed: 0 }) }], isError: false }),
+        }
+      }
       if (testReport !== undefined) {
-        await writeFile(testReport, JSON.stringify({ report, skillsReport, exportReport, syncReport, resumeReport, preparedSessions, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
+        await writeFile(testReport, JSON.stringify({ report, skillsReport, exportReport, syncReport, resumeReport, preparedSessions, presenters, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
       }
       const holdMs = Number(process.env.CLAUDE2DSH_TEST_HOLD_MS ?? '0')
       const failed = report.failed + (skillsReport?.filter((item) => item.status === 'failed').length ?? 0)
