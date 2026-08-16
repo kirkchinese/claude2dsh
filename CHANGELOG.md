@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Curated-list inclusion badge + `README.zh.md` (radar runtime-verification is explicitly not claimed).
+- DSH Settings page and durable `claude2dsh` settings namespace (auto-mirror, import defaults, write-back, hook fields); host validator rejects bad values.
+- Global `~/.claude/CLAUDE.md` → `$DSH_HOME/AGENTS.md` with preview/never-overwrite.
+- Project `MEMORY.md`/`memory/*.md` → one DSH-native skill bundle per project.
+- Tool-result `.txt` sidecar copy + durable path map, per-file size cap and `claude2dsh_sidecars`.
+- Explicit bidirectional three-way turn merge (`claude2dsh_merge`), same-turn dual edits preserved with a log-only marker, safe copies only.
+- Per-session source markers (`claude-main`/`claude-subagent`/`claude-merged`) + `claude2dsh_session_sources`.
+- Round-7 e2e for conflict merge and merged-session export.
+- DSH-Session-Move interop evaluation.
+
+### Fixed
+
+- Claude string tool_result content was previously dropped; it is now normalized into text blocks (restores persisted-output sidecar references).
+- Export-copy roundtrip now parses string items inside user/assistant content arrays.
+
 ## 0.1.0 — 2026-08-16
 
 ### Released
