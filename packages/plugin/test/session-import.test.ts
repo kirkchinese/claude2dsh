@@ -80,3 +80,35 @@ test('detects double-side growth as conflict and never appends', async () => {
   assert.equal(report.items[0]?.status, 'conflict')
   assert.equal(appended, 1)
 })
+
+test('same-turn edits with interleaved tool results are treated as conflict when DSH also grew', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'c2dsh-same-turn-'))
+  const sessionId = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff'
+  const file = join(dir, `${sessionId}.jsonl`)
+  const records = [
+    { type: 'mode', mode: 'normal', sessionId },
+    { type: 'user', uuid: 'u1', parentUuid: null, isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:00.000Z', message: { role: 'user', content: 'do work' } },
+    { type: 'assistant', uuid: 'a1', parentUuid: 'u1', isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'assistant', model: 'm', content: [{ type: 'tool_use', id: 'call_1', name: 'Bash', input: { command: 'ls' } }] } },
+    { type: 'user', uuid: 't1', parentUuid: 'a1', isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:02.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: [{ type: 'text', text: 'v1' }] }] } },
+  ]
+  await writeFile(file, records.map((record) => JSON.stringify(record)).join('\n') + '\n')
+  const home = join(dir, 'dsh-home')
+  await mkdir(join(home, 'claude2dsh'), { recursive: true })
+  await writeFile(join(home, 'claude2dsh', 'registry.json'), JSON.stringify({ version: 1, imports: {}, exports: {} }))
+  const live = { sessionPersistence: { async list() { return [] }, async create() {}, async append() {} } }
+  await importClaudeSessions(live as unknown as Context, { path: file }, home)
+  // Same turn count, changed tool result content; DSH side also grew.
+  records[3] = { ...records[3], message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: [{ type: 'text', text: 'v2' }] }] } }
+  await writeFile(file, records.map((record) => JSON.stringify(record)).join('\n') + '\n')
+  const targetId = `claude-${sessionId}`
+  const mock = {
+    sessionPersistence: {
+      async list() { return [{ id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }] },
+      async readFrom() { return { meta: { id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }, events: Array.from({ length: 10 }, (_, seq) => ({ seq })) } },
+      async create() { throw new Error('must not create') },
+      async append() { throw new Error('must not append') },
+    },
+  }
+  const report = await importClaudeSessions(mock as unknown as Context, { path: file }, home)
+  assert.equal(report.items[0]?.status, 'conflict')
+})
