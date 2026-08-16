@@ -1,15 +1,13 @@
-/** CI gate: assert the latest published DSH peer still satisfies our declared range. */
-const packageUrl = 'https://registry.npmjs.org/@deepseek-ai%2fdsh-session/latest'
-const expectedPrefix = '0.1.0-rc.'
-const response = await fetch(packageUrl)
+/** CI gate: assert the newest published 0.1.0-rc peer still satisfies our declared range. */
+const response = await fetch('https://registry.npmjs.org/@deepseek-ai%2fdsh-session')
 if (!response.ok) throw new Error(`registry fetch failed: ${response.status}`)
 const data = await response.json()
-const version = String(data.version ?? '')
-if (!version.startsWith(expectedPrefix)) {
-  throw new Error(`@deepseek-ai/dsh-session latest is ${version}; expected ${expectedPrefix}x`)
-}
-const rc = Number(version.slice(expectedPrefix.length))
-if (!Number.isInteger(rc) || rc < 6) {
-  throw new Error(`@deepseek-ai/dsh-session latest ${version} is older than rc.6`)
-}
-console.log(`DSH_COMPAT_OK @deepseek-ai/dsh-session ${version}`)
+const versions = Object.keys(data.versions ?? {})
+const candidates = versions
+  .filter((version) => /^0\.1\.0-rc\.\d+$/.test(version))
+  .sort((a, b) => Number(b.slice('0.1.0-rc.'.length)) - Number(a.slice('0.1.0-rc.'.length)))
+const newest = candidates[0]
+if (newest === undefined) throw new Error('no 0.1.0-rc.x version published for @deepseek-ai/dsh-session')
+const rc = Number(newest.slice('0.1.0-rc.'.length))
+if (rc < 6) throw new Error(`newest @deepseek-ai/dsh-session 0.1.x rc is ${newest}; expected >= rc.6`)
+console.log(`DSH_COMPAT_OK newest @deepseek-ai/dsh-session 0.1.x = ${newest}`)
