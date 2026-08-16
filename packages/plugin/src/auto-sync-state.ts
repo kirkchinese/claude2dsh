@@ -1,4 +1,4 @@
-/** Durable state for the beta auto-mirror. */
+/** Durable state for the auto-mirror. */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'

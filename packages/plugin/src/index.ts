@@ -26,7 +26,7 @@ import { inventoryClaudePlugins } from './plugin-inventory.ts'
 export const name = 'claude2dsh-import'
 export const inject = ['sessionPersistence', 'sessions', 'tools', 'attachments', 'llm']
 
-/** Plugin configuration. `autoSync` is beta and defaults to disabled. */
+/** Plugin configuration. `autoSync` defaults to disabled. */
 export interface PluginConfig {
   readonly autoSync?: AutoSyncConfig
 }

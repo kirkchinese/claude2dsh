@@ -30,7 +30,7 @@
    `workspace:^0.1.0-rc.1`，pack 后 manifest 为 `^0.1.0-rc.1`。
 3. 三包 `files` 白名单生效：pack 只含 lib、README、LICENSE、
    package.json（plugin 另有 cordis.patch.yml），不再含 src/test。
-4. plugin README 已补，并记录全部工具、beta 开关与安全边界。
+4. plugin README 已补，并记录全部工具、可选开关与安全边界。
 5. 三包版本 `0.1.0-rc.1`。
 6. plugin build 不再复制 cordis.patch.yml 进 lib；pack 列表已无该文件。
 7. 重做验证：

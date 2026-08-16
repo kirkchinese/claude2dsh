@@ -28,7 +28,7 @@ Every behavioral change must keep the four `scripts/e2e-round*.sh` green. They u
 ## Safety boundaries
 
 - Real `~/.claude` is read-only for migration. Export/sync never write it by default.
-- Auto-mirror is beta and default off; when enabled it only writes the safe export copy.
+- Auto-mirror is opt-in and default off; when enabled it only writes the safe export copy and pauses with a persisted conflict report if both sides grow.
 - Never commit credentials, real user transcripts, or personal paths.
 
 ## Coding conventions

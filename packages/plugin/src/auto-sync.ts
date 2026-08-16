@@ -1,5 +1,5 @@
 /**
- * Optional beta auto-mirror.
+ * Optional auto-mirror.
  *
  * Disabled by default. When enabled through plugin config it watches the
  * Claude projects directory and imports grown transcripts, and listens for
@@ -18,7 +18,7 @@ import { loadRegistry, resolveDshHome } from './registry.ts'
 import { loadAutoSyncState, pauseAutoSync, saveAutoSyncState, type AutoSyncState } from './auto-sync-state.ts'
 
 export interface AutoSyncConfig {
-  /** Beta switch. Defaults to false when the config section is absent. */
+  /** Feature switch. Defaults to false when the config section is absent. */
   readonly enabled?: boolean
   /** Claude projects directory to watch. Defaults to `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`. */
   readonly claudeProjectsRoot?: string
@@ -44,9 +44,9 @@ function logState(state: AutoSyncState): void {
 }
 
 /**
- * Activate the beta mirror. All effects are owned by the calling plugin fiber.
+ * Activate the mirror. All effects are owned by the calling plugin fiber.
  * @param ctx - plugin context.
- * @param config - validated beta configuration.
+ * @param config - validated mirror configuration.
  */
 export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: NodeJS.ProcessEnv = process.env): void {
   const root = resolveClaudeProjectsRoot(config, env)
