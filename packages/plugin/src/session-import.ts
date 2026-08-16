@@ -11,6 +11,7 @@ import { loadRegistry, saveRegistryRecord } from './registry.ts'
 import { applyImagePolicy, type ImageMode } from './image-policy.ts'
 import { buildImageMapEntries, saveImageMap } from './image-map.ts'
 import { copySessionSidecars, findSidecarReferences, type SidecarCopyResult } from './sidecar.ts'
+import { saveSessionSource } from './session-sources.ts'
 
 export interface SessionImportArgs {
   readonly path: string
@@ -248,6 +249,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
         }
         await ctx.sessionPersistence.append(known.targetId as SessionId, tail.events as unknown as SessionEvent[])
         const sidecarReport = sidecarReferenced > 0 ? await copySessionSidecars(parsed.session, sourcePath, known.targetId, dshHome, args.sidecarMaxBytes) : undefined
+        await recordSessionSource(known.targetId, sourcePath, parsed.session.origin, parsed.session.parentSession, dshHome)
         if (imageEntries.length > 0) await saveImageMap(known.targetId, imageEntries, dshHome)
         persisted.add(known.targetId)
         await saveRegistryRecord({
@@ -282,6 +284,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
       await ctx.sessionPersistence.create({ ...meta, id: brandedTargetId })
       await ctx.sessionPersistence.append(brandedTargetId, synthesized.events as unknown as SessionEvent[])
       const sidecarReport = sidecarReferenced > 0 ? await copySessionSidecars(parsed.session, sourcePath, targetId, dshHome, args.sidecarMaxBytes) : undefined
+      await recordSessionSource(targetId, sourcePath, parsed.session.origin, parsed.session.parentSession, dshHome)
       if (imageEntries.length > 0) await saveImageMap(targetId, imageEntries, dshHome)
       persisted.add(targetId)
       await saveRegistryRecord({
@@ -318,6 +321,16 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
   }
 
   return report
+}
+
+async function recordSessionSource(sessionId: string, sourcePath: string, origin: 'subagent' | undefined, parentSession: string | undefined, dshHome: string | undefined): Promise<void> {
+  await saveSessionSource({
+    sessionId,
+    kind: origin === 'subagent' ? 'claude-subagent' : 'claude-main',
+    sourcePath,
+    ...(parentSession !== undefined ? { parentSession } : {}),
+    recordedAt: Date.now(),
+  }, dshHome)
 }
 
 function sidecarSummary(report: SidecarCopyResult | undefined): { sidecarCopied?: number; sidecarReused?: number; sidecarMissing?: number; sidecarTooLarge?: number } {
