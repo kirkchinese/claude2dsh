@@ -8,3 +8,7 @@ coverage/
 *.log
 .eslintcache
 .DS_Store
+
+# local-only agent instruction files (never commit/push)
+AGENTS.md
+AGENTS_.md
