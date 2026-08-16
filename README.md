@@ -6,44 +6,82 @@ Migrate Claude Code conversations, skills, memory and plugin assets into DeepSee
 
 Included in the community [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) list under **Sessions & Messages**. The automatic [awesome-dsh-plugins](https://github.com/AdamPlatin123/awesome-dsh-plugins) radar has not marked this project as runtime-verified; this badge only reports the curated-list inclusion.
 
+## Design principle: foolproof out-of-box
+
+Every default must work without reading this document: install one command, open a browser, see the UI, complete the first migration. Safety defaults are never weakened — writing the real `~/.claude` stays refused unless the user explicitly enables it in a clearly labelled switch. Full criteria are in `docs/design-philosophy.md`.
+
 ## Quickstart (empty machine)
 
 Requirements: Node.js `>=22.19.0`, pnpm, and the `dsh` CLI.
 
-```sh
-# 1. Create a DSH profile with this bundle
-dsh plugin --profile claude2dsh add @claude2dsh/plugin
+### Recommended: use DSH's built-in web profile
 
-# 2. Import all Claude Code sessions (read-only) and skills
-#    In a DSH session (web profile), call:
-#      claude2dsh_import({ path: "~/.claude/projects" })
-#      claude2dsh_import_skills({ path: "~/.claude/skills" })
-#    Or boot once with the test seam:
-#      CLAUDE2DSH_TEST_IMPORT=~/.claude/projects dsh --profile claude2dsh
+```sh
+# 1. Install the plugin into the built-in headed profile
+dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.1
+
+# 2. Start the browser UI (prints http://127.0.0.1:3080)
+dsh web
 ```
 
-The profile installs `@deepseek-ai/dsh-base` automatically and adds `@claude2dsh/plugin` as a bundle. Restart DSH after installation.
+Open the printed URL, then go to **Settings → Claude2DSH**. The first screen is the migration guide: choose language (Chinese default), paste or keep the Claude sessions directory, click **Preview import**, inspect the report, then click **Run import**.
 
-Headless profiles only expose tools; the Settings UI needs a web-capable profile. Either add the plugin to your existing web profile (`dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.1` then `dsh web`), or add `@deepseek-ai/dsh-web-app@0.1.0-rc.6` to the same profile and boot it with a free port. The web Settings page appears under **Settings → Claude2DSH**.
+### Alternative: one command, isolated headed profile
 
-## Capabilities
+Clone this repository and run:
 
-| Tool                          | Behavior                                                                                                                                                                                                                                                                                                                              |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude2dsh_import`           | Read Claude Code JSONL read-only and write DSH-native session logs through `ctx.sessionPersistence`. Idempotent; a grown Claude transcript appends only new turns. `preview:true` is zero-side-effect. `includeSubagents:true` imports subagent/workflow transcripts as `origin:"subagent"` child sessions.                           |
-| `claude2dsh_import_skills`    | Copy kebab-case Claude skills into `$DSH_HOME/skills`; identical skills are skipped and conflicts are never overwritten.                                                                                                                                                                                                              |
-| `claude2dsh_export`           | Serialize one DSH session into a Claude Code JSONL transcript under `$DSH_HOME/claude2dsh/exports`. Writing below the real `~/.claude` requires `allowOriginalClaudeDir:true`; existing files require `force:true`.                                                                                                                   |
-| `claude2dsh_sync`             | Append DSH turns newer than the export watermark to the exported Claude copy (default `target:"copy"`). `target:"source"` requires `allowOriginalClaudeDir:true`; external modification/shrink guards refuse unless `force:true`.                                                                                                     |
-| `claude2dsh_autosync`         | `status` reports whether auto-mirroring is paused and lists recent conflicts plus the pending queue; `resume` clears a conflict pause after the two sides were reconciled with explicit tools.                                                                                                                                        |
-| `claude2dsh_import_context`   | Copy the user-global `~/.claude/CLAUDE.md` into `$DSH_HOME/AGENTS.md`. Preview by default, identical content is skipped, an existing different target is reported and never overwritten. Project CLAUDE.md is not copied because DSH already reads it.                                                                                |
-| `claude2dsh_import_memory`    | Package one project's `MEMORY.md` and `memory/*.md` as a DSH-native skill bundle under `$DSH_HOME/skills`; preview, identical skip and never-overwrite conflicts.                                                                                                                                                                     |
-| `claude2dsh_merge`            | Explicit three-way merge when both sides grew after the sync watermark. Complete turns are ordered by timestamp; a turn edited on both sides keeps both versions plus a log-only conflict marker. The original DSH session and Claude JSONL are never mutated; the result is a new safe copy. `dryRun:true` computes without writing. |
-| `claude2dsh_sidecars`         | List or resolve tool-result `.txt` sidecars copied under `$DSH_HOME/claude2dsh/sidecars` during import. Original Claude path references are preserved; the map translates them.                                                                                                                                                       |
-| `claude2dsh_session_sources`  | List or resolve the source marker written for every imported session: `claude-main`, `claude-subagent` or `claude-merged` (`codex`/`native` reserved).                                                                                                                                                                                |
-| `claude2dsh_plugin_inventory` | Dry-run inventory of installed Claude Code plugins; `apply:true` copies only declarative `SKILL.md` assets. Hooks and app-server runtime code are never executed.                                                                                                                                                                     |
-| Image policy                  | `claude2dsh_import` accepts `imageMode:"auto"` (default), `"placeholder"` or `"native"`. `auto` probes the target model's `inputModalities`: image-capable routes receive native DSH attachment blocks; text-only routes receive safe placeholders while attachments are retained and re-projected when the resumed model changes.    |
+```sh
+bash scripts/install-claude2dsh.sh
+```
 
-Settings panel: the plugin contributes a **Claude2DSH** page to the dsh Settings UI for auto-mirror, import defaults, write-back and hook-bridge fields. Changes validate on save; invalid values are rejected with the schema error. Tool arguments and `CLAUDE2DSH_*` environment variables remain available and take precedence as call-time overrides.
+The script installs `@deepseek-ai/dsh-web-app + @claude2dsh/plugin` into a new `claude2dsh` profile, repairs the profile manifest when pnpm reports the harmless ignored `koffi` build script, starts the web UI on `http://127.0.0.1:18781`, and prints the stop command.
+
+### Headless (advanced only)
+
+Automation that has no browser can use the tools directly:
+
+```sh
+dsh plugin --profile claude2dsh add @claude2dsh/plugin@0.2.0-rc.1
+CLAUDE2DSH_TEST_IMPORT=~/.claude/projects dsh --profile claude2dsh
+```
+
+**Headed vs headless in one sentence:** headed profiles include `@deepseek-ai/dsh-web-app` and show the browser UI; headless profiles run the same tools without a browser. The old tutorial created only a headless profile, which is why “nothing visible” happened — the plugin was working, but there was no UI to show.
+
+## Capabilities: what, when, and where
+
+| Capability       | When to use it                                                                  | Where                                                                        |
+| ---------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Session import   | First migration, or whenever Claude Code gained new turns                       | Settings → Claude2DSH → First-run migration, or the `claude2dsh_import` tool |
+| Skill import     | Bring Claude skills into DSH discovery                                          | `claude2dsh_import_skills` tool                                              |
+| Global context   | Move user-global `~/.claude/CLAUDE.md` to DSH global instructions               | `claude2dsh_import_context` tool                                             |
+| Project memory   | Make one project's `MEMORY.md`/`memory/*.md` discoverable as a DSH skill bundle | `claude2dsh_import_memory` tool                                              |
+| Export to Claude | Resume the migrated session in Claude Code again                                | `claude2dsh_export` tool                                                     |
+| Sync back        | Write DSH-side turns into the exported Claude copy                              | `claude2dsh_sync` tool                                                       |
+| Auto mirror      | Continuous two-way mirroring with conflict pause                                | Settings → Auto mirror (`autoSync.enabled`)                                  |
+| Conflict merge   | Both sides grew after the sync point and neither may be lost                    | `claude2dsh_merge` tool                                                      |
+| Sidecar files    | Locate large tool outputs copied during import                                  | `claude2dsh_sidecars` tool                                                   |
+| Session sources  | Tell which sessions came from Claude (main/subagent/merged)                     | Settings → Session sources, or `claude2dsh_session_sources` tool             |
+| Plugin inventory | Inspect installed Claude plugins without executing their code                   | `claude2dsh_plugin_inventory` tool                                           |
+| Image policy     | Images in old transcripts should survive into DSH safely                        | Automatic (`imageMode:"auto"`); override in Settings → Import defaults       |
+
+Import is read-only for `~/.claude` and idempotent: a second run says “already imported” instead of duplicating. Preview is always available before writing. Every action returns a JSON report the UI renders as numbers (`imported/already/skipped/failed`).
+
+## FAQ
+
+**I followed the old tutorial and saw no UI.**
+That profile only had `@deepseek-ai/dsh-base + @claude2dsh/plugin`: it is headless. Add the plugin to `dsh plugin --profile web`, or use `scripts/install-claude2dsh.sh`. The UI is under **Settings → Claude2DSH**.
+
+**`dsh plugin add @deepseek-ai/dsh-web-app` failed with “Ignored build scripts: koffi”.**
+pnpm refused to run koffi's build script; dependencies are installed but dsh did not finish the bundle patch. The installer script detects this state and repairs `dsh.profile.bundles`. Do not approve arbitrary build scripts.
+
+**What is a profile?**
+A named folder under `$DSH_HOME/profiles` that lists bundles and overrides. You normally only need `web` (browser) or `claude2dsh` (the script's isolated headed profile).
+
+**Will it write my real ~/.claude?**
+No. Import is read-only. Export/sync write a safe copy under `$DSH_HOME/claude2dsh/exports`; writing the original `~/.claude` requires `allowOriginalClaudeDir:true` and is refused by default.
+
+**Why are auto mirror and hook bridge off?**
+Auto mirror and hook bridge are opt-in so surprises cannot happen before the user understands them. Turn them on in Settings; auto mirror never writes the real `~/.claude`, and the hook bridge only supports the documented 7/30 command subset.
 
 ## Current limitations (honest status)
 

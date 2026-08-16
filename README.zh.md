@@ -6,44 +6,82 @@
 
 本项目已被社区 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 收录在 **Sessions & Messages（会话与消息）** 分类。自动雷达 [awesome-dsh-plugins](https://github.com/AdamPlatin123/awesome-dsh-plugins) 尚未给本项目打"运行级验证"标记；上方 badge 只代表精选列表收录，不代表雷达实测结论。
 
+## 设计原则：傻瓜式开箱即用
+
+默认路径必须不读文档也能用对：一条命令安装、浏览器打开、看到 UI、完成第一次迁移。安全默认绝不因此放松——写回真实 `~/.claude` 仍然默认拒绝，只有用户明确打开带风险提示的开关才允许。完整判据见 `docs/design-philosophy.md`。
+
 ## 快速开始（空机器）
 
 要求：Node.js `>=22.19.0`、pnpm 与 `dsh` CLI。
 
-```sh
-# 1. 创建带本 bundle 的 DSH profile
-dsh plugin --profile claude2dsh add @claude2dsh/plugin
+### 推荐：使用 DSH 内置 web profile
 
-# 2. 导入全部 Claude Code 会话（只读）与技能
-#    在 DSH 会话（web profile）中调用：
-#      claude2dsh_import({ path: "~/.claude/projects" })
-#      claude2dsh_import_skills({ path: "~/.claude/skills" })
-#    也可以用测试 seam 启动一次：
-#      CLAUDE2DSH_TEST_IMPORT=~/.claude/projects dsh --profile claude2dsh
+```sh
+# 1. 把插件装进内置有头 profile
+dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.1
+
+# 2. 启动浏览器 UI（终端会打印 http://127.0.0.1:3080）
+dsh web
 ```
 
-profile 会自动安装 `@deepseek-ai/dsh-base`，并把 `@claude2dsh/plugin` 作为 bundle 加入。安装后请重启 DSH。
+打开打印出的 URL，进入 **设置 → Claude2DSH**。第一屏就是迁移向导：选择语言（默认中文）、填/确认 Claude 会话目录、点 **预览导入** 看报告、再点 **执行导入** 看到结果。
 
-headless profile 只暴露工具；Settings UI 需要带 Web 的 profile。推荐把插件装进已有 web profile（`dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.1`，然后 `dsh web`），或向同一 profile 添加 `@deepseek-ai/dsh-web-app@0.1.0-rc.6` 并用空闲端口启动。Settings 页面位于 **Settings → Claude2DSH**。
+### 备选：一条命令生成独立有头 profile
 
-## 能力
+克隆本仓库后运行：
 
-| 工具                          | 行为                                                                                                                                                                                                                               |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude2dsh_import`           | 只读读取 Claude Code JSONL，通过 `ctx.sessionPersistence` 写 DSH 原生会话日志。幂等；变长的 Claude 转录只追加新轮次。`preview:true` 零副作用；`includeSubagents:true` 把 subagent/workflow 转录导入为 `origin:"subagent"` 子会话。 |
-| `claude2dsh_import_skills`    | 把 kebab-case 命名的 Claude 技能复制到 `$DSH_HOME/skills`；内容相同则跳过，冲突绝不覆盖。                                                                                                                                          |
-| `claude2dsh_import_context`   | 把用户全局 `~/.claude/CLAUDE.md` 复制到 `$DSH_HOME/AGENTS.md`。默认 preview，相同内容跳过，目标已有不同内容时报告冲突、绝不覆盖。项目级 CLAUDE.md 不迁移，因为 DSH 原生读取。                                                      |
-| `claude2dsh_import_memory`    | 把一个项目的 `MEMORY.md` 与 `memory/*.md` 打包为 `$DSH_HOME/skills` 下的 DSH 原生技能包；preview、相同跳过、绝不覆盖。                                                                                                             |
-| `claude2dsh_export`           | 把一个 DSH 会话序列化为 `$DSH_HOME/claude2dsh/exports` 下的 Claude Code JSONL。写真实 `~/.claude` 需显式 `allowOriginalClaudeDir:true`；已存在文件需 `force:true`。                                                                |
-| `claude2dsh_sync`             | 把晚于导出水位的 DSH 轮次追加到导出的 Claude 副本（默认 `target:"copy"`）。`target:"source"` 需显式 `allowOriginalClaudeDir:true`；外部改动/缩短有保护，除非 `force:true`。                                                        |
-| `claude2dsh_merge`            | 双端都在同步水位后增长时的显式三路合并。完整轮次按时间排序；同一轮双改保留双方并写入 log-only 冲突标记。原始 DSH 会话与 Claude JSONL 都不被修改，产物是新安全副本；`dryRun:true` 只计算不写。                                      |
-| `claude2dsh_autosync`         | `status` 查看镜像暂停状态、原因、最近冲突与待处理队列；`resume` 在用户用显式工具解决冲突后解除暂停。                                                                                                                               |
-| `claude2dsh_sidecars`         | 列出/解析导入时复制到 `$DSH_HOME/claude2dsh/sidecars` 的 tool-result `.txt` sidecar。Claude 原始路径引用保持不变，映射负责翻译。                                                                                                   |
-| `claude2dsh_session_sources`  | 列出/解析每个导入会话的来源标记：`claude-main`、`claude-subagent`、`claude-merged`（预留 `codex`/`native`）。                                                                                                                      |
-| `claude2dsh_plugin_inventory` | 只读盘点已安装 Claude Code 插件；`apply:true` 只复制声明式 `SKILL.md` 资产，绝不执行 hooks/app-server 代码。                                                                                                                       |
-| 图片策略                      | `claude2dsh_import` 支持 `imageMode:"auto"`（默认）、`"placeholder"`、`"native"`。`auto` 探测目标模型 `inputModalities`：支持图片的模型获得原生 DSH attachment block；纯文本模型获得安全占位符，附件保留并可在切换模型后重投影。   |
+```sh
+bash scripts/install-claude2dsh.sh
+```
 
-Settings 面板：插件在 DSH Settings UI 中提供 **Claude2DSH** 页面，管理 auto-mirror、导入默认值、导出/写回与 hook bridge 字段；保存时校验，坏值会返回 schema 错误。工具参数与 `CLAUDE2DSH_*` 环境变量继续可用，调用时参数优先。
+脚本会安装 `@deepseek-ai/dsh-web-app + @claude2dsh/plugin` 到新的 `claude2dsh` profile；如果 pnpm 报无害的 `koffi` build script 被忽略，脚本会自动补齐 `dsh.profile.bundles`，然后启动 `http://127.0.0.1:18781` 并打印停止命令。
+
+### Headless（仅高级用户/自动化）
+
+没有浏览器的自动化环境直接用工具：
+
+```sh
+dsh plugin --profile claude2dsh add @claude2dsh/plugin@0.2.0-rc.1
+CLAUDE2DSH_TEST_IMPORT=~/.claude/projects dsh --profile claude2dsh
+```
+
+**有头 vs 无头一句话：** 有头 profile 包含 `@deepseek-ai/dsh-web-app`，会打开浏览器 UI；无头 profile 运行同一套工具但没有浏览器。旧教程只创建了无头 profile，所以"什么都看不到"——插件其实在工作，只是没有 UI 可显示。
+
+## 能力：什么场景、怎么用
+
+| 能力          | 使用场景                                               | 入口                                                          |
+| ------------- | ------------------------------------------------------ | ------------------------------------------------------------- |
+| 会话导入      | 首次迁移，或 Claude Code 产生新轮次后                  | 设置 → Claude2DSH → 首次迁移向导，或 `claude2dsh_import` 工具 |
+| 技能导入      | 让 Claude 技能进入 DSH 原生发现                        | `claude2dsh_import_skills` 工具                               |
+| 全局上下文    | 把用户全局 `~/.claude/CLAUDE.md` 迁到 DSH 全局指令     | `claude2dsh_import_context` 工具                              |
+| 项目记忆      | 把一个项目的 `MEMORY.md`/`memory/*.md` 变成 DSH 技能包 | `claude2dsh_import_memory` 工具                               |
+| 导出回 Claude | 在 Claude Code 里继续这个会话                          | `claude2dsh_export` 工具                                      |
+| 同步回写      | 把 DSH 侧新轮次写进导出副本                            | `claude2dsh_sync` 工具                                        |
+| 自动镜像      | 持续双向镜像，冲突自动暂停                             | 设置 → 自动镜像（`autoSync.enabled`）                         |
+| 冲突合并      | 双端都在同步点后增长、任一侧都不能丢                   | `claude2dsh_merge` 工具                                       |
+| Sidecar 文件  | 找到导入时复制的大工具输出                             | `claude2dsh_sidecars` 工具                                    |
+| 会话来源      | 区分 claude 主会话/子会话/合并会话                     | 设置 → 会话来源，或 `claude2dsh_session_sources` 工具         |
+| 插件盘点      | 只读查看 Claude 插件，不执行其代码                     | `claude2dsh_plugin_inventory` 工具                            |
+| 图片策略      | 老转录里的图片安全进入 DSH                             | 默认 `imageMode:"auto"`；设置 → 导入默认值可改                |
+
+导入对 `~/.claude` 只读且幂等：第二次运行显示"已存在"，不会重复。任何写入前都可先预览；每个动作返回 JSON 报告，UI 会显示 `新导入/已存在/追加/跳过/失败` 数字。
+
+## FAQ
+
+**我按旧教程装完看不到 UI。**
+那个 profile 只有 `@deepseek-ai/dsh-base + @claude2dsh/plugin`，是无头 profile。把插件装进 `dsh plugin --profile web`，或用 `scripts/install-claude2dsh.sh`。UI 在 **设置 → Claude2DSH**。
+
+**`dsh plugin add @deepseek-ai/dsh-web-app` 报 "Ignored build scripts: koffi" 失败。**
+pnpm 拒绝运行 koffi 的构建脚本，依赖其实已安装，但 dsh 没有完成 bundle 修补。安装脚本会检测该状态并修复 `dsh.profile.bundles`。不要随便批准第三方构建脚本。
+
+**什么是 profile？**
+是 `$DSH_HOME/profiles` 下的一个命名目录，记录 bundles 与覆盖。普通用户只需要 `web`（浏览器）或脚本生成的 `claude2dsh`。
+
+**会写我的真实 ~/.claude 吗？**
+不会。导入只读；导出/同步只写 `$DSH_HOME/claude2dsh/exports` 安全副本。写原始 `~/.claude` 需要显式 `allowOriginalClaudeDir:true`，默认拒绝。
+
+**为什么 auto mirror 和 hook bridge 默认关？**
+为了不产生用户尚未理解的意外。可在设置中开启；自动镜像绝不写真实 `~/.claude`，hook bridge 只支持文档明示的 7/30 command-only 子集。
 
 ## 诚实局限
 
