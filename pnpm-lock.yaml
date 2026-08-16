@@ -49,7 +49,7 @@ importers:
   packages/adapters/claude-code:
     dependencies:
       '@claude2dsh/core':
-        specifier: workspace:^0.1.0
+        specifier: workspace:^0.2.0-rc.1
         version: link:../../core
       yaml:
         specifier: ^2.4.2
@@ -74,10 +74,10 @@ importers:
   packages/plugin:
     dependencies:
       '@claude2dsh/adapter-claude-code':
-        specifier: workspace:^0.1.0
+        specifier: workspace:^0.2.0-rc.1
         version: link:../adapters/claude-code
       '@claude2dsh/core':
-        specifier: workspace:^0.1.0
+        specifier: workspace:^0.2.0-rc.1
         version: link:../core
       '@deepseek-ai/dsh-hooks-claude-code':
         specifier: 0.1.0-rc.6

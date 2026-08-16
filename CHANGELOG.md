@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-rc.1 — 2026-08-16
 
 ### Added
 
@@ -10,7 +10,8 @@
 - Project `MEMORY.md`/`memory/*.md` → one DSH-native skill bundle per project.
 - Tool-result `.txt` sidecar copy + durable path map, per-file size cap and `claude2dsh_sidecars`.
 - Explicit bidirectional three-way turn merge (`claude2dsh_merge`), same-turn dual edits preserved with a log-only marker, safe copies only.
-- Per-session source markers (`claude-main`/`claude-subagent`/`claude-merged`) + `claude2dsh_session_sources`.
+- Per-session source markers (`claude-main`/`claude-subagent`/`claude-merged`) + `claude2dsh_session_sources`, now also visible in the Settings page.
+- `claude2dsh_session_move_inspect` interop entry for dsh-session-move (inspection only, never moves).
 - Round-7 e2e for conflict merge and merged-session export.
 - DSH-Session-Move interop evaluation.
 
