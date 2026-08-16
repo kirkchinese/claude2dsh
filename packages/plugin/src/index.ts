@@ -21,6 +21,8 @@ import { resolveDshHome } from './registry.ts'
 import { assertDshCompatibility } from './compat.ts'
 import { activateAutoSync, getAutoSyncState, resumeAutoSync, type AutoSyncConfig } from './auto-sync.ts'
 import { registerImageReprojection } from './image-reproject.ts'
+import { importGlobalClaudeContext } from './context-import.ts'
+import { importClaudeMemory } from './memory-import.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
 
 export const name = 'claude2dsh-import'
@@ -167,6 +169,43 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
   }))
 
   ctx.tools.register(defineTool({
+    name: 'claude2dsh_import_context',
+    description: [
+      'Import the user-global ~/.claude/CLAUDE.md into $DSH_HOME/AGENTS.md read-only.',
+      'Never overwrites an existing target: identical content is skipped and different content is reported as a conflict.',
+      'Project-level CLAUDE.md is not migrated because DeepSeek Harness reads AGENTS.md/CLAUDE.md natively.',
+      'preview:true computes the result without writing.',
+    ].join('\n'),
+    parameters: {
+      path: { type: 'string', description: 'Source CLAUDE.md. Defaults to $CLAUDE_CONFIG_DIR/CLAUDE.md or ~/.claude/CLAUDE.md.' },
+      preview: { type: 'boolean', description: 'Do not write; report what would happen.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const result = await importGlobalClaudeContext(args, resolveDshHome())
+      return result as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_import_memory',
+    description: [
+      'Package one Claude Code project memory (MEMORY.md and memory/*.md) as a DSH-native skill bundle under $DSH_HOME/skills.',
+      'Never overwrites an existing skill: identical content is skipped and different content is reported as a conflict.',
+      'preview:true computes the result without writing.',
+    ].join('\n'),
+    parameters: {
+      path: { type: 'string', required: true, description: 'Claude Code project root containing MEMORY.md and/or memory/*.md.' },
+      preview: { type: 'boolean', description: 'Do not write; report what would happen.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const result = await importClaudeMemory(args, resolveDshHome())
+      return result as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'claude2dsh_plugin_inventory',
     description: [
       'Inventory installed Claude Code plugins (read-only) and optionally migrate their declarative skill assets into DSH.',
@@ -263,6 +302,17 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
           skillsSnapshotError = error instanceof Error ? error.message : String(error)
         }
       }
+      let contextReport: Awaited<ReturnType<typeof importGlobalClaudeContext>> | undefined
+      if (process.env.CLAUDE2DSH_TEST_CONTEXT === '1') {
+        contextReport = await importGlobalClaudeContext({
+          ...(process.env.CLAUDE2DSH_TEST_CONTEXT_PATH !== undefined ? { path: process.env.CLAUDE2DSH_TEST_CONTEXT_PATH } : {}),
+          preview: process.env.CLAUDE2DSH_TEST_CONTEXT_PREVIEW === '1',
+        }, resolveDshHome())
+      }
+      let memoryReport: Awaited<ReturnType<typeof importClaudeMemory>> | undefined
+      if (process.env.CLAUDE2DSH_TEST_MEMORY !== undefined && process.env.CLAUDE2DSH_TEST_MEMORY.length > 0) {
+        memoryReport = await importClaudeMemory({ path: process.env.CLAUDE2DSH_TEST_MEMORY, preview: process.env.CLAUDE2DSH_TEST_MEMORY_PREVIEW === '1' }, resolveDshHome())
+      }
       let exportReport: Awaited<ReturnType<typeof exportClaudeSession>> | undefined
       let syncReport: Awaited<ReturnType<typeof syncClaudeSession>> | undefined
       const exportTarget = process.env.CLAUDE2DSH_TEST_EXPORT
@@ -349,7 +399,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
         }
       }
       if (testReport !== undefined) {
-        await writeFile(testReport, JSON.stringify({ report, skillsReport, exportReport, syncReport, resumeReport, preparedSessions, presenters, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
+        await writeFile(testReport, JSON.stringify({ report, skillsReport, contextReport, memoryReport, exportReport, syncReport, resumeReport, preparedSessions, presenters, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
       }
       const holdMs = Number(process.env.CLAUDE2DSH_TEST_HOLD_MS ?? '0')
       const failed = report.failed + (skillsReport?.filter((item) => item.status === 'failed').length ?? 0)
