@@ -30,6 +30,7 @@
   `lib/client.js` 与 `dsh.client`。
 - 未发布、未打 tag；radar PR 按用户决定暂不提交。
 
-## 待确认
+## 发布状态
 
-- 是否发布 0.2.0-rc.1（npm + GitHub release）。
+- npm 四包已发布，`latest=0.2.0-rc.1`，空环境 quickstart 通过。
+- GitHub push/tag/pre-release 随后执行。
