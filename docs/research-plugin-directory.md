@@ -68,4 +68,4 @@ README 已可作 storefront 回退截图来源。
 
 ## 决策状态
 
-PR 内容已列于本文；是否提交由用户确认（本轮未发起 PR）。
+PR 已提交：https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/968

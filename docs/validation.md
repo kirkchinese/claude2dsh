@@ -336,3 +336,10 @@ dsh --profile smoke
   npm 发布）；无阻断差距。
 - 待提交 PR 草稿与完整内容见 `docs/research-plugin-directory.md`；
   按约束未发起 PR，等待用户确认。
+
+## R10 awesome-dsh-plugin PR 提交（2026-08-16）
+
+- 用户确认后 fork 并推送分支 `add-claude2dsh`。
+- PR：https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/968
+- 修改内容：README.md 与 README.zh.md 各新增一行（Sessions & Messages /
+  会话与消息），无其他改动。
