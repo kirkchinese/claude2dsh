@@ -34,7 +34,7 @@ Clone this repository and run:
 bash scripts/install-claude2dsh.sh
 ```
 
-The script installs `@deepseek-ai/dsh-web-app + @claude2dsh/plugin` into a new `claude2dsh` profile, repairs the profile manifest when pnpm reports the harmless ignored `koffi` build script, starts the web UI on `http://127.0.0.1:18781`, and prints the stop command.
+The script installs the plugin into your main `web` profile and starts the browser UI on `http://127.0.0.1:18781`. It never creates an isolated profile unless you set `CLAUDE2DSH_PROFILE`; for an explicit custom profile it also installs `dsh-web-app` and repairs the profile manifest if pnpm reports the harmless ignored `koffi` build script.
 
 ### Headless (advanced only)
 

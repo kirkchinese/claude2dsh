@@ -6,7 +6,7 @@ E2E_HOME="$(mktemp -d /tmp/claude2dsh-e2e-r8.XXXXXX)"
 PORT="${CLAUDE2DSH_E2E_PORT:-18793}"
 SOURCE_BACKUP="${CLAUDE2DSH_SOURCE_BACKUP:-/tmp/claude2dsh-source-backup}"
 cleanup() {
-  pid="${E2E_HOME}/profiles/claude2dsh/claude2dsh-web.pid"
+  pid="${E2E_HOME}/profiles/web/claude2dsh-web.pid"
   if [ -f "$pid" ]; then kill "$(cat "$pid")" 2>/dev/null || true; fi
   rm -rf "$E2E_HOME"
 }

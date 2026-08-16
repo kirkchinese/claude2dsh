@@ -34,7 +34,7 @@ dsh web
 bash scripts/install-claude2dsh.sh
 ```
 
-脚本会安装 `@deepseek-ai/dsh-web-app + @claude2dsh/plugin` 到新的 `claude2dsh` profile；如果 pnpm 报无害的 `koffi` build script 被忽略，脚本会自动补齐 `dsh.profile.bundles`，然后启动 `http://127.0.0.1:18781` 并打印停止命令。
+脚本把插件装进你的主 `web` profile 并启动浏览器 UI（`http://127.0.0.1:18781`）。默认不创建隔离 profile；只有显式设置 `CLAUDE2DSH_PROFILE` 时，才为自定义 profile 安装 `dsh-web-app`，并在 pnpm 报无害的 `koffi` build script 被忽略时自动补齐 `dsh.profile.bundles`。
 
 ### Headless（仅高级用户/自动化）
 
