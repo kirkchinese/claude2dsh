@@ -41,13 +41,14 @@
    - 三 tarball 干净 profile 安装（core/adapter 以 overrides 模拟已发布
      依赖）+ boot + dump-config + import 冒烟通过。
 
-## 剩余发布前事实（2026-08-16 更新）
+## 发布结果（2026-08-16 更新）
 
-- `npm whoami` = `kirkchinese`；但 `npm publish` 被 2FA 拦截（E403），
-  需要 OTP 或带 bypass-2fa 权限的 granular token。
-- 三包均未发布（`npm view` 全部 404）。
-- GitHub 公开仓库与 release 已发布；npm 发布与真实 registry 空环境
-  验收待 2FA 解决后继续。
+- npm org `@claude2dsh` 已创建，三包 `0.1.0-rc.2` 已发布且
+  `latest` 指向 rc.2。
+- rc.1 因 `workspace:` 依赖协议问题已全部 deprecate。
+- 真实 registry 空环境安装验收通过（见 docs/validation.md R8）。
+- 后续发布必须使用 `pnpm pack` + `npm publish <tarball>`，避免
+  workspace 协议进入 registry manifest。
 
 ## 最终发布清单（对外发布时）
 

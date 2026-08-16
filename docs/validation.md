@@ -287,3 +287,41 @@ CLAUDE_CONFIG_DIR=/tmp/c2dsh-live-claude-resume-home \
 - 用户选择重新生成 token 后重试：`npm whoami` 仍 E401。
 - 按"失败即停"停止；临时 npmrc 已删除；registry 上三包仍 404。
 - npm 发布与真实 registry 空环境验收保持阻塞，等待有效发布凭据。
+
+## R8 npm 发布修复与真实 registry 空环境验收（2026-08-16）
+
+### 发布修复
+
+- 根因：本地 manifest 使用 `workspace:` 协议；`npm publish` 不会转换，
+  导致 rc.1 真实安装读取 `workspace:^0.1.0-rc.1` 失败。
+- 处理（用户选择 0.1.0-rc.2）：
+  - 三包版本升至 `0.1.0-rc.2`，本地依赖保持 workspace 协议以支持 monorepo。
+  - 使用 `pnpm pack` 生成转换后的 tarball（manifest 依赖已变为
+    `^0.1.0-rc.2`），再 `npm publish <tarball>` 发布。
+  - 发布顺序 core → adapter → plugin，每包发布后 `npm view versions` 确认。
+  - `@claude2dsh/{core,adapter-claude-code,plugin}@0.1.0-rc.1` 已
+    `npm deprecate`，指向 rc.2。
+- 三包 registry 状态：`latest` dist-tag 均为 `0.1.0-rc.2`。
+
+### 陌生用户空环境验收（真实 registry，无 link、无 overrides）
+
+```sh
+E2E=$(mktemp -d)
+DSH_HOME="$E2E" dsh plugin --profile smoke add @claude2dsh/plugin
+DSH_HOME="$E2E" dsh --profile smoke --dump-config
+DSH_HOME="$E2E" \
+CLAUDE2DSH_TEST_IMPORT=<备份主会话jsonl> \
+CLAUDE2DSH_TEST_SKILLS=1 \
+CLAUDE2DSH_TEST_SKILLS_ROOT=/tmp/claude2dsh-source-backup/skills \
+CLAUDE2DSH_TEST_REPORT=/tmp/report.json \
+dsh --profile smoke
+```
+
+实测：
+- `dsh plugin add` 解析到 `@claude2dsh/plugin@0.1.0-rc.2`，pnpm 从
+  registry 安装成功。
+- dump-config 出现 `claude2dsh-import` 与 hook bridge 行。
+- 导入 1 个主会话：`imported turns=3 events=31 toolCalls=3`，
+  DSH `sessionPersistence.inspect` eventCount=31。
+- skills：39 个复制成功，`ctx.skills.snapshot()` 共 42 个。
+- 全程未使用本地 link，未使用 overrides。
