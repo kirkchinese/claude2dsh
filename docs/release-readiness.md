@@ -41,10 +41,13 @@
    - 三 tarball 干净 profile 安装（core/adapter 以 overrides 模拟已发布
      依赖）+ boot + dump-config + import 冒烟通过。
 
-## 剩余发布前事实
+## 剩余发布前事实（2026-08-16 更新）
 
-- `npm whoami` 返回 `ENEEDAUTH`；`NPM_TOKEN` 未设置；`~/.npmrc` 不存在。
-- 因此**未执行 npm publish**；凭据可用且经用户确认后才可执行。
+- `npm whoami` = `kirkchinese`；但 `npm publish` 被 2FA 拦截（E403），
+  需要 OTP 或带 bypass-2fa 权限的 granular token。
+- 三包均未发布（`npm view` 全部 404）。
+- GitHub 公开仓库与 release 已发布；npm 发布与真实 registry 空环境
+  验收待 2FA 解决后继续。
 
 ## 最终发布清单（对外发布时）
 

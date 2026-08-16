@@ -235,3 +235,47 @@ CLAUDE_CONFIG_DIR=/tmp/c2dsh-live-claude-resume-home \
 - 根 `pnpm run check` 全绿。
 - `pnpm -r build/typecheck/test` 全绿。
 - 四个 e2e 脚本全绿（ROUND1/2/3/4 OK）。
+
+## R7 公开清理、GitHub release 与 npm 发布尝试（2026-08-16）
+
+### 历史重写（用户选择：压缩为单个公开初始提交）
+
+- 旧历史备份：`/tmp/claude2dsh-history-pre-public.bundle`（308 KB）与
+  `pre-public-history` 本地分支。
+- 敏感文件本地备份：`/tmp/claude2dsh-sensitive-backup/`。
+- 公开分支从 `dbaaa59`（Initial public release）开始，后续仅
+  README 定稿与 e2e 匿名化两个公开 commit。
+- 旧历史中移除：`docs/prompt-round2/3/4.md`、`premises.md`、
+  `projects-structural-inventory.*`、`inventory_projects_jsonl.py`；
+  文档中 `/home/misaka` 全部匿名化为 `~`，UUID 匿名化为 `<uuid>`，
+  脚本中真实样例 UUID 改为自动选择。
+- 审计结果：公开工作树无 `/home/misaka`、无 token 模式、无真实项目名；
+  仅测试夹具含合成 UUID（非真实会话）。
+
+### GitHub 远端与 release
+
+- 仓库：`https://github.com/kirkchinese/claude2dsh`（public）。
+- 本地 main 与 origin/main 均为 `4bc8398`；tag
+  `v0.1.0-rc.1` 指向同一 commit。
+- GitHub release 已发布：
+  `https://github.com/kirkchinese/claude2dsh/releases/tag/v0.1.0-rc.1`。
+- release notes 如实标注 npm 被 2FA 阻塞、hook 7/30、图片视觉路由未
+  验证、auto-mirror beta。
+
+### npm 发布尝试（失败即停）
+
+- `npm whoami` = `kirkchinese`；registry 可访问。
+- 依次尝试从 core 开始：`npm publish --access public` 返回
+  `E403 ... Two-factor authentication or granular access token with
+  bypass 2fa enabled is required to publish packages.`。
+- 失败后立即停止，未尝试 adapter/plugin。
+- `npm view` 三包均 404，确认 **没有任何包被发布**。
+- 结论：对外 npm 发布与任务 6 的真实 registry 空环境验收当前不可执行；
+  需要用户提供 OTP 或带 bypass-2fa 权限的 granular token 后，仍可按
+  0.1.0-rc.1 继续。
+
+### 发布后待办
+
+- 解决 npm 2FA → 按 core/adapter/plugin 顺序发布 → 三包 `npm view`
+  确认 → 真实 registry 空环境验收（quickstart）。
+- 官方插件目录收录：官方未规定第三方收录流程，暂不提交（用户已确认）。
