@@ -6,7 +6,22 @@
 set -euo pipefail
 
 SOURCE_BACKUP="${CLAUDE2DSH_SOURCE_BACKUP:-/tmp/claude2dsh-source-backup}"
-SAMPLE_FILE="${CLAUDE2DSH_SAMPLE_FILE:-$(find "$SOURCE_BACKUP/projects" -type f -name '*.jsonl' | head -1)}"
+SAMPLE_FILE="${CLAUDE2DSH_SAMPLE_FILE:-$(python3 - "$SOURCE_BACKUP/projects" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+for p in sorted(root.rglob('*.jsonl')):
+    if 'subagents' in p.parts or 'workflows' in p.parts or p.name == 'journal.jsonl': continue
+    try:
+        lines = p.read_text(errors='replace').splitlines()
+    except Exception:
+        continue
+    for line in lines[:3]:
+        if '"type":"user"' in line or '"type": "user"' in line:
+            print(p)
+            raise SystemExit
+print(sorted(root.rglob('*.jsonl'))[0])
+PY
+)}"
 SESSION="$(basename "$SAMPLE_FILE" .jsonl)"
 PROJECT_NAME="$(basename "$(dirname "$SAMPLE_FILE")")"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"

@@ -6,7 +6,22 @@
 set -euo pipefail
 
 SOURCE_BACKUP="${CLAUDE2DSH_SOURCE_BACKUP:-/tmp/claude2dsh-source-backup}"
-SAMPLE_FILE="${CLAUDE2DSH_SAMPLE_FILE:-$(find "$SOURCE_BACKUP/projects" -type f -name '*.jsonl' | head -1)}"
+SAMPLE_FILE="${CLAUDE2DSH_SAMPLE_FILE:-$(python3 - "$SOURCE_BACKUP/projects" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+for p in sorted(root.rglob('*.jsonl')):
+    if 'subagents' in p.parts or 'workflows' in p.parts or p.name == 'journal.jsonl': continue
+    try:
+        lines = p.read_text(errors='replace').splitlines()
+    except Exception:
+        continue
+    for line in lines[:3]:
+        if '"type":"user"' in line or '"type": "user"' in line:
+            print(p)
+            raise SystemExit
+print(sorted(root.rglob('*.jsonl'))[0])
+PY
+)}"
 SESSION="$(basename "$SAMPLE_FILE" .jsonl)"
 PROJECT_NAME="$(basename "$(dirname "$SAMPLE_FILE")")"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
@@ -58,6 +73,13 @@ open(path, 'w').write('\n'.join(json.dumps(r) for r in recs) + '\n')
 PY
 REPORT_A2="$WORK/report-a2.json"
 DSH_HOME="$HOME_A" CLAUDE2DSH_TEST_IMPORT="$SRC_FILE" CLAUDE2DSH_TEST_REPORT="$REPORT_A2" timeout 60 dsh --profile claude2dsh-e2e >/dev/null
+EXPECTED_EVENTS="$(python3 - "$REPORT_A2" <<'PY'
+import json, sys
+a2 = json.load(open(sys.argv[1]))
+item = a2['report']['items'][0]
+print(a2['inspected'][item['sessionId']]['eventCount'])
+PY
+)"
 python3 - "$REPORT_A1" "$REPORT_A2" <<'PY'
 import json, sys
 a1 = json.load(open(sys.argv[1]))
@@ -79,13 +101,14 @@ open(path, 'w').write('\n'.join(lines[:3]) + '\n')
 PY
 REPORT_A3="$WORK/report-a3.json"
 DSH_HOME="$HOME_A" CLAUDE2DSH_TEST_IMPORT="$SRC_FILE" CLAUDE2DSH_TEST_REPORT="$REPORT_A3" timeout 60 dsh --profile claude2dsh-e2e >/dev/null
-python3 - "$REPORT_A3" <<'PY'
+python3 - "$REPORT_A3" "$EXPECTED_EVENTS" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1]))
+expected = int(sys.argv[2])
 item = data['report']['items'][0]
 assert item['status'] == 'source-shrunk', item
 inspected = data['inspected'][item['sessionId']]
-assert inspected['eventCount'] == 150, inspected
+assert inspected['eventCount'] == expected, inspected
 print(f"A_GUARD_OK status={item['status']} native-events-unchanged={inspected['eventCount']}")
 PY
 
