@@ -279,3 +279,11 @@ CLAUDE_CONFIG_DIR=/tmp/c2dsh-live-claude-resume-home \
 - 解决 npm 2FA → 按 core/adapter/plugin 顺序发布 → 三包 `npm view`
   确认 → 真实 registry 空环境验收（quickstart）。
 - 官方插件目录收录：官方未规定第三方收录流程，暂不提交（用户已确认）。
+
+### npm token 重试（仍失败，已停止并删除临时配置）
+
+- 用户提供 token 后，token 通过 `/tmp/claude2dsh-npmrc` 注入，未打印值。
+- 第一次验证：`npm whoami` = E401；`npm publish @claude2dsh/core` = E404。
+- 用户选择重新生成 token 后重试：`npm whoami` 仍 E401。
+- 按"失败即停"停止；临时 npmrc 已删除；registry 上三包仍 404。
+- npm 发布与真实 registry 空环境验收保持阻塞，等待有效发布凭据。
