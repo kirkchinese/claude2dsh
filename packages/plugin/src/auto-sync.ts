@@ -48,7 +48,7 @@ function logState(state: AutoSyncState): void {
  * @param ctx - plugin context.
  * @param config - validated mirror configuration.
  */
-export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: NodeJS.ProcessEnv = process.env): void {
+export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: NodeJS.ProcessEnv = process.env): () => void {
   const root = resolveClaudeProjectsRoot(config, env)
   const debounceMs = Math.max(50, config.debounceMs ?? 500)
   const dshHome = resolveDshHome(env)
@@ -56,12 +56,7 @@ export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: Node
   let pending: ReturnType<typeof setTimeout> | undefined
   let state = loadAutoSyncState(dshHome)
 
-  const persistState = async (): Promise<void> => {
-    const loaded = await state
-    await saveAutoSyncState(loaded, dshHome)
-  }
-
-  ctx.effect(() => {
+  return ctx.effect(() => {
     void state.then(logState)
     void processPendingQueue(ctx, root, debounceMs, dshHome, state)
     watcher = watch(root, {
@@ -100,8 +95,6 @@ export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: Node
       watcher = undefined
     }
   }, 'claude2dsh auto-sync watcher')
-
-  void persistState
 }
 
 const pendingSync = new Set<string>()

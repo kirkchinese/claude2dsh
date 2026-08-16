@@ -24,7 +24,10 @@ import { registerImageReprojection } from './image-reproject.ts'
 import { importGlobalClaudeContext } from './context-import.ts'
 import { importClaudeMemory } from './memory-import.ts'
 import { loadSidecarMap } from './sidecar.ts'
+import { loadSessionSourceMap, saveSessionSource } from './session-sources.ts'
 import { mergeClaudeSession } from './merge-session.ts'
+import { createSettingsRuntime } from './settings-service.ts'
+import { registerClaude2dshSettingsRoutes } from './settings-routes.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
 
 export const name = 'claude2dsh-import'
@@ -78,6 +81,19 @@ function jsonToolOutput(): { schema: { type: 'json' }; render: (args: unknown, v
  */
 export function apply(ctx: Context, config: PluginConfig = {}): void {
   assertDshCompatibility()
+  const settings = createSettingsRuntime(ctx, config)
+  registerClaude2dshSettingsRoutes(ctx, settings)
+  let autoSyncDispose: (() => void) | undefined
+  const syncAutoSync = (next: ReturnType<typeof settings.get>): void => {
+    autoSyncDispose?.()
+    autoSyncDispose = undefined
+    if (next.autoSync.enabled) autoSyncDispose = activateAutoSync(ctx, next.autoSync)
+  }
+  syncAutoSync(settings.get())
+  ctx.inject(['settings'], () => {
+    syncAutoSync(settings.get())
+    settings.scope?.watch((next) => syncAutoSync(next))
+  })
   ctx.tools.register(defineTool({
     name: 'claude2dsh_import',
     description: SESSION_IMPORT_DESCRIPTION,
@@ -97,7 +113,15 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
     presentCall: (args) => ({ card: 'generic', title: 'Import Claude Code sessions', kind: 'other', rawInput: (args as { path?: unknown }).path }),
     presentResult: importResultView,
     async execute(args) {
-      const report = await importClaudeSessions(ctx, args)
+      const defaults = settings.get().importDefaults
+      const report = await importClaudeSessions(ctx, {
+        ...args,
+        ...(args.includeSubagents === undefined ? { includeSubagents: defaults.includeSubagents } : {}),
+        ...(args.imageMode === undefined ? { imageMode: defaults.imageMode } : {}),
+        ...(args.imageProvider === undefined ? { imageProvider: defaults.imageProvider } : {}),
+        ...(args.imageModel === undefined ? { imageModel: defaults.imageModel } : {}),
+        ...(args.sidecarMaxBytes === undefined ? { sidecarMaxBytes: defaults.sidecarMaxBytes } : {}),
+      })
       return report as unknown as JsonValue
     },
   }))
@@ -117,7 +141,12 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
     },
     output: jsonToolOutput(),
     async execute(args) {
-      const result = await exportClaudeSession(ctx, args, resolveDshHome())
+      const writeback = settings.get().writeback
+      const result = await exportClaudeSession(ctx, {
+        ...args,
+        ...(args.outputDir === undefined && writeback.exportDir.length > 0 ? { outputDir: writeback.exportDir } : {}),
+        ...(args.allowOriginalClaudeDir === undefined ? { allowOriginalClaudeDir: writeback.allowOriginalClaudeDir } : {}),
+      }, resolveDshHome())
       return result as unknown as JsonValue
     },
   }))
@@ -143,7 +172,12 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       return genericResult('Sync to Claude Code', `status=${v.status ?? 'unknown'} records=${v.appendedRecords ?? 0} events=${v.appendedEvents ?? 0}${v.reason ? ` reason=${v.reason}` : ''}`)
     },
     async execute(args) {
-      const result = await syncClaudeSession(ctx, args, resolveDshHome())
+      const writeback = settings.get().writeback
+      const result = await syncClaudeSession(ctx, {
+        ...args,
+        ...(args.target === undefined ? { target: writeback.target } : {}),
+        ...(args.allowOriginalClaudeDir === undefined ? { allowOriginalClaudeDir: writeback.allowOriginalClaudeDir } : {}),
+      }, resolveDshHome())
       return result as unknown as JsonValue
     },
   }))
@@ -168,6 +202,28 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       const action = (args as { action: string }).action
       const state = action === 'resume' ? await resumeAutoSync(resolveDshHome()) : await getAutoSyncState(resolveDshHome())
       return state as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_session_sources',
+    description: [
+      'Inspect the source marker of DSH sessions migrated by Claude2DSH.',
+      'action list: return every recorded source marker (claude-main, claude-subagent, claude-merged; codex/native reserved).',
+      'action resolve: return the marker for one session id.',
+    ].join('\n'),
+    parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'resolve'], description: 'list all markers or resolve one session.' },
+      sessionId: { type: 'string', description: 'DSH session id (resolve only).' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const map = await loadSessionSourceMap(resolveDshHome())
+      if (args.action === 'resolve') {
+        const sessionId = typeof args.sessionId === 'string' ? args.sessionId : ''
+        return (map.sessions[sessionId] ?? { status: 'missing', sessionId }) as unknown as JsonValue
+      }
+      return { sessions: map.sessions } as unknown as JsonValue
     },
   }))
 

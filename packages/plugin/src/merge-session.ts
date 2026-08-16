@@ -9,6 +9,7 @@ import { loadRegistry, resolveDshHome } from './registry.ts'
 import { loadImageMap, saveImageMap } from './image-map.ts'
 import { loadSidecarMap, writeSidecarMap } from './sidecar.ts'
 import { saveMergeRecord } from './merge-state.ts'
+import { saveSessionSource } from './session-sources.ts'
 
 export interface MergeSessionArgs {
   /** DSH session id that the import record owns. */
@@ -105,6 +106,7 @@ export async function mergeClaudeSession(ctx: Context, args: MergeSessionArgs, d
   const meta = { ...stored.meta, id: mergedId, seedLength: stored.meta.seedLength } as SessionHeader
   await ctx.sessionPersistence.create({ ...meta, id: mergedId as SessionId })
   await ctx.sessionPersistence.append(mergedId as SessionId, plan.events as unknown as SessionEvent[])
+  await saveSessionSource({ sessionId: mergedId, kind: 'claude-merged', sourcePath, recordedAt: Date.now() }, dshHome)
 
   // Keep both migration sidecars reachable from the merged copy.
   try {
