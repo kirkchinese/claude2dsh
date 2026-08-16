@@ -81,7 +81,8 @@ function sourceSessionDir(sourcePath: string): string {
   return join(fileDir, stem)
 }
 
-async function writeMap(map: SidecarMap, path: string): Promise<void> {
+export async function writeSidecarMap(map: SidecarMap, dshHome = resolveDshHome()): Promise<void> {
+  const path = sidecarMapPath(dshHome)
   const dir = dirname(path)
   await mkdir(dir, { recursive: true })
   const temp = join(dir, `.sidecar-map-${randomUUID()}.tmp`)
@@ -156,7 +157,7 @@ export async function copySessionSidecars(
   if (items.length > 0) {
     const map = await loadSidecarMap(dshHome)
     map.sessions[sessionId] = items
-    await writeMap(map, sidecarMapPath(dshHome))
+    await writeSidecarMap(map, dshHome)
   }
   return { sessionId, referenced: references.length, copied, reused, missing, tooLarge, failed, items }
 }

@@ -24,6 +24,7 @@ import { registerImageReprojection } from './image-reproject.ts'
 import { importGlobalClaudeContext } from './context-import.ts'
 import { importClaudeMemory } from './memory-import.ts'
 import { loadSidecarMap } from './sidecar.ts'
+import { mergeClaudeSession } from './merge-session.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
 
 export const name = 'claude2dsh-import'
@@ -167,6 +168,26 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       const action = (args as { action: string }).action
       const state = action === 'resume' ? await resumeAutoSync(resolveDshHome()) : await getAutoSyncState(resolveDshHome())
       return state as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_merge',
+    description: [
+      'Explicit three-way merge for a session that grew on both sides after the sync watermark.',
+      'Complete turns are ordered by timestamp; a turn edited on both sides keeps both versions and a log-only conflict marker.',
+      'The original DSH session and Claude JSONL are never mutated: the result is a new DSH session id (<sessionId>-merged).',
+      'dryRun:true computes the merged copy without writing.',
+    ].join('\n'),
+    parameters: {
+      sessionId: { type: 'string', required: true, description: 'DSH session id owned by a claude2dsh import record.' },
+      path: { type: 'string', description: 'Optional explicit Claude source path; defaults to the import record.' },
+      dryRun: { type: 'boolean', description: 'Compute and report without creating the merged session.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const result = await mergeClaudeSession(ctx, args, resolveDshHome())
+      return result as unknown as JsonValue
     },
   }))
 
