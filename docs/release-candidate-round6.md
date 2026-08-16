@@ -32,15 +32,20 @@
 - 不包含：增强型按轮三路合并（设计完成，待确认后实施）、UI 增强集、
   PR #968 更新动作——这些不阻塞 `0.1.0`。
 
-## 发布前检查（本轮已实跑）
+## 发布前检查（0.1.0 bump 后已全部复跑）
 
-见 `docs/release-checklist.md`：隐私 grep、根 check、workspace
-build/typecheck/test（core 4 / adapter 11 / plugin 18）、四个 e2e、
-三包 pack 白名单与依赖转换、`npm whoami=kirkchinese`、
+见 `docs/release-checklist.md` 与 `docs/validation.md` R12：隐私 grep、
+根 check、workspace build/typecheck/test（core 4 / adapter 11 /
+plugin 18）、四个 e2e、`npm whoami=kirkchinese`、
 `scripts/check-dsh-compat.mjs=DSH_COMPAT_OK rc.6` 全部通过。
-剩余动作仅为版本号 bump、按 core→adapter→plugin 顺序
-`pnpm pack` + `npm publish <tarball>`、`npm view` 复核、空环境
-quickstart、GitHub release；对外发布必须经用户确认后执行。
+三包 `pnpm pack` 后 manifest 已确认：版本 0.1.0，
+core↔adapter↔plugin 依赖为 `^0.1.0`，无 workspace 协议，hook 上游
+仍精确锁 `0.1.0-rc.6`。
+
+剩余发布动作：按 core→adapter→plugin 顺序
+`pnpm pack` + `npm publish <tarball>`、每包 `npm view` 复核、空环境
+quickstart、GitHub release。npm 与 GitHub 对外动作需再次确认后执行；
+当前未发布、未打 tag。
 
 ## 待用户拍板的四项
 

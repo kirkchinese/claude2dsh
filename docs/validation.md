@@ -457,3 +457,48 @@ bash scripts/e2e-round4-subagents.sh
 
 结果：根 check 全绿；workspace 全绿（core 4/4、adapter 11/11、
 plugin 18/18）；DSH_COMPAT_OK；四个 e2e 全绿；真实模型调用 0 轮。
+
+## R12 0.1.0 发布准备（2026-08-16，仅准备，未发布）
+
+### 用户决定
+
+- 双向合并增强：维持已实施底线，先发布 0.1.0；按轮三路合并留作
+  发布后 roadmap。
+- awesome PR #968：等待维护者反馈，不更新、不催更。
+- UI：0.1.0 只含最小 tool cards；first-run migration guide 发布后做。
+- 版本：`0.1.0`。
+- 发布动作：仅准备并全量重测，npm 与 GitHub release 待再次确认。
+
+### 准备动作与证据
+
+- 提交 `197cbca`：三包 version `0.1.0-rc.2` → `0.1.0`，workspace 依赖
+  同步 `workspace:^0.1.0`，pnpm-lock 更新，CHANGELOG Unreleased 段
+  改为 `## 0.1.0 — 2026-08-16`。
+- 根 `pnpm run check` 全绿。
+- workspace：build/typecheck 全绿；tests core 4/4、adapter 11/11、
+  plugin 18/18。
+- 四个 e2e 复跑：ROUND1_OK、ROUND2_OK、ROUND3_OK、
+  R4_OK imported=782 skipped=1。
+- `node scripts/check-dsh-compat.mjs` =
+  `DSH_COMPAT_OK newest @deepseek-ai/dsh-session 0.1.x = 0.1.0-rc.6`。
+- 三包 `pnpm pack` 解包核对：
+  `@claude2dsh/core@0.1.0`、
+  `@claude2dsh/adapter-claude-code@0.1.0`（依赖 core `^0.1.0`）、
+  `@claude2dsh/plugin@0.1.0`（依赖 adapter/core `^0.1.0`，
+  hook 上游精确 `0.1.0-rc.6`）；files 白名单仍无 src/test/tsconfig。
+- `npm whoami` = `kirkchinese`；未执行任何 `npm publish`，未创建 tag。
+- 隐私 grep：无真实主目录路径/真实会话 UUID/真实凭据；命中仅为
+  文档中的匿名化说明与测试脚本里的 `ANTHROPIC_API_KEY=dummy`。
+
+### 待确认后执行
+
+```sh
+# core -> adapter -> plugin，每包发布后 npm view 复核
+pnpm --dir packages/core pack --pack-destination <tmp>
+npm publish <tmp>/claude2dsh-core-0.1.0.tgz --access public
+npm view @claude2dsh/core@0.1.0
+# ... adapter、plugin 同理 ...
+# 空环境验收
+DSH_HOME=$(mktemp -d) dsh plugin --profile smoke add @claude2dsh/plugin@0.1.0
+# GitHub tag + release（与发布 commit 一致）
+```
