@@ -183,26 +183,6 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
           })
           continue
         }
-        if (parsed.session.turns.length === known.turns) {
-          pushItem(report, {
-            path: sourcePath,
-            status: 'source-changed',
-            sessionId: known.targetId,
-            turns: parsed.session.turns.length,
-            reason: 'same turn count but changed content; append-only storage refuses in-place rewrite, pass force:true for a fresh copy',
-          })
-          continue
-        }
-        if (prefixHash(parsed.session.turns.slice(0, known.turns)) !== known.prefixHash) {
-          pushItem(report, {
-            path: sourcePath,
-            status: 'source-changed',
-            sessionId: known.targetId,
-            turns: parsed.session.turns.length,
-            reason: 'already-imported prefix was rewritten; pass force:true for a fresh copy',
-          })
-          continue
-        }
         const storedLength = await storedEventCount(ctx, known.targetId)
         if (storedLength === undefined) {
           pushItem(report, {
@@ -220,7 +200,27 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
             status: 'conflict',
             sessionId: known.targetId,
             turns: parsed.session.turns.length,
-            reason: `both sides grew after the last sync point (source turns now ${parsed.session.turns.length}, DSH events ${storedLength} > recorded ${known.events}); auto-append paused, no data changed`,
+            reason: `both sides changed after the last sync point (source turns ${parsed.session.turns.length}, DSH events ${storedLength} > recorded ${known.events}); auto-append paused, no data changed`,
+          })
+          continue
+        }
+        if (parsed.session.turns.length === known.turns) {
+          pushItem(report, {
+            path: sourcePath,
+            status: 'source-changed',
+            sessionId: known.targetId,
+            turns: parsed.session.turns.length,
+            reason: 'same turn count but changed content; append-only storage refuses in-place rewrite, pass force:true for a fresh copy',
+          })
+          continue
+        }
+        if (prefixHash(parsed.session.turns.slice(0, known.turns)) !== known.prefixHash) {
+          pushItem(report, {
+            path: sourcePath,
+            status: 'source-changed',
+            sessionId: known.targetId,
+            turns: parsed.session.turns.length,
+            reason: 'already-imported prefix was rewritten; pass force:true for a fresh copy',
           })
           continue
         }
