@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+node_modules/
+.pnpm-store/
+lib/
+coverage/
+*.tgz
+*.log
+.eslintcache
+.DS_Store

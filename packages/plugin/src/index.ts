@@ -1,0 +1,299 @@
+/**
+ * Claude2DSH migration plugin for DeepSeek Harness.
+ *
+ * The plugin consumes only host services (`sessionPersistence`, `tools`) and
+ * writes session data through the host persistence service. Skill files and
+ * the import registry are written below `$DSH_HOME`; `~/.claude` is opened
+ * read-only and is never a write target.
+ * @module @claude2dsh/plugin
+ */
+import { writeFile } from 'node:fs/promises'
+import type { Context } from '@deepseek-ai/cordis'
+import type { SessionId, UserMessage } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-session'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import { claudeCodeAdapter } from '@claude2dsh/adapter-claude-code'
+import { importClaudeSessions } from './session-import.ts'
+import { exportClaudeSession } from './export-claude.ts'
+import { syncClaudeSession } from './sync-claude.ts'
+import { importClaudeSkills } from './skills-import.ts'
+import { resolveDshHome } from './registry.ts'
+import { activateAutoSync, type AutoSyncConfig } from './auto-sync.ts'
+import { registerImageReprojection } from './image-reproject.ts'
+import { inventoryClaudePlugins } from './plugin-inventory.ts'
+
+export const name = 'claude2dsh-import'
+export const inject = ['sessionPersistence', 'tools', 'attachments', 'llm']
+
+/** Plugin configuration. `autoSync` is beta and defaults to disabled. */
+export interface PluginConfig {
+  readonly autoSync?: AutoSyncConfig
+}
+
+const SESSION_IMPORT_DESCRIPTION = [
+  'Import Claude Code conversation transcripts into DeepSeek Harness as native resumable sessions.',
+  'Reads the given ~/.claude/projects path (or a single <sessionId>.jsonl file) read-only and writes only DSH-native session logs.',
+  'Re-importing an unchanged source is idempotent; a changed source requires force:true in this version.',
+  'Set preview:true for a zero-side-effect conversion report.',
+].join('\n')
+
+const SKILLS_IMPORT_DESCRIPTION = [
+  'Copy Claude Code skills from ~/.claude/skills into the DSH-native skills root ($DSH_HOME/skills).',
+  'Only kebab-case skills with a non-empty description are copied; existing identical skills are skipped and conflicts are reported, never overwritten.',
+  'Source skills are symlinks in real Claude layouts, so files are dereferenced and copied.',
+].join('\n')
+
+function jsonToolOutput(): { schema: { type: 'json' }; render: (args: unknown, value: unknown) => { type: 'text'; text: string }[] } {
+  return {
+    schema: { type: 'json' as const },
+    render: (_args: unknown, value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+  }
+}
+
+/**
+ * Activate the plugin.
+ *
+ * @param ctx - Cordis context of the profile that mounted this plugin.
+ * @param config - optional plugin configuration.
+ */
+export function apply(ctx: Context, config: PluginConfig = {}): void {
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_import',
+    description: SESSION_IMPORT_DESCRIPTION,
+    parameters: {
+      path: { type: 'string', required: true, description: 'Path to ~/.claude/projects, a project directory, or one <sessionId>.jsonl transcript.' },
+      recursive: { type: 'boolean', description: 'Recurse into project subdirectories when the root has no direct transcripts.' },
+      includeSubagents: { type: 'boolean', description: 'Also import subagent and workflow agent transcripts as child DSH sessions.' },
+      imageMode: { type: 'string', enum: ['auto', 'placeholder', 'native'], description: 'Image policy: auto probes model inputModalities (default), placeholder always degrades safely, native forces attachment blocks.' },
+      imageProvider: { type: 'string', description: 'Provider route probed by imageMode auto/native.' },
+      imageModel: { type: 'string', description: 'Model id probed by imageMode auto/native.' },
+      force: { type: 'boolean', description: 'Create a fresh DSH session copy under a new id when the source changed or already exists.' },
+      preview: { type: 'boolean', description: 'Convert and report without persisting anything.' },
+      sessionId: { type: 'string', description: 'Override the target DSH session id for a single-file import.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const report = await importClaudeSessions(ctx, args)
+      return report as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_export',
+    description: [
+      'Export one DSH session (native or imported) as a Claude Code JSONL transcript that Claude Code can load with --resume.',
+      'The default destination is $DSH_HOME/claude2dsh/exports; writing into the real ~/.claude directory is refused unless allowOriginalClaudeDir:true is explicit.',
+      'Existing files are never overwritten unless force:true.',
+    ].join('\n'),
+    parameters: {
+      sessionId: { type: 'string', required: true, description: 'DSH session id to export.' },
+      outputDir: { type: 'string', description: 'Destination directory. Defaults to $DSH_HOME/claude2dsh/exports.' },
+      allowOriginalClaudeDir: { type: 'boolean', description: 'Explicitly allow writing below ~/.claude (default false).' },
+      force: { type: 'boolean', description: 'Replace an existing export file.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const result = await exportClaudeSession(ctx, args, resolveDshHome())
+      return result as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_sync',
+    description: [
+      'Append DSH-side turns newer than the last export watermark to the exported Claude Code JSONL copy.',
+      'The default target is the safe export copy under $DSH_HOME/claude2dsh/exports; writing the original ~/.claude transcript requires target:"source" plus allowOriginalClaudeDir:true.',
+      'Guards refuse an externally modified or shrunken file unless force:true re-anchors the watermark.',
+    ].join('\n'),
+    parameters: {
+      sessionId: { type: 'string', required: true, description: 'DSH session id whose new turns should be written back.' },
+      target: { type: 'string', enum: ['copy', 'source'], description: 'Write the last export copy (default) or the original Claude source transcript.' },
+      allowOriginalClaudeDir: { type: 'boolean', description: 'Explicitly allow writing the original ~/.claude transcript.' },
+      force: { type: 'boolean', description: 'Re-anchor a moved or externally modified target.' },
+      dryRun: { type: 'boolean', description: 'Compute and validate the append without writing.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const result = await syncClaudeSession(ctx, args, resolveDshHome())
+      return result as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_plugin_inventory',
+    description: [
+      'Inventory installed Claude Code plugins (read-only) and optionally migrate their declarative skill assets into DSH.',
+      'Dry-run is the default: apply:true copies only SKILL.md assets; hooks, app-server scripts and runtime code are never executed or copied.',
+    ].join('\n'),
+    parameters: {
+      path: { type: 'string', description: 'Claude plugins root; defaults to $CLAUDE_CONFIG_DIR/plugins or ~/.claude/plugins.' },
+      apply: { type: 'boolean', description: 'Actually copy plugin SKILL.md assets into $DSH_HOME/skills (default false).' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const result = await inventoryClaudePlugins(args, resolveDshHome())
+      return result as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_import_skills',
+    description: SKILLS_IMPORT_DESCRIPTION,
+    parameters: {
+      path: { type: 'string', required: true, description: 'Claude skills root, normally ~/.claude/skills.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const results = await importClaudeSkills(args.path, resolveDshHome())
+      return { source: args.path, destination: resolveDshHome() + '/skills', results } as unknown as JsonValue
+    },
+  }))
+
+  registerImageReprojection(ctx)
+
+  if (config.autoSync?.enabled === true) {
+    activateAutoSync(ctx, config.autoSync)
+  }
+
+  // Optional multi-tool extension point. The root `claude2dsh` bundle owns the
+  // in-memory registry; profiles that do not mount it simply never invoke this
+  // callback, and the import tools remain fully functional.
+  ctx.inject(['sessionSources'], (ready) => {
+    const registry = (ready as unknown as {
+      sessionSources: { register(adapter: { id: string; displayName: string }): () => unknown }
+    }).sessionSources
+    registry.register({ id: claudeCodeAdapter.id, displayName: claudeCodeAdapter.label })
+  })
+
+  // Integration-test seam: boot a profile with this plugin and import without
+  // a model round-trip. Production profiles never set the environment variable.
+  const testPath = process.env.CLAUDE2DSH_TEST_IMPORT
+  const testReport = process.env.CLAUDE2DSH_TEST_REPORT
+  if (testPath !== undefined && testPath.length > 0) {
+    ctx.inject(['sessionPersistence', 'sessions', 'skills', 'agents'], async (ready) => {
+      const report = await importClaudeSessions(ready, {
+        path: testPath,
+        recursive: process.env.CLAUDE2DSH_TEST_RECURSIVE === '1',
+        includeSubagents: process.env.CLAUDE2DSH_TEST_INCLUDE_SUBAGENTS === '1',
+        preview: process.env.CLAUDE2DSH_TEST_PREVIEW === '1',
+        force: process.env.CLAUDE2DSH_TEST_FORCE === '1',
+      }, resolveDshHome())
+      const skillsReport = process.env.CLAUDE2DSH_TEST_SKILLS === '1'
+        ? await importClaudeSkills(process.env.CLAUDE2DSH_TEST_SKILLS_ROOT ?? testPath, resolveDshHome())
+        : undefined
+      const headers = await ready.sessionPersistence.list()
+      const inspected: Record<string, { header: unknown; eventCount: number; error?: string }> = {}
+      for (const item of report.items) {
+        if (item.sessionId !== undefined && item.status !== 'preview' && item.status !== 'failed') {
+          try {
+            const view = await ready.sessionPersistence.inspect(item.sessionId as SessionId)
+            inspected[item.sessionId] = { header: view.meta, eventCount: view.events.length }
+          } catch (error) {
+            inspected[item.sessionId] = { header: null, eventCount: -1, error: error instanceof Error ? error.message : String(error) }
+          }
+        }
+      }
+      let preparedSessions: Record<string, number> | undefined
+      if (process.env.CLAUDE2DSH_TEST_PREPARE === '1') {
+        preparedSessions = {}
+        for (const item of report.items) {
+          if (item.sessionId === undefined || item.status === 'preview' || item.status === 'failed') continue
+          try {
+            const preparation = await ready.sessionPersistence.prepare(item.sessionId as SessionId)
+            preparedSessions[item.sessionId] = preparation.session.deriveMessages().length
+            preparation[Symbol.dispose]()
+          } catch {
+            preparedSessions[item.sessionId] = -1
+          }
+        }
+      }
+      let skillsSnapshot: string[] | undefined
+      let skillsSnapshotError: string | undefined
+      if (skillsReport !== undefined) {
+        try {
+          skillsSnapshot = (await (ready as unknown as { skills: { snapshot(options: { cwd?: string }): Promise<{ skills: { name: string }[]; complete: boolean }> } }).skills.snapshot({ cwd: process.cwd() })).skills.map((skill) => skill.name).sort()
+        } catch (error) {
+          skillsSnapshotError = error instanceof Error ? error.message : String(error)
+        }
+      }
+      let exportReport: Awaited<ReturnType<typeof exportClaudeSession>> | undefined
+      let syncReport: Awaited<ReturnType<typeof syncClaudeSession>> | undefined
+      const exportTarget = process.env.CLAUDE2DSH_TEST_EXPORT
+      if (exportTarget !== undefined && exportTarget.length > 0) {
+        exportReport = await exportClaudeSession(ready, {
+          sessionId: exportTarget,
+          ...(process.env.CLAUDE2DSH_TEST_EXPORT_DIR !== undefined ? { outputDir: process.env.CLAUDE2DSH_TEST_EXPORT_DIR } : {}),
+          allowOriginalClaudeDir: process.env.CLAUDE2DSH_TEST_ALLOW_ORIGINAL_CLAUDE === '1',
+          force: process.env.CLAUDE2DSH_TEST_FORCE === '1',
+        }, resolveDshHome())
+      }
+      const appendEventsPath = process.env.CLAUDE2DSH_TEST_APPEND_EVENTS
+      const appendSyntheticTurn = async (): Promise<string> => {
+        const { readFile } = await import('node:fs/promises')
+        if (appendEventsPath === undefined) throw new Error('append events path is missing')
+        const raw = JSON.parse(await readFile(appendEventsPath, 'utf8')) as Array<{ type: string; time: number; data: Record<string, unknown>; surfaceOp?: 'append'; sourceEventSeqs?: number[] }>
+        const sessionId = process.env.CLAUDE2DSH_TEST_APPEND_SESSION ?? exportReport?.sessionId ?? report.items.find((item) => item.status === 'imported')?.sessionId
+        if (sessionId === undefined) throw new Error('CLAUDE2DSH_TEST_APPEND_EVENTS requires an imported session')
+        const stored = await ready.sessionPersistence.readFrom(sessionId as SessionId, 0)
+        const events = raw.map((event, index) => ({ ...event, seq: stored.events.length + index }))
+        await ready.sessionPersistence.append(sessionId as SessionId, events as never)
+        return sessionId
+      }
+      if (appendEventsPath !== undefined && appendEventsPath.length > 0 && process.env.CLAUDE2DSH_TEST_APPEND_AFTER_EXPORT !== '1') {
+        await appendSyntheticTurn()
+      }
+      let resumeReport: { sessionId: string; prompt: string; events: number; messages: number; status: string; error?: string } | undefined
+      if (process.env.CLAUDE2DSH_TEST_RESUME === '1') {
+        const resumeId = process.env.CLAUDE2DSH_TEST_RESUME_SESSION ?? exportReport?.sessionId ?? report.items.find((item) => item.status === 'imported')?.sessionId
+        if (resumeId === undefined) throw new Error('CLAUDE2DSH_TEST_RESUME requires an imported session')
+        const prompt = process.env.CLAUDE2DSH_TEST_PROMPT ?? 'Continue this conversation with exactly: dsh-pong'
+        try {
+          const handle = await ready.agents.resume({
+            resumeSessionId: resumeId as SessionId,
+            agentOptions: {
+              provider: process.env.CLAUDE2DSH_TEST_PROVIDER ?? 'deepseek-official',
+              model: process.env.CLAUDE2DSH_TEST_MODEL ?? 'deepseek-v4-flash',
+            },
+          })
+          const message = {
+            id: `claude2dsh:live:${Date.now()}`,
+            role: 'user' as const,
+            content: [{ type: 'text' as const, text: prompt }],
+            source: { kind: 'user' as const },
+          }
+          handle.agent.followup(message as UserMessage)
+          await handle.agent.whenIdle()
+          resumeReport = {
+            sessionId: resumeId,
+            prompt,
+            events: handle.agent.session.events.length,
+            messages: handle.agent.session.deriveMessages().length,
+            status: handle.agent.status,
+          }
+          await handle.dispose()
+        } catch (error) {
+          resumeReport = { sessionId: resumeId, prompt, events: -1, messages: -1, status: 'error', error: error instanceof Error ? error.message : String(error) }
+        }
+      }
+      if (appendEventsPath !== undefined && appendEventsPath.length > 0 && process.env.CLAUDE2DSH_TEST_APPEND_AFTER_EXPORT === '1') {
+        await appendSyntheticTurn()
+      }
+      if (exportReport?.status === 'exported' && process.env.CLAUDE2DSH_TEST_SYNC === '1') {
+        syncReport = await syncClaudeSession(ready, {
+          sessionId: exportReport.sessionId,
+          target: process.env.CLAUDE2DSH_TEST_SYNC_TARGET === 'source' ? 'source' : 'copy',
+          allowOriginalClaudeDir: process.env.CLAUDE2DSH_TEST_ALLOW_ORIGINAL_CLAUDE === '1',
+          force: process.env.CLAUDE2DSH_TEST_FORCE === '1',
+          dryRun: process.env.CLAUDE2DSH_TEST_SYNC_DRY_RUN === '1',
+        }, resolveDshHome())
+      }
+      if (testReport !== undefined) {
+        await writeFile(testReport, JSON.stringify({ report, skillsReport, exportReport, syncReport, resumeReport, preparedSessions, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
+      }
+      const holdMs = Number(process.env.CLAUDE2DSH_TEST_HOLD_MS ?? '0')
+      const failed = report.failed + (skillsReport?.filter((item) => item.status === 'failed').length ?? 0)
+      process.exitCode = failed > 0 || exportReport?.status === 'refused' ? 1 : 0
+      setTimeout(() => process.exit(process.exitCode), holdMs > 0 ? holdMs : 50)
+    })
+  }
+}

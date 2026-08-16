@@ -1,0 +1,70 @@
+{
+  "name": "claude2dsh",
+  "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Read-only DSH bundle skeleton for future Claude Code session adapters",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "clean": "node --eval \"import('node:fs/promises').then(({ rm }) => Promise.all(['lib', 'coverage'].map((path) => rm(path, { force: true, recursive: true }))))\"",
+    "format": "prettier --check package.json tsconfig.json tsconfig.build.json eslint.config.js vitest.config.ts README.md cordis.patch.yml src test .agents/notes/implemented/architecture/*.md",
+    "format:write": "prettier --write package.json tsconfig.json tsconfig.build.json eslint.config.js vitest.config.ts README.md cordis.patch.yml src test .agents/notes/implemented/architecture/*.md",
+    "lint": "eslint src test",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run",
+    "build": "tsc --project tsconfig.build.json",
+    "package:dry-run": "pnpm pack --dry-run",
+    "check": "pnpm run format && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run package:dry-run"
+  },
+  "keywords": [
+    "dsh",
+    "cordis",
+    "session"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis-plugin-include": "^1.0.6",
+    "@eslint/js": "^9.39.5",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.19.0",
+    "eslint": "^9.39.1",
+    "js-yaml": "^4.2.0",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.50.1",
+    "vitest": "^4.0.18"
+  }
+}

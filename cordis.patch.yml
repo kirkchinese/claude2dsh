@@ -1,0 +1,7 @@
+# This bundle only adds an in-memory adapter registry. It has no source adapter,
+# does not inspect ~/.claude, and exposes no import or write operation.
+- insert:
+    - id: claude2dsh
+      name: claude2dsh
+      config:
+        mode: read-only

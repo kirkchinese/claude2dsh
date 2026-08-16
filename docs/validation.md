@@ -1,0 +1,237 @@
+# 验证记录
+
+## R1 最小闭环：Claude 会话 + skills → DSH 原生读取
+
+复现命令：`bash scripts/e2e-round1.sh`（默认源副本
+`/tmp/claude2dsh-source-backup`，可用 `CLAUDE2DSH_SOURCE_BACKUP` 覆盖）。
+
+验证变量（一次只测一个）：
+1. 工作区 `pnpm -r build && pnpm -r typecheck && pnpm -r test` 全绿。
+2. 隔离 DSH_HOME（mktemp）+ base-only profile + `@claude2dsh/plugin`
+   本地 link，`dsh --profile claude2dsh-e2e` 启动，`--dump-config` 能看到
+   `claude2dsh-import` 行。
+3. env 门控 seam 导入备份 projects 全量 + skills 全量并写报告。
+
+真实数据结果（58 个主转录、39 个技能）：
+- 报告 `imported=57 skipped=1 failed=0`；skip 证据为
+  `171f5c9a-...jsonl` 仅含 mode/permission-mode/system/last-prompt，
+  无 user/assistant 可导入记录。
+- DSH 原生 `sessionPersistence.list()` 返回 57 个头；每个导入会话
+  `inspect()` 成功，事件总数 22,163，无失败。
+- 对 57 个会话逐一调用 DSH resume 路径 `sessionPersistence.prepare()` 并
+  `deriveMessages()`，全部 >0 条模型消息，证明可直接续聊。
+- 另用 `@deepseek-ai/dsh-session` 的 `Session.create(seed)` 对同一事件流
+  重放并 `deriveMessages()`，57/58 通过（1 个无消息跳过），证明模型面可读。
+- `ctx.skills.snapshot()` 列出 42 个技能：39 个来自 Claude 副本，另 3 个为
+  DSH 自带；39 个迁移技能全部被 DSH 原生发现。
+- 重跑同一导入：57 个 `already-imported`，39 个技能
+  `skipped-identical`；未新增/覆盖任何文件。
+
+原始目录安全：脚本只读 `SOURCE_BACKUP` 副本，不引用 `~/.claude`；导入写入
+仅发生在隔离 `DSH_HOME/sessions`、`DSH_HOME/skills`、`DSH_HOME/claude2dsh`。
+
+## R2 DSH → Claude Code 反向导出（默认安全关闭 + 真机识别）
+
+复现命令：`bash scripts/e2e-round2-claude-recognition.sh`。
+
+真实数据结果（样例会话 `351f7946-...`）：
+- 导入 DSH 后经 `claude2dsh_export` 导出到隔离
+  `$DSH_HOME/claude2dsh/exports`；`recordCount=57`、toolCalls=22、
+  toolResults=22、droppedToolResults=0。
+- 对导出 JSONL 逐行 JSON、parentUuid 链、tool_result 挂接校验通过。
+- 默认 `outputDir` 指向 `~/.claude/projects` 时返回
+  `status:"refused"`，测试 seam 以非零退出，原目录未产生新文件。
+- 启动本地 mock Anthropic 端点，`CLAUDE_CONFIG_DIR` 指向仅含导出文件的
+  隔离目录，真实 `claude --resume <导出uuid> --print` 向 mock 发出
+  `/v1/messages?beta=true` 请求；请求体从导出转录重建出 56 条消息，
+  含 assistant tool_use；redacted_thinking 被 Claude Code 按原格式处理，
+  重建请求中 thinking 块数为 0（与直接 resume 原始文件行为一致）。
+- Claude Code 只与 mock 通信（401 重试后超时），未发生任何真实 API 调用。
+
+## R3 双向继续对话
+
+复现命令：`bash scripts/e2e-round3-bidirectional.sh`。
+
+方向 A（Claude 继续 → DSH 识别）：
+- 把样例会话复制到隔离目录并导入（turns=6、events=144、DSH 原生
+  inspect 通过）。
+- 向复制源追加 1 个完整 Claude 轮次（新 user/assistant、parentUuid 链
+  接旧尾），重跑导入。
+- 结果 `status=appended`、turns=7、events=150；同一 DSH 会话 id 未变，
+  `sessionPersistence.inspect` 原生读取 150 个事件成功。
+
+方向 B（DSH 继续 → Claude Code 识别）：
+- 导入 + `claude2dsh_export` 生成安全副本；导出后经测试 seam 向 DSH 日志
+  append 1 个完整轮次（6 个事件），再执行 `claude2dsh_sync`（默认
+  target=copy）。
+- 结果 `status=synced`、appendedTurns=1、appendedEvents=6、
+  appendedRecords=2；副本记录从 57 增至 59，锚点推进。
+- 用 mock Anthropic 端点让真实 `claude --resume` 加载同步后的副本：
+  请求重建 58 条消息，且包含 DSH 侧追加文本
+  “This turn was appended by the DSH side…”，证明 Claude Code 正确识别
+  DSH 端继续的新轮次。
+- 原始 `~/.claude` 写回路径仍受 `allowOriginalClaudeDir` 显式开关保护，
+  默认 target=copy 只写 `$DSH_HOME/claude2dsh/exports`。
+## R4 子代理/工作流转录
+
+复现命令：`bash scripts/e2e-round4-subagents.sh`。
+
+真实数据结果（58 主转录 + 725 subagent/workflow agent 转录）：
+- `includeSubagents:true` 导入报告 total=783，imported=782，skipped=1，
+  failed=0。
+- DSH 原生 `sessionPersistence.list()` 返回 782；782 个 `inspect()` 全部
+  成功，事件总数 86,866。
+- 子代理 header 携带 `origin:"subagent"`、`delegationDepth:1` 和
+  `parentSession`（如 `claude-a0aaae...` 的父会话为
+  `claude-8f2f7ac6-...`），DSH 原生重建了父子归属。
+- 另用 `Session.create(seed)` 对全部 783 个文件的事件重放通过（782 有
+  消息，1 个无可导入轮次）。
+
+## 插件生态（plugins/）与 session-env/（暂缓）
+
+- plugins：`installed_plugins.json` 记录 codex@openai-codex、
+  i-have-adhd 等用户插件及 3 个 marketplace；本轮不迁移插件，避免把
+  Claude 插件副作用带进 DSH。
+- session-env：43 个会话目录，仅部分含 `sessionstart-hook-0.sh`；是
+  hook 环境快照，不是会话正文。后续按"源适配器扩展点"单独处理。
+
+## R5 真实 API 端到端（2026-08-16）
+
+### 密钥与鉴权状态（只报告存在性，不打印值）
+
+- bash 环境：`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`、
+  `ANTHROPIC_AUTH_TOKEN` 均 unset。
+- Claude Code：默认配置下 `claude auth status` =
+  `{"loggedIn":true,"authMethod":"oauth_token","apiProvider":"firstParty"}`。
+  隔离 `CLAUDE_CONFIG_DIR` 后默认 `loggedIn:false`；通过
+  `claude --settings ~/.claude/settings.json` 恢复登录态
+  （由 CLI 读取，未打印任何值）。
+- DSH：`~/.dsh/.credentials.yaml` 存在（size=54, mode=600），未读取
+  值；隔离 DSH_HOME 的 profile 用 cordis.patch.yml 覆盖 credentials
+  插件 `path` 指向该文件，由 DSH 凭据服务读取。
+
+### 隔离核验
+
+- 基线：`find ~/.claude -printf '%y %p %s %T@'` 排序哈希
+  `e11c86332b2a64ae59ae7fbd19117ab9f2d2db648009d9b40b1e0ff6b1b845cf`。
+- 第一次隔离 Claude 调用后真实 `~/.claude` diff_lines=0、哈希不变；
+  真实 resume 调用后再核验 diff_lines=0、哈希不变。
+
+### 实际调用序列与结果
+
+1. 隔离工作区 `/tmp/c2dsh-live-work`、隔离配置
+   `/tmp/c2dsh-live-claude-home` 中新建真实 Claude 会话：
+   `claude --settings ... -p "Reply with exactly: pong" --max-budget-usd 0.1`
+   → `result:"pong"`，`total_cost_usd:0.053424`，session_id
+   `<uuid>`，1 次真实 API 轮次。
+2. DSH 隔离 home（`/tmp/c2dsh-live-dsh-home2`）中
+   `CLAUDE2DSH_TEST_IMPORT=<该jsonl>` → `imported, turns=1, events=7`。
+3. `CLAUDE2DSH_TEST_EXPORT` 先导出安全副本（recordCount=4）。
+4. `CLAUDE2DSH_TEST_RESUME=1` + provider/model 显式
+   `deepseek-official/deepseek-v4-flash` 真实 DSH 续聊：
+   prompt `Continue with exactly: dsh-pong` → DSH 会话 events 7→31、
+   新增 assistant `"dsh-pong"`，turn/end reason completed；
+   assistant usage `{inputTokens:13040,outputTokens:5}`。1 次真实
+   DSH API 轮次（此前一次未配 provider/model 的失败尝试在模型调用前
+   即错误退出，不计 API 调用）。
+5. `CLAUDE2DSH_TEST_SYNC=1` 回写导出副本：`synced, appendedTurns=1,
+   appendedEvents=24, appendedRecords=2`。
+6. 把同步后副本拷入隔离 Claude home
+   `/tmp/c2dsh-live-claude-resume-home`，真实
+   `claude --resume 4b8eafd1-... --print "Continue with exactly: claude-pong"`
+   → `result:"claude-pong"`，`total_cost_usd:0.053025`。1 次真实
+   Claude API 轮次。
+
+### 成本与调用次数
+
+- Claude 真实 API：2 轮（新建 1、resume 1），合计
+  `0.053424 + 0.053025 = 0.106449 USD`。
+- DSH 真实 API：1 轮（续聊），未获得价格字段，usage 见上。
+- 无 mock 冒充；上表所有结果来自真实模型响应。
+
+### 复现命令
+
+见 `/tmp` 实验目录与本节字段；核心命令模式：
+```sh
+# Claude 新建（隔离）
+cd /tmp/c2dsh-live-work && CLAUDE_CONFIG_DIR=/tmp/c2dsh-live-claude-home \
+  claude --settings ~/.claude/settings.json -p "Reply with exactly: pong" \
+  --output-format json --max-budget-usd 0.1
+
+# DSH import/export/real-resume/sync（隔离 DSH_HOME）
+DSH_HOME=/tmp/c2dsh-live-dsh-home2 CLAUDE2DSH_TEST_IMPORT=<claude-jsonl> \
+  CLAUDE2DSH_TEST_EXPORT=claude-<id> CLAUDE2DSH_TEST_RESUME=1 \
+  CLAUDE2DSH_TEST_PROMPT='Continue with exactly: dsh-pong' CLAUDE2DSH_TEST_SYNC=1 \
+  CLAUDE2DSH_TEST_REPORT=/tmp/c2dsh-live-report2.json dsh --profile claude2dsh-e2e
+
+# Claude resume（隔离）
+CLAUDE_CONFIG_DIR=/tmp/c2dsh-live-claude-resume-home \
+  claude --settings ~/.claude/settings.json --resume <export-uuid> \
+  -p "Continue with exactly: claude-pong" --output-format json --max-budget-usd 0.1
+```
+
+## R6 发布修复 + beta 特性验证（2026-08-16）
+
+### 发布本地修复
+
+- 三包版本 `0.1.0-rc.1`，`private` 移除，publishConfig/license/
+  repository/files 齐备。
+- pack 白名单实测：core 12 文件、adapter 24 文件、plugin 28 文件，
+  均无 src/test/tsconfig；plugin 无 `lib/cordis.patch.yml`。
+- tarball manifest 依赖实测：
+  `@claude2dsh/core@^0.1.0-rc.1`、`@claude2dsh/adapter-claude-code@^0.1.0-rc.1`。
+- 干净 profile tarball 安装（core/adapter 用 overrides 模拟已发布依赖）
+  → pnpm install 成功 → `dsh --profile smoke --dump-config` 出现
+  `claude2dsh-import` → 导入冒烟 imported/events=7/inspect OK。
+- `dsh plugin add -w link:` 冒烟同样通过。
+- npm 凭据：`npm whoami` = ENEEDAUTH，NPM_TOKEN unset，~/.npmrc 不存在。
+  未执行 npm publish。
+
+### 自动双向镜像 beta
+
+- 默认关：bundle patch `autoSync.enabled: false`；`--dump-config`
+  可见该配置。
+- Claude→DSH watcher 实测：隔离 DSH_HOME + `autoSync.enabled:true` +
+  `claudeProjectsRoot=/tmp/c2dsh-autosync-projects`，进程启动后向目录
+  新增一个合法 Claude JSONL，日志出现
+  `[claude2dsh] auto-import: 1 session(s) updated`，DSH_HOME/sessions
+  生成对应 zstd 会话。
+- DSH→Claude 实测：隔离 DSH_HOME + autoSync.dshToClaude + 真实 DSH
+  续聊 1 轮（provider/model=deepseek-official/deepseek-v4-flash，
+  prompt `Continue with exactly: auto-pong`），日志出现
+  `[claude2dsh] auto-sync: ... appended 2 record(s)`；导出副本
+  recordCount 4→6。真实 DSH API 调用：1 轮。
+- 写回真实 `~/.claude`：auto-sync 固定 target=copy，安全门控不变。
+
+### 图片能力探测 + 自动降级
+
+- 能力面证据：`ctx.llm.resolveModelInfo` 返回 `inputModalities`；
+  DeepSeek adapter 声明 `["text"]`。
+- 单元测试：text-only 模型 → surface 为 `[image image/jpeg]` 占位，
+  attachment 仍保存 1 份；image-capable mock → surface 为原生 image block。
+- resume 重投影单元测试：placeholder→native 会 append
+  `surfaceOp:{op:'replace'}` + `sourceEventSeqs:[seq]` 且 content[0]
+  为 image；由 `image-map/<sessionId>.json` sidecar 驱动。
+- 集成：非法 base64 图片导入时 attachment 保存被 DSH 拒绝 → 自动
+  降级占位、导入成功，image-map 写入 placeholder 条目，不崩溃。
+- 切换模型正确性：pre-step listener 每次 resume 用当前 provider/model
+  探测并替换不一致 surface 节点；DeepSeek 当前无视觉模型，native 路径
+  由 mock 能力测试覆盖。
+
+### 插件生态迁移（资产清单）
+
+- `claude2dsh_plugin_inventory` 对备份 `installed_plugins.json` 实测：
+  2 个插件、3 个 marketplace、4 个 SKILL.md、8 个 commands、1 个 agent、
+  2 个 prompts、5 个 hook 文件；dry-run 不写盘。
+- `apply:true` 实测迁移 4 个 skills 到 `$DSH_HOME/skills`。
+- Claude hook bridge：bundle 中新增可选行
+  `@claude2dsh/plugin/hook-bridge`（re-export 上游
+  `@deepseek-ai/dsh-hooks-claude-code@0.1.0-rc.6`）。无
+  `CLAUDE2DSH_HOOKS_CONFIG` 时禁用；有 fake hooks.json 时 boot 无报错。
+  上游限制照写：command-only、7/30 事件、部分语义。
+
+### 回归
+
+- 根 `pnpm run check` 全绿。
+- `pnpm -r build/typecheck/test` 全绿。
+- 四个 e2e 脚本全绿（ROUND1/2/3/4 OK）。

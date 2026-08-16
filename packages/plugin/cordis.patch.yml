@@ -1,0 +1,13 @@
+- insert:
+    - id: claude2dsh-import
+      name: '@claude2dsh/plugin'
+      config:
+        autoSync:
+          enabled: false
+    - id: claude2dsh-hooks
+      name: '@claude2dsh/plugin/hook-bridge'
+      disabled: !!js process.env.CLAUDE2DSH_HOOKS_CONFIG === undefined
+      config:
+        configPath: !!js process.env.CLAUDE2DSH_HOOKS_CONFIG || ''
+        pluginRoot: !!js process.env.CLAUDE2DSH_HOOKS_PLUGIN_ROOT || undefined
+        projectDir: !!js process.env.CLAUDE2DSH_HOOKS_PROJECT_DIR || undefined

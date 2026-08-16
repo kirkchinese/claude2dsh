@@ -1,0 +1,9 @@
+AGENTS.md
+premises.md
+inventory_projects_jsonl.py
+projects-structural-inventory.json
+projects-structural-inventory.fields.tsv
+coverage/
+lib/
+node_modules/
+pnpm-lock.yaml
