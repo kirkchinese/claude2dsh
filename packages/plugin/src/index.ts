@@ -447,6 +447,21 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       if (appendEventsPath !== undefined && appendEventsPath.length > 0 && process.env.CLAUDE2DSH_TEST_APPEND_AFTER_EXPORT !== '1') {
         await appendSyntheticTurn()
       }
+      let mergeReport: Awaited<ReturnType<typeof mergeClaudeSession>> | Awaited<ReturnType<typeof mergeDshToClaude>> | undefined
+      if (process.env.CLAUDE2DSH_TEST_MERGE === '1') {
+        const mergeId = process.env.CLAUDE2DSH_TEST_MERGE_SESSION ?? exportReport?.sessionId ?? report.items.find((item) => item.status === 'imported')?.sessionId
+        if (mergeId === undefined) throw new Error('CLAUDE2DSH_TEST_MERGE requires an imported or exported session')
+        const mergeDryRun = process.env.CLAUDE2DSH_TEST_MERGE_DRY_RUN === '1'
+        if (process.env.CLAUDE2DSH_TEST_MERGE_DIRECTION === 'dsh-to-claude') {
+          mergeReport = await mergeDshToClaude(ready, { sessionId: mergeId, dryRun: mergeDryRun }, resolveDshHome())
+        } else {
+          mergeReport = await mergeClaudeSession(ready, {
+            sessionId: mergeId,
+            ...(process.env.CLAUDE2DSH_TEST_MERGE_PATH !== undefined ? { path: process.env.CLAUDE2DSH_TEST_MERGE_PATH } : {}),
+            dryRun: mergeDryRun,
+          }, resolveDshHome())
+        }
+      }
       let resumeReport: { sessionId: string; prompt: string; events: number; messages: number; status: string; error?: string } | undefined
       if (process.env.CLAUDE2DSH_TEST_RESUME === '1') {
         const resumeId = process.env.CLAUDE2DSH_TEST_RESUME_SESSION ?? exportReport?.sessionId ?? report.items.find((item) => item.status === 'imported')?.sessionId
@@ -507,7 +522,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
         }
       }
       if (testReport !== undefined) {
-        await writeFile(testReport, JSON.stringify({ report, skillsReport, contextReport, memoryReport, exportReport, syncReport, resumeReport, preparedSessions, presenters, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
+        await writeFile(testReport, JSON.stringify({ report, skillsReport, contextReport, memoryReport, exportReport, syncReport, mergeReport, resumeReport, preparedSessions, presenters, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
       }
       const holdMs = Number(process.env.CLAUDE2DSH_TEST_HOLD_MS ?? '0')
       const failed = report.failed + (skillsReport?.filter((item) => item.status === 'failed').length ?? 0)
