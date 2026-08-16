@@ -72,4 +72,4 @@ Round 2 and round 3 use the real `claude` binary against a local mock Anthropic 
 
 ## License and acknowledgements
 
-MIT. The design was benchmarked against `dsh-chat-import` (MIT) and `dsh-claude-move` (Apache-2.0); this project is an independent implementation and reuses no competitor code. Hook compatibility delegates to the official DeepSeek Harness hook bridge package.
+MIT. The design was benchmarked against `dsh-chat-import` (MIT) and `dsh-claude-move` (Apache-2.0); thanks to both projects for their useful reference points. Hook compatibility delegates to the official DeepSeek Harness hook bridge package.
