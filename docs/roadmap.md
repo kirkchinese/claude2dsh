@@ -28,4 +28,4 @@ Consequence: **do not copy project CLAUDE.md to AGENTS.md**. DSH already reads p
 | 7 | Hook semantic expansion (upstream or fork): add more of the 23 unsupported events / handler types | 0.5–2 days per event | Low | Value is real but bounded; command-only 7/30 is already documented. |
 | 8 | Vision model real acceptance: verify native image path with an actual image-capable DSH route | 0.5 day when route exists | Low now, high later | Blocked on a vision-capable route. |
 | 9 | Codex session-source adapter | 3–5 days | Low | Reuses the existing adapter contract and IR; good test of the multi-tool claim. |
-| 10 | Official/third-party plugin directory inclusion | unknown | Low | No official third-party inclusion process was found in the DSH repository; revisit if a catalog appears. |
+| 10 | Plugin directory inclusion | PR prep: 0.5 day | Low | Official DSH channel does not exist (re-verified 2026-08-16). Community `awesome-dsh-plugin` accepts PRs; our repo meets all requirements; PR draft in `docs/research-plugin-directory.md`, submission pending user approval. |

@@ -325,3 +325,14 @@ dsh --profile smoke
   DSH `sessionPersistence.inspect` eventCount=31。
 - skills：39 个复制成功，`ctx.skills.snapshot()` 共 42 个。
 - 全程未使用本地 link，未使用 overrides。
+
+## R9 插件收录渠道调研（2026-08-16）
+
+- 官方渠道复查：DSH master `47f9438`；docs/website/packages 与完整
+  tree 搜索均无第三方插件目录/marketplace/registry。结论：官方渠道
+  不存在。
+- 社区渠道：`awesome-dsh-plugin` HEAD `df1d87b`，维护活跃。我们满足
+  全部收录硬要求（dsh.bundle、真实代码、活跃维护、dsh-plugin topic、
+  npm 发布）；无阻断差距。
+- 待提交 PR 草稿与完整内容见 `docs/research-plugin-directory.md`；
+  按约束未发起 PR，等待用户确认。
