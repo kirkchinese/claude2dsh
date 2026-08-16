@@ -526,3 +526,107 @@ bypass 2fa enabled is required ...`；立即停止，`npm view` 复核
   （URL + 一次性 code）确认后 `gh auth refresh -s workflow` 完成，
   `git push origin main` 成功（98c97cf..HEAD）。
 - 临时 npmrc 与临时发布目录已删除；代码与文档中未残留任何令牌。
+
+## R13 第七轮：Settings UI、上下文/记忆、sidecar、按轮合并与生态评估（2026-08-16）
+
+### 前提核验
+
+- HEAD=`596a626`；工作区除未跟踪 prompt-round5/6/7 外干净。
+- npm 三包 `latest=0.1.0`；`scripts/check-dsh-compat.mjs` 通过 rc.6。
+- awesome PR #968 实测 merged=true（2026-08-16T09:16:49Z）；条目在
+  EN README line 384（Sessions & Messages）。
+- 雷达 `AdamPlatin123/awesome-dsh-plugins` 的 repo-map 无 claude2dsh
+  条目；badge 只声明 curated 收录，不声明雷达运行级验证。
+
+### 收录 badge 与中文 README
+
+- `README.md` 顶部 badge 链接 `awesome-dsh-plugin.com/badge.svg` →
+  awesome-dsh-plugin.com；正文明确"雷达未标记运行级验证"。
+- 新增 `README.zh.md`，与英文能力/quickstart/局限/致谢同步。
+
+### Settings UI（机制级证据）
+
+- 机制：`@deepseek-ai/dsh-settings` 提供 `ctx.settings.register(ns,
+schemastery schema, { base, applies })`；`dsh-client-ui-settings` 的
+  `settings.section` slot 是插件可注册的 Settings 页面。官方 apiproxy
+  只 expose 白名单 namespace，因此本插件按 dsh-codex 模式自建
+  `/plugins/claude2dsh/settings` GET/POST 路由，并由 browser bundle
+  注册 `settings.section`。
+- `dsh.client` manifest 后 boot graph 实测包含
+  `@claude2dsh/plugin` → `/plugins/@claude2dsh/plugin/client.js`；
+  client bundle 含 Claude2DSH 页面。
+- 后端实测：GET 200 返回 schema 默认值；POST
+  `{"autoSync":{"debounceMs":10}}` 返回 400
+  `$.autoSync.debounceMs expected number >= 50`；POST 合法值 200 且
+  `settings.yaml` 落盘。
+- Playwright 实测可见：Settings → Claude2DSH 页面显示 Auto mirror、
+  Import defaults、Export/write-back、Claude hook bridge 全部字段；
+  UI 改 sidecarMaxBytes=999 保存后 GET 返回 999。
+  截图：`docs/assets/settings-ui-claude2dsh.png`。
+- headless 兼容：webServer 缺失时跳过路由注册，四个原 e2e 仍全绿。
+
+### 上下文与记忆迁移
+
+- `claude2dsh_import_context` 单测：preview 不写、imported 写
+  `$DSH_HOME/AGENTS.md`、相同跳过、不同内容冲突不覆盖、缺失报告。
+- `claude2dsh_import_memory` 单测：一个项目 MEMORY.md+memory/*.md →
+  `claude-memory-<slug>` 技能包，preview/相同跳过/冲突不覆盖/空项目跳过。
+- 真实 DSH 隔离 boot：context imported bytes=20；memory
+  `claude-memory-memory-project` imported files=3；DSH skills 目录原生
+  发现该技能包。
+
+### tool-result sidecar
+
+- adapter 修复：Claude `tool_result.content` 为字符串（persisted-output）
+  时归一化为 text block；原先会被丢弃。
+- 真实 subagent 导入（agent-a1f50d07b4437637b）：报告
+  `sidecarReferenced=5 copied=5 missing=0 tooLarge=0`；
+  `$DSH_HOME/claude2dsh/sidecars/<sessionId>/` 5 个文件存在。
+- `claude2dsh_sidecars` 工具可 list/resolve；原 Claude 路径引用保留。
+- 大小上限测试：超过 cap 的文件只入映射不拷贝。
+
+### 按轮三路合并（增强）
+
+- core `planTurnMerge`：base=水印，单位完整轮次，按时间排序；
+  同轮双改保留双方完整轮 + `todo/write` `[conflict]` 标记；
+  交错 tool call/result 不拆轮；半开 DSH 尾轮丢弃；sourceEventSeqs 重映射。
+- 显式工具 `claude2dsh_merge` 支持 `claude-to-dsh` 与
+  `dsh-to-claude`；原会话/原 JSONL 不写，产物为新安全副本；
+  dryRun 只计算。
+- 单测：merge DSH 副本 `Session.create().deriveMessages()` 通过；
+  dsh-to-claude 副本不覆盖原 export file。
+- 新 e2e `scripts/e2e-round7-merge.sh` 全绿：
+  `ROUND7_OK conflicts=1 events=20 messages=6 exported=8`。
+- 合并产物两侧校验：DSH 侧 `sessionPersistence.inspect` +
+  `Session.create/deriveMessages`；Claude 侧导出的 JSONL 逐行 UUID/
+  parentUuid 校验，且包含 dsh-version 与 claude-version。
+
+### 会话来源
+
+- 机制：`sidebar.workspaces` 为 single slot，无 session-row 扩展点；
+  `SessionHeader.origin` 仅 `'subagent'`。结论与替代方案记录在
+  `docs/research-session-source-ui.md`。
+- 已实施：`session-sources.json` 记录 `claude-main`/
+  `claude-subagent`/`claude-merged`；工具
+  `claude2dsh_session_sources` 可查询；单测覆盖主/子会话标记。
+
+### DSH-Session-Move 评估
+
+- 完整能力依赖私有 8-patch 系列 + 精确 base 47f9438；rc.6 未补丁仅
+  只读 inspect、move 一律 unsupported。结论：不合并代码；做互操作
+  入口、联合验收与文档互指，见 `docs/research-session-move.md`。
+
+### 全量回归
+
+```sh
+pnpm run check
+pnpm -r build && pnpm -r typecheck && pnpm -r test
+bash scripts/e2e-round1.sh
+bash scripts/e2e-round2-claude-recognition.sh
+bash scripts/e2e-round3-bidirectional.sh
+bash scripts/e2e-round4-subagents.sh
+bash scripts/e2e-round7-merge.sh
+```
+
+结果：根 check 全绿；core 8/8、adapter 13/13、plugin 29/29；五个
+e2e 全绿（ROUND1/2/3/4/7）；真实模型调用 0 轮。
