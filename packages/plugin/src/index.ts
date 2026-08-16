@@ -18,6 +18,7 @@ import { exportClaudeSession } from './export-claude.ts'
 import { syncClaudeSession } from './sync-claude.ts'
 import { importClaudeSkills } from './skills-import.ts'
 import { resolveDshHome } from './registry.ts'
+import { assertDshCompatibility } from './compat.ts'
 import { activateAutoSync, type AutoSyncConfig } from './auto-sync.ts'
 import { registerImageReprojection } from './image-reproject.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
@@ -57,6 +58,7 @@ function jsonToolOutput(): { schema: { type: 'json' }; render: (args: unknown, v
  * @param config - optional plugin configuration.
  */
 export function apply(ctx: Context, config: PluginConfig = {}): void {
+  assertDshCompatibility()
   ctx.tools.register(defineTool({
     name: 'claude2dsh_import',
     description: SESSION_IMPORT_DESCRIPTION,
