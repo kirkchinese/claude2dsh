@@ -720,9 +720,16 @@ preview=preview`。真实 registry 版可用
   plugin 30 全绿。
 - e2e R1/R2/R3/R4/R7/R8 全绿；真实模型调用 0 轮。
 
-### 0.2.0-rc.2 发布尝试（失败即停）
+### 0.2.0-rc.2 实际发布
 
-- 四个 rc.2 tarball 已 pack；默认 npm 凭据发布 root 被
-  `E403 Two-factor authentication ... required` 拒绝。
-- 未发布任何包、未 push、未打 tag；`npm view` 四包 latest 仍为
-  0.2.0-rc.1。等待可用 OTP / bypass-2FA token 后重试。
+- 默认 npm 凭据先被 2FA 拒绝，失败即停；随后用户确认重试，沿用其
+  自动失效令牌注入临时 npmrc（令牌未打印、已删除）。
+- 四包 `claude2dsh`、`@claude2dsh/core`、`adapter-claude-code`、
+  `plugin` 0.2.0-rc.2 均 `+ published`；`npm view latest` 全部
+  0.2.0-rc.2。
+- 主环境验收：隔离 DSH_HOME 执行
+  `dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.2`
+  无 koffi 错误；`dsh --profile web` 启动后
+  `/plugins/claude2dsh/settings` 200 且 `ui.language=zh`；
+  `/plugins/claude2dsh/import` preview 200，报告 `previewed=1`、
+  item status `preview`。

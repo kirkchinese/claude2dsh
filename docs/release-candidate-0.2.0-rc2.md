@@ -21,6 +21,7 @@
 - Playwright 实测首次迁移向导与执行结果；round8 脚本 curl 证据。
 - 未发布、未打 tag；npm latest 仍 0.2.0-rc.1。
 
-## 待确认
+## 发布状态
 
-- 发布 0.2.0-rc.2（npm + GitHub pre-release）。
+- npm 四包已发布且 latest=0.2.0-rc.2；主 `web` profile 空环境验收通过。
+- GitHub push/tag/pre-release 随后执行。
