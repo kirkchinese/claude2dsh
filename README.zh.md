@@ -24,6 +24,8 @@ dsh plugin --profile claude2dsh add @claude2dsh/plugin
 
 profile 会自动安装 `@deepseek-ai/dsh-base`，并把 `@claude2dsh/plugin` 作为 bundle 加入。安装后请重启 DSH。
 
+headless profile 只暴露工具；Settings UI 需要带 Web 的 profile。推荐把插件装进已有 web profile（`dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.1`，然后 `dsh web`），或向同一 profile 添加 `@deepseek-ai/dsh-web-app@0.1.0-rc.6` 并用空闲端口启动。Settings 页面位于 **Settings → Claude2DSH**。
+
 ## 能力
 
 | 工具                          | 行为                                                                                                                                                                                                                               |
