@@ -4,9 +4,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SettingsRuntime } from './settings-service.ts'
 import { loadSessionSourceMap } from './session-sources.ts'
+import { importClaudeSessions } from './session-import.ts'
+import { resolveDshHome } from './registry.ts'
 
 export const CLAUDE2DSH_SETTINGS_PATH = '/plugins/claude2dsh/settings'
 export const CLAUDE2DSH_SESSION_SOURCES_PATH = '/plugins/claude2dsh/session-sources'
+export const CLAUDE2DSH_IMPORT_PATH = '/plugins/claude2dsh/import'
 
 function trustedRequest(req: IncomingMessage): boolean {
   const remote = req.socket.remoteAddress
@@ -73,6 +76,31 @@ export function registerClaude2dshSettingsRoutes(ctx: Context, runtime: Settings
       },
     })
     disposers.push(dispose)
+    disposers.push(webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_IMPORT_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+        try {
+          const body = await readJson(req)
+          if (typeof body.path !== 'string' || body.path.trim().length === 0) throw new Error('path must be a non-empty string')
+          const defaults = runtime.get().importDefaults
+          const report = await importClaudeSessions(ctx, {
+            path: body.path,
+            preview: body.preview === true,
+            includeSubagents: body.includeSubagents === true ? true : defaults.includeSubagents,
+            imageMode: defaults.imageMode,
+            imageProvider: defaults.imageProvider,
+            imageModel: defaults.imageModel,
+            sidecarMaxBytes: defaults.sidecarMaxBytes,
+          }, resolveDshHome())
+          json(res, 200, report)
+        } catch (error) {
+          json(res, 400, { error: safeMessage(error) })
+        }
+      },
+    }))
     disposers.push(webServer.register({
       kind: 'exact',
       path: CLAUDE2DSH_SESSION_SOURCES_PATH,

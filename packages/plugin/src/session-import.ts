@@ -53,6 +53,7 @@ export interface SessionImportItem {
 export interface SessionImportReport {
   mode: 'single' | 'directory'
   total: number
+  previewed: number
   imported: number
   alreadyImported: number
   appended: number
@@ -76,12 +77,13 @@ function targetSuffix(existing: ReadonlySet<string>, baseId: string): string {
 }
 
 function emptyReport(mode: 'single' | 'directory'): SessionImportReport {
-  return { mode, total: 0, imported: 0, alreadyImported: 0, appended: 0, skipped: 0, failed: 0, items: [] }
+  return { mode, total: 0, previewed: 0, imported: 0, alreadyImported: 0, appended: 0, skipped: 0, failed: 0, items: [] }
 }
 
 function pushItem(report: SessionImportReport, item: SessionImportItem): void {
   report.total += 1
-  if (item.status === 'imported') report.imported += 1
+  if (item.status === 'preview') report.previewed += 1
+  else if (item.status === 'imported') report.imported += 1
   else if (item.status === 'already-imported') report.alreadyImported += 1
   else if (item.status === 'appended') report.appended += 1
   else if (item.status === 'failed') report.failed += 1

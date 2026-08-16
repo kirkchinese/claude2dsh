@@ -31,6 +31,9 @@ export interface Claude2DshSettings {
     readonly pluginRoot: string
     readonly projectDir: string
   }
+  readonly ui: {
+    readonly language: 'zh' | 'en'
+  }
 }
 
 export function defaultClaude2dshSettings(): Claude2DshSettings {
@@ -39,6 +42,7 @@ export function defaultClaude2dshSettings(): Claude2DshSettings {
     importDefaults: { imageMode: 'auto', imageProvider: 'deepseek-official', imageModel: 'deepseek-v4-flash', includeSubagents: false, sidecarMaxBytes: 64 * 1024 * 1024 },
     writeback: { target: 'copy', allowOriginalClaudeDir: false, exportDir: '' },
     hooks: { configPath: '', pluginRoot: '', projectDir: '' },
+    ui: { language: 'zh' },
   }
 }
 
@@ -65,6 +69,9 @@ export const claude2dshSettingsSchema: z<Claude2DshSettings> = z.object({
     configPath: z.string().default(''),
     pluginRoot: z.string().default(''),
     projectDir: z.string().default(''),
+  }),
+  ui: z.object({
+    language: z.union(['zh', 'en'] as const).default('zh'),
   }),
 })
 
