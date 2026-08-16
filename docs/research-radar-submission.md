@@ -50,10 +50,18 @@
 `PLUGINS.md` 实际格式（🔌 单插件表，含运行级列）提交：
 
 - PR：https://github.com/AdamPlatin123/awesome-dsh-plugins/pull/205
-- 标题：`docs: 登记 claude2dsh`
+- 标题：`docs: 登记 claude2dsh`（符合模板标题格式）
 - 分支：`kirkchinese:register-claude2dsh`
 - `maintainer_can_modify=true`；只改 `PLUGINS.md` 一行，运行级填
   `待测`，未声称验证通过。
+- 复核后修正 PR body 到模板要求：taxonomy v2 分类填
+  `🤖 Agent 能力`（附 `scripts/classify.py` 预归类输出），自检清单
+  完整勾选；同时注明当前 `PLUGINS.md` 是旧分类结构、故行落在
+  🔌 单插件表。
+- 与 curated 仓库的关系已在 PR 备注澄清：awesome-dsh-plugin #968
+  是另一仓库的精选列表，已合并；本雷达仓库 PR #205 是首次登记，
+  提交前 `PLUGINS.md`/`PLUGINS-ALL.md`/`data/repo-map.json` 均无
+  claude2dsh 条目，不存在重复行。
 
 ## 纪律
 
