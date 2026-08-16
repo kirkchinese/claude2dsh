@@ -1,63 +1,66 @@
-# claude2dsh
+# Claude2DSH
 
-Migrate Claude Code conversations and skills into DeepSeek Harness (DSH) as native, resumable sessions — and export/sync DSH sessions back into Claude Code JSONL transcripts. Claude Code is the first adapter of a multi-tool session-source framework.
+Migrate Claude Code conversations, skills and plugin assets into DeepSeek Harness (DSH) as native, resumable sessions — then export and sync DSH sessions back into Claude Code JSONL transcripts. Claude Code is the first session-source adapter of a multi-tool migration layer.
 
-## Workspace layout
+## Quickstart (empty machine)
 
-```
-src/                                 root bundle: sessionSources registry plugin
-test/                                root bundle tests (Cordis + patch engine)
-packages/core/                       normalized session IR + DSH event synthesis + tail logic
-packages/adapters/claude-code/       Claude Code adapter: discovery, main-chain parser,
-                                     skills, Claude JSONL serializer
-packages/plugin/                     DSH plugin: claude2dsh_import,
-                                     claude2dsh_import_skills, claude2dsh_export,
-                                     claude2dsh_sync
-scripts/e2e-round*.sh                reproducible acceptance runs
-docs/                                data survey, competitor analysis, gap list, validation
-```
-
-The root package remains the DSH bundle skeleton that publishes the in-memory `sessionSources` extension point. `@claude2dsh/plugin` is the bundle you install into a DSH profile.
-
-## Install into a DSH profile
+Requirements: Node.js `>=22.19.0`, pnpm, and the `dsh` CLI.
 
 ```sh
-pnpm -r build
-dsh plugin --profile web add -w link:$PWD/packages/plugin
-# or in an isolated profile:
-# package.json dependencies: { "@claude2dsh/plugin": "link:$PWD/packages/plugin" }
-# dsh.profile.bundles: ["@deepseek-ai/dsh-base", "@claude2dsh/plugin"]
+# 1. Create a DSH profile with this bundle
+dsh plugin --profile claude2dsh add @claude2dsh/plugin
+
+# 2. Import all Claude Code sessions (read-only) and skills
+#    In a DSH session (web profile), call:
+#      claude2dsh_import({ path: "~/.claude/projects" })
+#      claude2dsh_import_skills({ path: "~/.claude/skills" })
+#    Or boot once with the test seam:
+#      CLAUDE2DSH_TEST_IMPORT=~/.claude/projects dsh --profile claude2dsh
 ```
 
-Restart DSH after installation.
+The profile installs `@deepseek-ai/dsh-base` automatically and adds `@claude2dsh/plugin` as a bundle. Restart DSH after installation.
 
-## Tools
+## Capabilities
 
-| Tool                       | Behavior                                                                                                                                                                                                                                                                                                                      |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude2dsh_import`        | Read `~/.claude/projects` (or one JSONL) read-only and write DSH-native session logs through `ctx.sessionPersistence`. Idempotent; a grown Claude transcript appends only new turns. `preview:true` is zero-side-effect. `includeSubagents:true` imports subagent/workflow transcripts as `origin:"subagent"` child sessions. |
-| `claude2dsh_import_skills` | Copy kebab-case Claude skills with non-empty descriptions from `~/.claude/skills` into `$DSH_HOME/skills`. Existing identical skills are skipped; conflicts are never overwritten.                                                                                                                                            |
-| `claude2dsh_export`        | Serialize one DSH session into a Claude Code JSONL transcript under `$DSH_HOME/claude2dsh/exports`. Writing below the real `~/.claude` is refused unless `allowOriginalClaudeDir:true`; existing files are never overwritten unless `force:true`.                                                                             |
-| `claude2dsh_sync`          | Append DSH turns newer than the export watermark to the exported Claude copy (default `target:"copy"`). `target:"source"` requires `allowOriginalClaudeDir:true`. External modification/shrink guards refuse the write unless `force:true`.                                                                                   |
+| Tool                          | Behavior                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude2dsh_import`           | Read Claude Code JSONL read-only and write DSH-native session logs through `ctx.sessionPersistence`. Idempotent; a grown Claude transcript appends only new turns. `preview:true` is zero-side-effect. `includeSubagents:true` imports subagent/workflow transcripts as `origin:"subagent"` child sessions.                        |
+| `claude2dsh_import_skills`    | Copy kebab-case Claude skills into `$DSH_HOME/skills`; identical skills are skipped and conflicts are never overwritten.                                                                                                                                                                                                           |
+| `claude2dsh_export`           | Serialize one DSH session into a Claude Code JSONL transcript under `$DSH_HOME/claude2dsh/exports`. Writing below the real `~/.claude` requires `allowOriginalClaudeDir:true`; existing files require `force:true`.                                                                                                                |
+| `claude2dsh_sync`             | Append DSH turns newer than the export watermark to the exported Claude copy (default `target:"copy"`). `target:"source"` requires `allowOriginalClaudeDir:true`; external modification/shrink guards refuse unless `force:true`.                                                                                                  |
+| `claude2dsh_plugin_inventory` | Dry-run inventory of installed Claude Code plugins; `apply:true` copies only declarative `SKILL.md` assets. Hooks and app-server runtime code are never executed.                                                                                                                                                                  |
+| Image policy                  | `claude2dsh_import` accepts `imageMode:"auto"` (default), `"placeholder"` or `"native"`. `auto` probes the target model's `inputModalities`: image-capable routes receive native DSH attachment blocks; text-only routes receive safe placeholders while attachments are retained and re-projected when the resumed model changes. |
 
-## Optional beta features
+## Current limitations (honest status)
 
-- Auto mirror: `autoSync.enabled: true` in the plugin row (default false). Watches Claude transcripts and mirrors DSH turns to the safe export copy. Never writes the real `~/.claude` directory.
-- Claude hook bridge: set `CLAUDE2DSH_HOOKS_CONFIG` before boot. Command-handler subset only.
-- Image policy: `claude2dsh_import` `imageMode` `auto`/`placeholder`/`native` probes model `inputModalities`, retains attachments, and re-projects image nodes when the resumed model changes.
+- Claude hook bridge is **beta and default off**: it reuses the upstream `@deepseek-ai/dsh-hooks-claude-code` bridge, which supports **7 of Claude Code's 30 hook events** and only `type:"command"` handlers, with partial semantics per event. Full hook compatibility is a roadmap goal, not a current claim.
+- Native image path is implemented but has not been validated against a real vision-capable DSH model route; the shipped DeepSeek adapter declares text-only input.
+- Auto mirror is **beta and default off**. Enable with `autoSync.enabled: true` in the plugin row. It watches Claude transcripts and mirrors DSH turns to the safe export copy; it never writes the real `~/.claude`.
+- Automatic mirroring and full plugin-runtime compatibility are roadmap goals; current synchronization is explicit-tool plus the opt-in beta mirror.
 
 ## Safety boundaries
 
-- `~/.claude` is always read-only for migration. Export/sync never write the original Claude directory by default.
+- `~/.claude` is read-only for migration. Export/sync never write the original Claude directory by default.
 - DSH writes go only through host persistence (`$DSH_HOME/sessions`), the DSH-native skill root (`$DSH_HOME/skills`), and the sidecar registry (`$DSH_HOME/claude2dsh`).
-- Every validation run uses an experimental copy of the source data, never the live original.
+- Validation always uses an experimental copy of source data, never the live original.
 
-## Validation
+## Repository layout
+
+```
+src/                                 root bundle: sessionSources registry plugin
+packages/core/                       normalized session IR + DSH event synthesis + tail logic
+packages/adapters/claude-code/       Claude Code adapter
+packages/plugin/                     DSH plugin bundle: @claude2dsh/plugin
+scripts/e2e-round*.sh                reproducible acceptance runs
+docs/                                design notes, surveys and validation records
+```
+
+## Development validation
 
 ```sh
 pnpm install
-pnpm run format && pnpm run lint && pnpm run typecheck && pnpm run test
-pnpm -r typecheck && pnpm -r test && pnpm -r build
+pnpm run check
+pnpm -r build && pnpm -r typecheck && pnpm -r test
 
 CLAUDE2DSH_SOURCE_BACKUP=/tmp/claude2dsh-source-backup bash scripts/e2e-round1.sh
 CLAUDE2DSH_SOURCE_BACKUP=/tmp/claude2dsh-source-backup bash scripts/e2e-round2-claude-recognition.sh
@@ -65,4 +68,8 @@ CLAUDE2DSH_SOURCE_BACKUP=/tmp/claude2dsh-source-backup bash scripts/e2e-round3-b
 CLAUDE2DSH_SOURCE_BACKUP=/tmp/claude2dsh-source-backup bash scripts/e2e-round4-subagents.sh
 ```
 
-Round 2 and round 3 use the real `claude` binary against a local mock Anthropic endpoint: Claude Code proves it can reconstruct model messages from the exported transcript, while no real API request is made. See `docs/validation.md` for the recorded results.
+Round 2 and round 3 use the real `claude` binary against a local mock Anthropic endpoint; no real API request is made in those scripts.
+
+## License and acknowledgements
+
+MIT. The design was benchmarked against `dsh-chat-import` (MIT) and `dsh-claude-move` (Apache-2.0); this project is an independent implementation and reuses no competitor code. Hook compatibility delegates to the official DeepSeek Harness hook bridge package.
