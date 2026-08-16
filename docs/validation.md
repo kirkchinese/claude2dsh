@@ -525,5 +525,4 @@ bypass 2fa enabled is required ...`；立即停止，`npm view` 复核
 - GitHub 推送被 workflow-scope 门禁拒绝一次；用户通过 device flow
   （URL + 一次性 code）确认后 `gh auth refresh -s workflow` 完成，
   `git push origin main` 成功（98c97cf..HEAD）。
-- 临时 npmrc 与临时发布目录在发布确认后会清理；代码中未残留任何
-  令牌。
+- 临时 npmrc 与临时发布目录已删除；代码与文档中未残留任何令牌。
