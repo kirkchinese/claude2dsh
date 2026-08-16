@@ -660,3 +660,62 @@ e2e 全绿（ROUND1/2/3/4/7）；真实模型调用 0 轮。
   `imported, turns=15, events=247`，`session-sources.json` 记录
   `claude-main`。
 - 临时 npmrc 已删除；未残留令牌。
+
+## R14 第八轮：傻瓜式开箱即用（2026-08-16）
+
+### 前提
+
+- HEAD=`8cc342a`；除 prompt-round5/6/7/8 外工作区干净；npm 四包
+  latest=0.2.0-rc.1；radar PR 为 PR #205（maintainer_can_modify=true）。
+- 实验 profile claude2dsh-web 曾运行于 18781，本轮开始时停止。
+
+### 设计哲学与审计
+
+- `docs/design-philosophy.md` 记录两条判据：傻瓜式开箱即用 + 安全红线；
+  审计表覆盖 headless 默认、koffi 摩擦、Capabilities 可操作性、
+  autoSync/hook bridge 默认关、allowOriginalClaudeDir、imageMode、
+  首次使用路径，逐项给出设计决策。
+
+### 默认有头与安装摩擦
+
+- 机制证据：`dsh/lib/plugin-*.js` 只在 pnpm exit 0 时 reconcile
+  `dsh.profile.bundles`；package 的 `dsh.bundle` 无法自动把另一个 bundle
+  加入 profile bundles，因此插件不能通过 manifest 自动带入
+  `dsh-web-app`。
+- 方案：默认 quickstart 使用 DSH 内置 `web` profile（已有 web-app）；
+  另提供 `scripts/install-claude2dsh.sh` 一键生成独立有头 profile。
+- koffi 摩擦复现：隔离 DSH_HOME 执行 installer，pnpm 返回
+  `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: koffi@3.1.5` 且 dsh
+  报 pnpm failed；脚本检测依赖已装后自动把
+  `@deepseek-ai/dsh-base,@deepseek-ai/dsh-web-app,@claude2dsh/plugin`
+  写入 bundles，随后 `Settings endpoint is live`。
+- 修复：installer 的 dump-config 检查改为落盘再 grep，避免 SIGPIPE；
+  round8 脚本 sample 选择用 `find -print -quit`。
+
+### 首启引导（Web UI）
+
+- host 新增 `/plugins/claude2dsh/import`（loopback-only POST）：
+  path 必填，preview/includeSubagents 可选，返回 SessionImportReport。
+- settings schema 新增 `ui.language`（`zh` 默认，`en` 可选）。
+- Settings 页首屏为迁移向导：语言 → 会话目录 → 预览导入 → 执行导入 →
+  结果显示；其余区块中英双语。Playwright 实测：
+  - 中文默认文案 `首次迁移向导 / 语言 / 预览导入 / 执行导入`；
+  - 填第二个真实备份会话并点 `执行导入` 后显示
+    `新导入=1 已存在=0 追加=0 跳过=0 失败=0` 和 imported 行；
+  - Session sources 表格即时出现该会话 `claude-main`。
+- 修复：preview 项不再计入 `skipped`，报告新增 `previewed`。
+
+### 空环境有头验收
+
+- 新增 `scripts/e2e-round8-web.sh`：隔离 DSH_HOME 安装
+  plugin+web-app、启动 Web、校验 Settings endpoint、boot graph 含
+  `@claude2dsh/plugin` client、POST import preview 返回 `preview`。
+  当前代码（local link）输出 `ROUND8_OK settings=false client-entry=yes
+preview=preview`。真实 registry 版可用
+  `CLAUDE2DSH_PLUGIN_SPEC=@claude2dsh/plugin@<version>` 重跑。
+
+### 回归
+
+- 根 `pnpm run check`、workspace build/typecheck、core 8/adapter 13/
+  plugin 30 全绿。
+- e2e R1/R2/R3/R4/R7/R8 全绿；真实模型调用 0 轮。
