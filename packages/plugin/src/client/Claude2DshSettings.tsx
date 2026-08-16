@@ -3,6 +3,15 @@
 import { useCallback, useEffect, useState } from 'react'
 
 const SETTINGS_PATH = '/plugins/claude2dsh/settings'
+const SOURCES_PATH = '/plugins/claude2dsh/session-sources'
+
+interface SessionSourceRecord {
+  sessionId: string
+  kind: string
+  sourcePath: string
+  parentSession?: string
+  recordedAt: number
+}
 
 interface SettingsShape {
   autoSync: { enabled: boolean; claudeProjectsRoot: string; debounceMs: number; dshToClaude: boolean }
@@ -30,6 +39,7 @@ export function Claude2DshSettings(): React.JSX.Element {
   const [value, setValue] = useState<SettingsShape>(empty)
   const [error, setError] = useState<string | undefined>()
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [sources, setSources] = useState<SessionSourceRecord[]>([])
 
   const load = useCallback(async () => {
     try {
@@ -45,6 +55,15 @@ export function Claude2DshSettings(): React.JSX.Element {
   }, [])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void fetch(SOURCES_PATH, { method: 'GET' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+        return response.json() as Promise<{ sessions: Record<string, SessionSourceRecord> }>
+      })
+      .then((body) => setSources(Object.values(body.sessions).sort((a, b) => a.sessionId.localeCompare(b.sessionId))))
+      .catch(() => setSources([]))
+  }, [])
 
   const patch = (update: (draft: SettingsShape) => SettingsShape): void => {
     setValue((draft) => update(draft))
@@ -99,6 +118,24 @@ export function Claude2DshSettings(): React.JSX.Element {
         <div style={row}><span style={label}>hooks.json path</span><input style={input} value={value.hooks.configPath} onChange={(event) => patch((draft) => ({ ...draft, hooks: { ...draft.hooks, configPath: event.target.value } }))} /></div>
         <div style={row}><span style={label}>Plugin root</span><input style={input} value={value.hooks.pluginRoot} onChange={(event) => patch((draft) => ({ ...draft, hooks: { ...draft.hooks, pluginRoot: event.target.value } }))} /></div>
         <div style={row}><span style={label}>Project dir</span><input style={input} value={value.hooks.projectDir} onChange={(event) => patch((draft) => ({ ...draft, hooks: { ...draft.hooks, projectDir: event.target.value } }))} /></div>
+      </section>
+
+      <section style={card}>
+        <h3 style={{ margin: 0 }}>Session sources</h3>
+        {sources.length === 0 ? <p style={{ margin: 0, fontSize: 12 }}>No imported sessions recorded yet.</p> : (
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+            <thead><tr>{['sessionId', 'kind', 'sourcePath'].map((head) => <th key={head} style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' }}>{head}</th>)}</tr></thead>
+            <tbody>
+              {sources.map((item) => (
+                <tr key={item.sessionId}>
+                  <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' }}>{item.sessionId}</td>
+                  <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' }}>{item.kind}</td>
+                  <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)', wordBreak: 'break-all' }}>{item.sourcePath}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <div style={{ display: 'flex', gap: 10 }}>

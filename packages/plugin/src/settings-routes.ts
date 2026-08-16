@@ -3,8 +3,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SettingsRuntime } from './settings-service.ts'
+import { loadSessionSourceMap } from './session-sources.ts'
 
 export const CLAUDE2DSH_SETTINGS_PATH = '/plugins/claude2dsh/settings'
+export const CLAUDE2DSH_SESSION_SOURCES_PATH = '/plugins/claude2dsh/session-sources'
 
 function trustedRequest(req: IncomingMessage): boolean {
   const remote = req.socket.remoteAddress
@@ -64,5 +66,21 @@ export function registerClaude2dshSettingsRoutes(ctx: Context, runtime: Settings
       }
     },
   })
-  ctx.effect(() => dispose, 'claude2dsh: settings routes')
+  const disposeSources = webServer.register({
+    kind: 'exact',
+    path: CLAUDE2DSH_SESSION_SOURCES_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+      if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+      try {
+        json(res, 200, { sessions: (await loadSessionSourceMap()).sessions })
+      } catch (error) {
+        json(res, 500, { error: safeMessage(error) })
+      }
+    },
+  })
+  ctx.effect(() => () => {
+    dispose()
+    disposeSources()
+  }, 'claude2dsh: settings routes')
 }
