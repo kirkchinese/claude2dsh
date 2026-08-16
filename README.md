@@ -24,6 +24,8 @@ dsh plugin --profile claude2dsh add @claude2dsh/plugin
 
 The profile installs `@deepseek-ai/dsh-base` automatically and adds `@claude2dsh/plugin` as a bundle. Restart DSH after installation.
 
+Headless profiles only expose tools; the Settings UI needs a web-capable profile. Either add the plugin to your existing web profile (`dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.1` then `dsh web`), or add `@deepseek-ai/dsh-web-app@0.1.0-rc.6` to the same profile and boot it with a free port. The web Settings page appears under **Settings → Claude2DSH**.
+
 ## Capabilities
 
 | Tool                          | Behavior                                                                                                                                                                                                                                                                                                                              |
