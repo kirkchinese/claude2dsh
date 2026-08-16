@@ -645,3 +645,12 @@ e2e 全绿（ROUND1/2/3/4/7）；真实模型调用 0 轮。
   plugin tarball 含 `lib/client.js`。
 - 回归：根 check、workspace build/typecheck、core 8/adapter 13/plugin 30、
   e2e R1/R2/R3/R4/R7 全绿；`DSH_COMPAT_OK`。未发布、未打 tag。
+
+### 0.2.0-rc.1 实际发布尝试（失败即停）
+
+- 用户确认「Publish npm + GitHub pre-release」。
+- 四个 tarball 已 pack；`npm publish claude2dsh-0.2.0-rc.1.tgz` 返回
+  `E403 Two-factor authentication ... required`。
+- 按失败即停：未发布任何包、未 push、未打 tag；`npm view` 复核三包
+  latest 仍 0.1.0，`claude2dsh` 仍 404。等待可用 OTP / bypass-2FA
+  granular token 后继续。
