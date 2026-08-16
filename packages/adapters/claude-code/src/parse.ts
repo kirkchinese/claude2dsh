@@ -81,6 +81,13 @@ function extractUserPrompt(content: unknown): { prompt?: string; promptBlocks?: 
   const blocks: NormalizedContentBlock[] = []
   let imageCount = 0
   for (const block of content) {
+    if (typeof block === 'string') {
+      if (block.length > 0) {
+        parts.push(block)
+        blocks.push({ type: 'text', text: block })
+      }
+      continue
+    }
     if (typeof block !== 'object' || block === null) continue
     const raw = block as RawJson
     if (raw.type === 'text' && typeof raw.text === 'string' && raw.text.length > 0) {
@@ -106,6 +113,10 @@ function mapAssistantBlocks(content: unknown, step: MutableStep): void {
   }
   if (!Array.isArray(content)) return
   for (const block of content) {
+    if (typeof block === 'string') {
+      step.content.push({ type: 'text', text: block })
+      continue
+    }
     if (typeof block !== 'object' || block === null) continue
     const raw = block as RawJson
     switch (raw.type) {

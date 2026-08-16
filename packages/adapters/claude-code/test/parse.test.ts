@@ -190,3 +190,23 @@ test('keeps base64 image blocks as degraded image content in user prompts', asyn
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('accepts string items in user and assistant content arrays', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-parse-string-blocks-'))
+  const sessionId = 'bbbbbbbb-aaaa-4ccc-8ddd-eeeeeeeeeeee'
+  const file = join(dir, `${sessionId}.jsonl`)
+  try {
+    await writeFile(file, [
+      { type: 'mode', mode: 'normal', sessionId },
+      { type: 'user', uuid: 'u1', parentUuid: null, isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:00.000Z', message: { role: 'user', content: ['hello from string block'] } },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'assistant', model: 'm', content: ['assistant from string block'] } },
+    ].map((record) => JSON.stringify(record)).join('\n') + '\n')
+    const parsed = await readClaudeSession({ ref: file, sourceId: sessionId })
+    assert.equal(parsed.session.turns.length, 1)
+    assert.equal(parsed.session.turns[0]?.prompt, 'hello from string block')
+    assert.equal(parsed.session.turns[0]?.steps[0]?.content[0]?.type, 'text')
+    assert.equal(parsed.session.turns[0]?.steps[0]?.content[0]?.text, 'assistant from string block')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

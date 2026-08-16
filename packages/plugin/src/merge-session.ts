@@ -1,10 +1,13 @@
 /** Explicit three-way merge for sessions that grew on both sides. */
-import { basename, join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionHeader } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { synthesizeDshSession, tailSessionEvents, planTurnMerge } from '@claude2dsh/core'
-import { readClaudeSession } from '@claude2dsh/adapter-claude-code'
+import type { ForeignSessionView } from '@claude2dsh/core'
+import { readClaudeSession, serializeClaudeJsonl, slugifyClaudeCwd } from '@claude2dsh/adapter-claude-code'
 import { loadRegistry, resolveDshHome } from './registry.ts'
 import { loadImageMap, saveImageMap } from './image-map.ts'
 import { loadSidecarMap, writeSidecarMap } from './sidecar.ts'
@@ -20,6 +23,11 @@ export interface MergeSessionArgs {
   readonly dryRun?: boolean
 }
 
+export interface MergeDshToClaudeArgs {
+  readonly sessionId: string
+  readonly dryRun?: boolean
+}
+
 export interface MergeSessionResult {
   readonly status: 'merged' | 'dry-run' | 'no-new-turns' | 'no-claude-growth' | 'no-dsh-growth'
   readonly reason?: string
@@ -30,6 +38,7 @@ export interface MergeSessionResult {
   readonly claudeTurns?: number[]
   readonly dshTurns?: number[]
   readonly conflicts?: number
+  readonly filePath?: string
 }
 
 function targetSuffix(existing: ReadonlySet<string>, baseId: string): string {
@@ -138,4 +147,61 @@ export async function mergeClaudeSession(ctx: Context, args: MergeSessionArgs, d
   }, dshHome)
 
   return { status: 'merged', sessionId: args.sessionId, mergedSessionId: mergedId, ...base }
+}
+
+/**
+ * Merge DSH-side and Claude-copy growth after the export watermark. The
+ * original export copy is never mutated; the result is a new Claude JSONL in
+ * the same export directory. Same-turn conflicts remain in the merged DSH log
+ * as both turns plus a todo marker; the Claude serializer projects model
+ * messages from both versions and the merge-map records the conflict.
+ */
+export async function mergeDshToClaude(ctx: Context, args: MergeDshToClaudeArgs, dshHome = resolveDshHome()): Promise<MergeSessionResult> {
+  const registry = await loadRegistry(dshHome)
+  const mapping = registry.exports[args.sessionId]
+  if (mapping === undefined) throw new Error(`no export mapping for session ${args.sessionId}; run claude2dsh_export first`)
+
+  const [parsed, stored] = await Promise.all([
+    readClaudeSession({ ref: mapping.filePath, sourceId: mapping.sessionUuid }),
+    sessionEvents(ctx, args.sessionId),
+  ])
+  const synthesized = synthesizeDshSession(parsed.session)
+  const claudeTail = tailSessionEvents(synthesized.events, { fromTurn: mapping.lastWrittenTurn + 1, fromSeq: mapping.lastWrittenSeq })
+  if (claudeTail.events.length === 0) {
+    return { status: 'no-claude-growth', reason: claudeTail.droppedIncompleteTurn ? 'new final turn is incomplete' : 'no complete Claude turns after the export watermark', sessionId: args.sessionId }
+  }
+  if (stored.events.length <= mapping.lastWrittenSeq) {
+    return { status: 'no-dsh-growth', reason: 'DSH log has no events after the export watermark', sessionId: args.sessionId }
+  }
+
+  const plan = planTurnMerge(stored.events as never[], mapping.lastWrittenSeq, claudeTail.events as never[])
+  const base = summarizePlan(plan)
+  const view: ForeignSessionView = {
+    id: args.sessionId,
+    createdAt: stored.meta.createdAt,
+    ...(stored.meta.cwd !== undefined ? { cwd: stored.meta.cwd } : {}),
+    events: plan.events as unknown as ForeignSessionView['events'],
+  }
+  const sessionUuid = randomUUID()
+  const out = serializeClaudeJsonl(view, { sessionUuid })
+  const slug = slugifyClaudeCwd(stored.meta.cwd ?? process.cwd())
+  const mergedPath = join(dirname(mapping.filePath), `${mapping.sessionUuid}.merged-${Date.now()}.jsonl`)
+
+  if (args.dryRun === true) {
+    return { status: 'dry-run', reason: 'merged Claude copy computed; no write performed', sessionId: args.sessionId, filePath: mergedPath, ...base }
+  }
+  await mkdir(dirname(mergedPath), { recursive: true })
+  await writeFile(mergedPath, out.jsonl, { flag: 'wx' })
+  await saveMergeRecord({
+    direction: 'dsh-to-claude',
+    originalSessionId: args.sessionId,
+    resultSessionId: sessionUuid,
+    filePath: mergedPath,
+    mergedAt: Date.now(),
+    baseEvents: plan.baseEvents,
+    claudeTurns: plan.claudeTurns,
+    dshTurns: plan.dshTurns,
+    conflicts: plan.conflicts.map((conflict) => ({ turn: conflict.turn, claudeEvents: conflict.claude.events.length, dshEvents: conflict.dsh.events.length })),
+  }, dshHome)
+  return { status: 'merged', sessionId: args.sessionId, mergedSessionId: sessionUuid, filePath: mergedPath, ...base }
 }

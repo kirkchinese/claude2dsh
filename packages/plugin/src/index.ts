@@ -25,7 +25,7 @@ import { importGlobalClaudeContext } from './context-import.ts'
 import { importClaudeMemory } from './memory-import.ts'
 import { loadSidecarMap } from './sidecar.ts'
 import { loadSessionSourceMap, saveSessionSource } from './session-sources.ts'
-import { mergeClaudeSession } from './merge-session.ts'
+import { mergeClaudeSession, mergeDshToClaude } from './merge-session.ts'
 import { createSettingsRuntime } from './settings-service.ts'
 import { registerClaude2dshSettingsRoutes } from './settings-routes.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
@@ -236,13 +236,16 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       'dryRun:true computes the merged copy without writing.',
     ].join('\n'),
     parameters: {
-      sessionId: { type: 'string', required: true, description: 'DSH session id owned by a claude2dsh import record.' },
-      path: { type: 'string', description: 'Optional explicit Claude source path; defaults to the import record.' },
-      dryRun: { type: 'boolean', description: 'Compute and report without creating the merged session.' },
+      sessionId: { type: 'string', required: true, description: 'DSH session id owned by a claude2dsh import or export record.' },
+      direction: { type: 'string', enum: ['claude-to-dsh', 'dsh-to-claude'], description: 'Merge into a new DSH session (default) or into a new Claude JSONL copy.' },
+      path: { type: 'string', description: 'Optional explicit Claude source path; claude-to-dsh only, defaults to the import record.' },
+      dryRun: { type: 'boolean', description: 'Compute and report without creating the merged copy.' },
     },
     output: jsonToolOutput(),
     async execute(args) {
-      const result = await mergeClaudeSession(ctx, args, resolveDshHome())
+      const result = args.direction === 'dsh-to-claude'
+        ? await mergeDshToClaude(ctx, args, resolveDshHome())
+        : await mergeClaudeSession(ctx, args, resolveDshHome())
       return result as unknown as JsonValue
     },
   }))

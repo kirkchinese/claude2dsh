@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -8,7 +8,7 @@ import { Session } from '@deepseek-ai/dsh-session'
 import { synthesizeDshSession } from '@claude2dsh/core'
 import { readClaudeSession } from '@claude2dsh/adapter-claude-code'
 import { importClaudeSessions } from '../src/session-import.ts'
-import { mergeClaudeSession } from '../src/merge-session.ts'
+import { mergeClaudeSession, mergeDshToClaude } from '../src/merge-session.ts'
 
 const sessionId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 
@@ -98,6 +98,50 @@ test('dry-run never creates a session', async () => {
     const result = await mergeClaudeSession(ctx as unknown as Context, { sessionId: targetId, dryRun: true }, home)
     assert.equal(result.status, 'dry-run')
     assert.equal(created, 0)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('dsh-to-claude merge writes a new copy and never mutates the export mapping file', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'c2dsh-merge-export-'))
+  const home = join(dir, 'dsh-home')
+  const file = join(dir, `${sessionId}.jsonl`)
+  try {
+    await writeFile(file, claudeRecords().map((record) => JSON.stringify(record)).join('\n') + '\n')
+    await mkdir(join(home, 'claude2dsh'), { recursive: true })
+    await writeFile(join(home, 'claude2dsh', 'registry.json'), JSON.stringify({ version: 1, imports: {}, exports: {} }))
+    const live = { sessionPersistence: { async list() { return [] }, async create() {}, async append() {} } }
+    await importClaudeSessions(live as unknown as Context, { path: file }, home)
+    const targetId = `claude-${sessionId}`
+    const baseEvents = synthesizeDshSession((await readClaudeSession({ ref: file, sourceId: sessionId })).session).events
+    let storedEvents = baseEvents
+    const ctx = {
+      sessionPersistence: {
+        async list() { return [{ id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }] },
+        async readFrom() { return { meta: { id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }, events: storedEvents } },
+        async create() {},
+        async append() {},
+      },
+    }
+    const exported = await (await import('../src/export-claude.ts')).exportClaudeSession(ctx as unknown as Context, { sessionId: targetId }, home)
+    assert.equal(exported.status, 'exported')
+    const exportFile = exported.filePath as string
+    // Claude copy grows a second turn, chained from its real last record.
+    const before = await readFile(exportFile, 'utf8')
+    const lastRecord = before.trim().split('\n').at(-1)
+    const last = lastRecord === undefined ? null : JSON.parse(lastRecord) as { uuid?: string; sessionId?: string }
+    const lastUuid = last?.uuid ?? null
+    const exportSessionId = last?.sessionId ?? lastUuid
+    assert.ok(typeof lastUuid === 'string' && typeof exportSessionId === 'string')
+    const extra = [{ ...claudeRecords('copy-next')[1], uuid: 'z0', parentUuid: lastUuid, sessionId: exportSessionId }, { ...claudeRecords('copy-next')[2], uuid: 'z1', parentUuid: 'z0', sessionId: exportSessionId }]
+    await writeFile(exportFile, before.trimEnd() + '\n' + extra.map((record) => JSON.stringify(record)).join('\n') + '\n')
+    // DSH grows a different turn.
+    storedEvents = [...baseEvents, { type: 'turn/start', seq: baseEvents.length, time: 30, data: { turn: 3 } }, { type: 'turn/end', seq: baseEvents.length + 1, time: 30, data: { turn: 3, reason: { kind: 'completed' } } }]
+    const result = await mergeDshToClaude(ctx as unknown as Context, { sessionId: targetId }, home)
+    assert.equal(result.status, 'merged')
+    assert.ok(result.filePath !== exportFile)
+    assert.equal(await readFile(exportFile, 'utf8'), before.trimEnd() + '\n' + extra.map((record) => JSON.stringify(record)).join('\n') + '\n')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
