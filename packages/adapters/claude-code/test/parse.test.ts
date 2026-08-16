@@ -210,3 +210,23 @@ test('accepts string items in user and assistant content arrays', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('maps string tool_result content into a text block', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-parse-string-toolresult-'))
+  const sessionId = 'cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+  const file = join(dir, `${sessionId}.jsonl`)
+  try {
+    await writeFile(file, [
+      { type: 'mode', mode: 'normal', sessionId },
+      { type: 'user', uuid: 'u1', parentUuid: null, isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:00.000Z', message: { role: 'user', content: 'run tool' } },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'assistant', model: 'm', content: [{ type: 'tool_use', id: 'call_1', name: 'Bash', input: {} }] } },
+      { type: 'user', uuid: 't1', parentUuid: 'a1', isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:02.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: '<persisted-output>\nFull output saved to: /x/tool-results/a.txt\n' }] } },
+    ].map((record) => JSON.stringify(record)).join('\n') + '\n')
+    const parsed = await readClaudeSession({ ref: file, sourceId: sessionId })
+    const result = parsed.session.turns[0]?.steps[0]?.toolResults[0]
+    assert.equal(result?.content[0]?.type, 'text')
+    assert.match(result?.content[0]?.text ?? '', /tool-results\/a\.txt/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
