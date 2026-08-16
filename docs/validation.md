@@ -486,6 +486,9 @@ plugin 18/18）；DSH_COMPAT_OK；四个 e2e 全绿；真实模型调用 0 轮�
   `@claude2dsh/adapter-claude-code@0.1.0`（依赖 core `^0.1.0`）、
   `@claude2dsh/plugin@0.1.0`（依赖 adapter/core `^0.1.0`，
   hook 上游精确 `0.1.0-rc.6`）；files 白名单仍无 src/test/tsconfig。
+- 提交 `ee6c13a`：四包 `repository.url` 修正为真实公开仓库
+  `git+https://github.com/kirkchinese/claude2dsh.git`（旧值指向不存在的
+  `Claude2DSH/Claude2DSH`），pack 后已复核。
 - `npm whoami` = `kirkchinese`；未执行任何 `npm publish`，未创建 tag。
 - 隐私 grep：无真实主目录路径/真实会话 UUID/真实凭据；命中仅为
   文档中的匿名化说明与测试脚本里的 `ANTHROPIC_API_KEY=dummy`。
