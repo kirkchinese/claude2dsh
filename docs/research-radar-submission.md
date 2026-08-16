@@ -44,11 +44,16 @@
 - 已收录于 curated `awesome-dsh-plugin`（Sessions & Messages）。
 - 不声称雷达运行级验证；请雷达按其 k8s 实测流程给出独立状态。
 
-## 用户决定（2026-08-16）
+## 用户决定与执行结果（2026-08-16 更新）
 
-用户认为 curated PR 刚合并、雷达 PR 属小改动，暂不提交。保留本草案，
-依赖雷达 topic 自动发现；若后续需要人工登记或自动发现长期缺失，
-再经用户确认提交。不主动催更、不重复开 PR。
+用户后续确认「刚刚获得同意，可以提交 radar PR」。已按主仓库当前
+`PLUGINS.md` 实际格式（🔌 单插件表，含运行级列）提交：
+
+- PR：https://github.com/AdamPlatin123/awesome-dsh-plugins/pull/205
+- 标题：`docs: 登记 claude2dsh`
+- 分支：`kirkchinese:register-claude2dsh`
+- `maintainer_can_modify=true`；只改 `PLUGINS.md` 一行，运行级填
+  `待测`，未声称验证通过。
 
 ## 纪律
 
