@@ -51,8 +51,10 @@ fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg, null, 2) + 
 console.log('profile manifest bundles:', bundles.join(', '))
 NODE
 
-if ! DSH_HOME="$DSH_HOME" dsh --profile "$PROFILE" --dump-config 2>/dev/null | grep -q 'id: claude2dsh-import'; then
+DSH_HOME="$DSH_HOME" dsh --profile "$PROFILE" --dump-config >"$PROFILE_DIR/dump-config.txt" 2>&1 || true
+if ! grep -q 'id: claude2dsh-import' "$PROFILE_DIR/dump-config.txt"; then
   echo "ERROR: profile $PROFILE did not compose claude2dsh-import" >&2
+  tail -20 "$PROFILE_DIR/dump-config.txt" >&2 || true
   exit 1
 fi
 
