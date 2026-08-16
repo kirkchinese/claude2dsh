@@ -19,7 +19,7 @@ import { syncClaudeSession } from './sync-claude.ts'
 import { importClaudeSkills } from './skills-import.ts'
 import { resolveDshHome } from './registry.ts'
 import { assertDshCompatibility } from './compat.ts'
-import { activateAutoSync, type AutoSyncConfig } from './auto-sync.ts'
+import { activateAutoSync, getAutoSyncState, resumeAutoSync, type AutoSyncConfig } from './auto-sync.ts'
 import { registerImageReprojection } from './image-reproject.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
 
@@ -138,6 +138,29 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
     async execute(args) {
       const result = await syncClaudeSession(ctx, args, resolveDshHome())
       return result as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_autosync',
+    description: [
+      'Inspect or resume the Claude2DSH auto-mirror without editing state files by hand.',
+      'status: show whether mirroring is paused, the pause reason, recent conflicts and the pending work queue.',
+      'resume: clear a conflict pause after the two sides were reconciled with explicit import/sync/force tools.',
+    ].join('\n'),
+    parameters: {
+      action: { type: 'string', required: true, enum: ['status', 'resume'], description: 'status to inspect mirror state, resume to clear a conflict pause.' },
+    },
+    output: jsonToolOutput(),
+    presentCall: (args) => ({ card: 'generic', title: 'Claude2DSH auto-mirror', kind: 'other', rawInput: (args as { action?: unknown }).action }),
+    presentResult: (_args, value) => {
+      const state = value as { paused?: boolean; reason?: string; conflicts?: unknown[]; pending?: unknown[] }
+      return genericResult('Claude2DSH auto-mirror', `paused=${state.paused ?? false} reason=${state.reason ?? 'none'} conflicts=${state.conflicts?.length ?? 0} pending=${state.pending?.length ?? 0}`)
+    },
+    async execute(args) {
+      const action = (args as { action: string }).action
+      const state = action === 'resume' ? await resumeAutoSync(resolveDshHome()) : await getAutoSyncState(resolveDshHome())
+      return state as unknown as JsonValue
     },
   }))
 
