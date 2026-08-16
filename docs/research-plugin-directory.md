@@ -69,3 +69,43 @@ README 已可作 storefront 回退截图来源。
 ## 决策状态
 
 PR 已提交：https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/968
+
+## 2026-08-16 晚更新：PR #968 与 data-driven-list 新格式
+
+实测（`gh pr view 968` + API）：
+
+- PR 状态：`OPEN`；`mergedAt:null`；评论数 0；baseRefName=main；
+  baseRefOid 仍是旧 main `df1d87b6`。
+- main 最新提交 `bccd4d9c`（#970）已将列表迁移为
+  `data/plugins/<owner>__<repo>.yml` + 脚本生成两个 README；
+  旧的"手工改 README"提交方式已废弃。
+- PR 对旧 base 仍显示 `MERGEABLE/CLEAN`，但内容基于旧格式，合并到
+  新 main 后不会出现在生成列表的正确位置；条目不在列表的原因 =
+  **PR 未合并，且仓库格式已改，旧式 PR 不再适配**。
+- `contributing.md` 新要求：一个 PR 只新增一个
+  `data/plugins/kirkchinese__claude2dsh.yml`，并运行
+  `npm ci && node scripts/generate-readme.mjs` 后提交生成的两个 README；
+  CI 自动检查 `dsh.bundle`、仓库年龄/提交数、awesome-lint 与站点构建。
+
+按新格式准备的条目（`data/plugins/kirkchinese__claude2dsh.yml`）：
+
+```yaml
+url: https://github.com/kirkchinese/claude2dsh
+name: kirkchinese/claude2dsh
+category: session
+description:
+  en: Import Claude Code sessions, skills and plugin assets into DSH as native resumable sessions, and export or sync DSH sessions back to Claude Code JSONL.
+  zh: 将 Claude Code 会话、技能与插件资产导入为 DSH 原生可续聊会话，并支持将 DSH 会话导出或同步回 Claude Code JSONL。
+```
+
+后续选项与代价：
+
+1. **更新 PR #968 到新格式（推荐）**：rebase 分支到新 main，用上面的
+   YAML + 生成的 README 替换旧的两行手工修改，force-push 同一分支。
+   代价约 0.5 小时，不新增评论，符合新 contributing 规范。
+2. 等待维护者处理：PR 当前对新 main 已过时，等待大概率被要求改格式；
+   代价是不确定等待时间。
+3. 关闭后重开：会丢失现有 PR 链接与 review 记录（当前 0 评论，
+   损失小），不如直接 force-push。
+
+具体动作需用户确认后执行。
