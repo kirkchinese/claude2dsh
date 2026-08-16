@@ -6,6 +6,7 @@
 `/tmp/claude2dsh-source-backup`，可用 `CLAUDE2DSH_SOURCE_BACKUP` 覆盖）。
 
 验证变量（一次只测一个）：
+
 1. 工作区 `pnpm -r build && pnpm -r typecheck && pnpm -r test` 全绿。
 2. 隔离 DSH_HOME（mktemp）+ base-only profile + `@claude2dsh/plugin`
    本地 link，`dsh --profile claude2dsh-e2e` 启动，`--dump-config` 能看到
@@ -13,6 +14,7 @@
 3. env 门控 seam 导入备份 projects 全量 + skills 全量并写报告。
 
 真实数据结果（58 个主转录、39 个技能）：
+
 - 报告 `imported=57 skipped=1 failed=0`；skip 证据为
   `171f5c9a-...jsonl` 仅含 mode/permission-mode/system/last-prompt，
   无 user/assistant 可导入记录。
@@ -35,6 +37,7 @@
 复现命令：`bash scripts/e2e-round2-claude-recognition.sh`。
 
 真实数据结果（样例会话 `351f7946-...`）：
+
 - 导入 DSH 后经 `claude2dsh_export` 导出到隔离
   `$DSH_HOME/claude2dsh/exports`；`recordCount=57`、toolCalls=22、
   toolResults=22、droppedToolResults=0。
@@ -53,6 +56,7 @@
 复现命令：`bash scripts/e2e-round3-bidirectional.sh`。
 
 方向 A（Claude 继续 → DSH 识别）：
+
 - 把样例会话复制到隔离目录并导入（turns=6、events=144、DSH 原生
   inspect 通过）。
 - 向复制源追加 1 个完整 Claude 轮次（新 user/assistant、parentUuid 链
@@ -61,6 +65,7 @@
   `sessionPersistence.inspect` 原生读取 150 个事件成功。
 
 方向 B（DSH 继续 → Claude Code 识别）：
+
 - 导入 + `claude2dsh_export` 生成安全副本；导出后经测试 seam 向 DSH 日志
   append 1 个完整轮次（6 个事件），再执行 `claude2dsh_sync`（默认
   target=copy）。
@@ -72,11 +77,13 @@
   DSH 端继续的新轮次。
 - 原始 `~/.claude` 写回路径仍受 `allowOriginalClaudeDir` 显式开关保护，
   默认 target=copy 只写 `$DSH_HOME/claude2dsh/exports`。
+
 ## R4 子代理/工作流转录
 
 复现命令：`bash scripts/e2e-round4-subagents.sh`。
 
 真实数据结果（58 主转录 + 725 subagent/workflow agent 转录）：
+
 - `includeSubagents:true` 导入报告 total=783，imported=782，skipped=1，
   failed=0。
 - DSH 原生 `sessionPersistence.list()` 返回 782；782 个 `inspect()` 全部
@@ -135,7 +142,7 @@
    DSH API 轮次（此前一次未配 provider/model 的失败尝试在模型调用前
    即错误退出，不计 API 调用）。
 5. `CLAUDE2DSH_TEST_SYNC=1` 回写导出副本：`synced, appendedTurns=1,
-   appendedEvents=24, appendedRecords=2`。
+appendedEvents=24, appendedRecords=2`。
 6. 把同步后副本拷入隔离 Claude home
    `/tmp/c2dsh-live-claude-resume-home`，真实
    `claude --resume 4b8eafd1-... --print "Continue with exactly: claude-pong"`
@@ -152,6 +159,7 @@
 ### 复现命令
 
 见 `/tmp` 实验目录与本节字段；核心命令模式：
+
 ```sh
 # Claude 新建（隔离）
 cd /tmp/c2dsh-live-work && CLAUDE_CONFIG_DIR=/tmp/c2dsh-live-claude-home \
@@ -267,7 +275,7 @@ CLAUDE_CONFIG_DIR=/tmp/c2dsh-live-claude-resume-home \
 - `npm whoami` = `kirkchinese`；registry 可访问。
 - 依次尝试从 core 开始：`npm publish --access public` 返回
   `E403 ... Two-factor authentication or granular access token with
-  bypass 2fa enabled is required to publish packages.`。
+bypass 2fa enabled is required to publish packages.`。
 - 失败后立即停止，未尝试 adapter/plugin。
 - `npm view` 三包均 404，确认 **没有任何包被发布**。
 - 结论：对外 npm 发布与任务 6 的真实 registry 空环境验收当前不可执行；
@@ -318,6 +326,7 @@ dsh --profile smoke
 ```
 
 实测：
+
 - `dsh plugin add` 解析到 `@claude2dsh/plugin@0.1.0-rc.2`，pnpm 从
   registry 安装成功。
 - dump-config 出现 `claude2dsh-import` 与 hook bridge 行。
@@ -343,3 +352,108 @@ dsh --profile smoke
 - PR：https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/968
 - 修改内容：README.md 与 README.zh.md 各新增一行（Sessions & Messages /
   会话与消息），无其他改动。
+
+## R11 第六轮完善：仓库卫生、双向并发底线、镜像转正、hook/UI 形式化（2026-08-16）
+
+### 前提核验与回归
+
+- 轮次开始时 HEAD=`98c97cf`；工作区除未跟踪的
+  `docs/prompt-round5.md`/`docs/prompt-round6.md` 外干净。
+- README 第 75 行防御性措辞已删除，替换为中性 MIT 许可 +
+  对 `dsh-chat-import`（MIT）与 `dsh-claude-move`（Apache-2.0）的致谢；
+  全文复查无同类表述。
+- 四个 e2e 本轮修改完成后复跑全绿：
+  `ROUND1_OK`（57 imported/0 already + skills）、`ROUND2_OK`、
+  `ROUND3_OK`、`R4_OK imported=782`。
+
+### awesome-dsh-plugin PR #968 实测（本日最新）
+
+- `gh pr view 968`：state=OPEN、mergedAt=null、评论 0；
+  baseRefOid 仍为旧 main `df1d87b6`。
+- main 已合并 #970（`bccd4d9c`），列表迁到
+  `data/plugins/<owner>__<repo>.yml`，README 由脚本生成。
+- 结论：条目不在列表 = 未合并，且旧式"手工改两个 README"的 PR 已
+  落后于新格式；新格式候选条目与后续选项记录在
+  `docs/research-plugin-directory.md`（动作等用户确认）。
+
+### 仓库卫生五件套
+
+| 项                        | 证据                                                                                                                                                                                                      |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 根 AGENTS.md              | 已替换为 Claude2DSH 项目开发说明；旧 148 行 DSH 官方仓库拷贝不再存在，权限已修复                                                                                                                          |
+| GitHub Actions            | `.github/workflows/ci.yml`：push 触发根 check + workspace build/typecheck/test + `scripts/check-dsh-compat.mjs` job                                                                                       |
+| DSH 兼容自检              | `compat.ts` 启动时检查 `@deepseek-ai/dsh-session` peer `0.1.x(rc>=6)` 与 `SESSION_FORMAT_VERSION===0`；单测覆盖 fail-loud；`node scripts/check-dsh-compat.mjs` 实测输出 `DSH_COMPAT_OK newest 0.1.0-rc.6` |
+| plugin-inventory 路径清洗 | `safeSegment/safeSkillName` 拒绝 `..`、绝对路径与非安全段；新增路径穿越测试通过                                                                                                                           |
+| CHANGELOG                 | 自 rc.1 起记录，含 rc.1 deprecate 原因、rc.2 发布、Unreleased 本轮改动                                                                                                                                    |
+
+### 双向并发：底线已实施并测试
+
+- 检测逻辑：源文件相对 registry 水印变化且 DSH 已存事件数
+  `> recorded events` → `status=conflict`；`append`/`create` 永不调用。
+- 测试证据（`packages/plugin/test/`，共 18/18 pass）：
+  - 双端各自增长 → conflict，append 计数保持首次导入的 1；
+  - 同轮双改 + 交错 tool_result → conflict；
+  - watcher 真实激活注入 conflict → 状态暂停、冲突记录落盘、
+    源文件字节不变、append=0；
+  - 持久化 pending 队列跨重启，激活后 drain 并转为暂停。
+- 自动镜像暂停后 `claude2dsh_autosync` 工具可 `status`/`resume`。
+- 增强（按轮三路合并、同轮双改保双方）设计见
+  `docs/design-bidirectional-merge.md`，是否实施待用户确认。
+
+### auto-mirror 转正验收
+
+| 验收项            | 结果                                                                                                                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| live-session 跳过 | `isLiveSession` 通过 `ctx.sessions.get` 判断，turn/end 时跳过并记日志                                                                                                                    |
+| 队列持久化        | `auto-sync-state.json` 原子写；pending 项重启后由 `processPendingQueue` drain（测试通过）                                                                                                |
+| 可观测性          | 启动/暂停/跳过/同步均有 `[claude2dsh] auto-*` 日志；`claude2dsh_autosync status` 输出 paused/reason/conflicts/pending；UI card 实测输出 `paused=false reason=none conflicts=0 pending=0` |
+| 失败注入          | 新增 `test/auto-sync.test.ts`：真实 chokidar 路径注入双端增长 → pause + report + 两侧零写入                                                                                              |
+| 双端并发          | conflict → 自动镜像暂停，不丢任一侧                                                                                                                                                      |
+| 文档              | 代码与 README/plugin README/roadmap/CHANGELOG 均移除 auto-mirror beta 标注                                                                                                               |
+
+### hook bridge 形式化
+
+- 上游版本锁定：`@deepseek-ai/dsh-hooks-claude-code` 固定
+  `0.1.0-rc.6`（精确版本，非 range），pnpm-lock 锁定。
+- 配置校验 fail loud 实测（真实 DSH boot）：
+  `printf '{ bad json' > /tmp/claude2dsh-bad-hooks.json` +
+  `CLAUDE2DSH_HOOKS_CONFIG=/tmp/claude2dsh-bad-hooks.json dsh --profile ...`
+  → exit=1，输出
+  `claude2dsh hook bridge: invalid JSON in /tmp/claude2dsh-bad-hooks.json`。
+- 错误浮现会话层机制证据：上游 `dsh-hook-protocol` 的
+  `appendHookInvoked/appendHookResult` 把每次 hook 的
+  `hook/invoked`+`hook/result`（含 decision/exitCode/stderrSummary/
+  durationMs）写入会话日志；见本机 rc.6 安装产物
+  `lib/types/events.d.ts` 与 `lib/index.js` 的 `appendHookResult`。
+- 测试：坏 JSON/坏结构带路径 fail-loud；合法 hooks 对象通过。
+- 文档如实标注 7/30、command-only；全兼容仍在 roadmap #7。
+
+### UI 最小集验收
+
+- 机制证据与候选清单见 `docs/research-ui.md`。
+- 最小集 = 官方 `presentCall/presentResult` generic card，无 web client。
+- 真实 boot 探针（`CLAUDE2DSH_TEST_PRESENTERS=1`，隔离 DSH_HOME）实测：
+  - importCall：`card=generic, title="Import Claude Code sessions"`；
+  - importResult：`card=generic, title="Claude Code import"`,
+    `text="imported=1 already=0 appended=0 skipped=0 failed=0"`；
+  - autoSyncCall/autoSyncResult：`card=generic,
+title="Claude2DSH auto-mirror"`，结果摘要解析出 paused/reason/
+    conflicts/pending。
+- 修复：`presentResult` 收到的第二参数是 `ToolResult`，三张 result card
+  均改为解析 `content[0].text` 的 JSON（此前 sync/autosync card 会读错
+  对象形状）。
+
+### 本轮最终回归命令与结果
+
+```sh
+pnpm run check
+pnpm -r build && pnpm -r typecheck && pnpm -r test
+node scripts/check-dsh-compat.mjs
+bash scripts/e2e-round1.sh
+bash scripts/e2e-round2-claude-recognition.sh
+bash scripts/e2e-round3-bidirectional.sh
+bash scripts/e2e-round4-subagents.sh
+```
+
+结果：根 check 全绿；workspace 全绿（core 4/4、adapter 11/11、
+plugin 18/18）；DSH_COMPAT_OK；四个 e2e 全绿；真实模型调用 0 轮。
