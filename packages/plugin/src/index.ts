@@ -23,6 +23,7 @@ import { activateAutoSync, getAutoSyncState, resumeAutoSync, type AutoSyncConfig
 import { registerImageReprojection } from './image-reproject.ts'
 import { importGlobalClaudeContext } from './context-import.ts'
 import { importClaudeMemory } from './memory-import.ts'
+import { loadSidecarMap } from './sidecar.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
 
 export const name = 'claude2dsh-import'
@@ -86,6 +87,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       imageMode: { type: 'string', enum: ['auto', 'placeholder', 'native'], description: 'Image policy: auto probes model inputModalities (default), placeholder always degrades safely, native forces attachment blocks.' },
       imageProvider: { type: 'string', description: 'Provider route probed by imageMode auto/native.' },
       imageModel: { type: 'string', description: 'Model id probed by imageMode auto/native.' },
+      sidecarMaxBytes: { type: 'number', description: 'Per-file byte cap for tool-result .txt sidecars; larger files are mapped but not copied.' },
       force: { type: 'boolean', description: 'Create a fresh DSH session copy under a new id when the source changed or already exists.' },
       preview: { type: 'boolean', description: 'Convert and report without persisting anything.' },
       sessionId: { type: 'string', description: 'Override the target DSH session id for a single-file import.' },
@@ -165,6 +167,32 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       const action = (args as { action: string }).action
       const state = action === 'resume' ? await resumeAutoSync(resolveDshHome()) : await getAutoSyncState(resolveDshHome())
       return state as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_sidecars',
+    description: [
+      'Inspect the durable tool-result sidecar map created by claude2dsh_import.',
+      'action list: return every session whose referenced .txt files were copied, skipped or mapped.',
+      'action resolve: return the DSH-side path for one session filename (the original Claude path reference stays intact).',
+    ].join('\n'),
+    parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'resolve'], description: 'list session maps or resolve one filename.' },
+      sessionId: { type: 'string', description: 'Target DSH session id; defaults to all sessions for list, required for resolve.' },
+      filename: { type: 'string', description: 'Sidecar basename such as b37elc3ww.txt (resolve only).' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const map = await loadSidecarMap(resolveDshHome())
+      if (args.action === 'resolve') {
+        const sessionId = typeof args.sessionId === 'string' ? args.sessionId : ''
+        const filename = typeof args.filename === 'string' ? args.filename : ''
+        const item = map.sessions[sessionId]?.find((candidate) => candidate.filename === filename)
+        if (item === undefined) return { status: 'missing', sessionId, filename } as unknown as JsonValue
+        return item as unknown as JsonValue
+      }
+      return { sessions: map.sessions } as unknown as JsonValue
     },
   }))
 

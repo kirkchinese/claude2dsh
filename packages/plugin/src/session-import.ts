@@ -10,6 +10,7 @@ import { discoverClaudeCodeSessions, readClaudeSession } from '@claude2dsh/adapt
 import { loadRegistry, saveRegistryRecord } from './registry.ts'
 import { applyImagePolicy, type ImageMode } from './image-policy.ts'
 import { buildImageMapEntries, saveImageMap } from './image-map.ts'
+import { copySessionSidecars, findSidecarReferences, type SidecarCopyResult } from './sidecar.ts'
 
 export interface SessionImportArgs {
   readonly path: string
@@ -24,6 +25,8 @@ export interface SessionImportArgs {
   readonly imageProvider?: string
   /** Model id used by `auto`/`native` capability resolution. */
   readonly imageModel?: string
+  /** Per-file size cap in bytes for tool-result .txt sidecars. */
+  readonly sidecarMaxBytes?: number
 }
 
 export interface SessionImportItem {
@@ -37,6 +40,11 @@ export interface SessionImportItem {
   readonly imageMode?: 'native' | 'placeholder'
   readonly imagesSaved?: number
   readonly imagesDegraded?: number
+  readonly sidecarReferenced?: number
+  readonly sidecarCopied?: number
+  readonly sidecarReused?: number
+  readonly sidecarMissing?: number
+  readonly sidecarTooLarge?: number
   readonly reason?: string
   readonly error?: string
 }
@@ -140,6 +148,8 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
 
       const synthesized = synthesizeDshSession(parsed.session)
       const imageEntries = buildImageMapEntries(parsed.session, synthesized.events)
+      const sidecarReferenced = findSidecarReferences(parsed.session, sourcePath).length
+      const sidecarFields = sidecarReferenced > 0 ? { sidecarReferenced } : {}
       if (args.preview === true) {
         pushItem(report, {
           path: sourcePath,
@@ -150,6 +160,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
           toolCalls: synthesized.stats.toolCalls,
           synthesizedToolResults: synthesized.stats.synthesizedToolResults,
           ...imageFields,
+          ...sidecarFields,
         })
         continue
       }
@@ -236,6 +247,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
           continue
         }
         await ctx.sessionPersistence.append(known.targetId as SessionId, tail.events as unknown as SessionEvent[])
+        const sidecarReport = sidecarReferenced > 0 ? await copySessionSidecars(parsed.session, sourcePath, known.targetId, dshHome, args.sidecarMaxBytes) : undefined
         if (imageEntries.length > 0) await saveImageMap(known.targetId, imageEntries, dshHome)
         persisted.add(known.targetId)
         await saveRegistryRecord({
@@ -258,6 +270,8 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
           toolCalls: synthesized.stats.toolCalls,
           synthesizedToolResults: synthesized.stats.synthesizedToolResults,
           ...imageFields,
+          ...sidecarFields,
+          ...sidecarSummary(sidecarReport),
         })
         continue
       }
@@ -267,6 +281,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
       const brandedTargetId = targetId as SessionId
       await ctx.sessionPersistence.create({ ...meta, id: brandedTargetId })
       await ctx.sessionPersistence.append(brandedTargetId, synthesized.events as unknown as SessionEvent[])
+      const sidecarReport = sidecarReferenced > 0 ? await copySessionSidecars(parsed.session, sourcePath, targetId, dshHome, args.sidecarMaxBytes) : undefined
       if (imageEntries.length > 0) await saveImageMap(targetId, imageEntries, dshHome)
       persisted.add(targetId)
       await saveRegistryRecord({
@@ -290,6 +305,8 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
         toolCalls: synthesized.stats.toolCalls,
         synthesizedToolResults: synthesized.stats.synthesizedToolResults,
         ...imageFields,
+        ...sidecarFields,
+        ...sidecarSummary(sidecarReport),
       })
     } catch (error) {
       pushItem(report, {
@@ -301,6 +318,16 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
   }
 
   return report
+}
+
+function sidecarSummary(report: SidecarCopyResult | undefined): { sidecarCopied?: number; sidecarReused?: number; sidecarMissing?: number; sidecarTooLarge?: number } {
+  if (report === undefined) return {}
+  return {
+    sidecarCopied: report.copied,
+    sidecarReused: report.reused,
+    sidecarMissing: report.missing,
+    sidecarTooLarge: report.tooLarge,
+  }
 }
 
 /** Directories the adapter discovered, for diagnostics. */
