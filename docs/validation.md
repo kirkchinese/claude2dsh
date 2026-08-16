@@ -506,15 +506,24 @@ DSH_HOME=$(mktemp -d) dsh plugin --profile smoke add @claude2dsh/plugin@0.1.0
 # GitHub tag + release（与发布 commit 一致）
 ```
 
-### 实际发布尝试（失败即停）
+### 实际发布
 
-- 用户已确认「Publish npm + GitHub release now」。
-- 三个 0.1.0 tarball 已 pack 完成（core/adapter/plugin）。
-- `npm publish <core tarball> --access public` 立即返回：
-  `E403 Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages.`
-- 按失败即停纪律：未尝试 adapter/plugin、未 push、未打 tag。
-- `npm view` 复核三包 versions 仍只有 rc.1/rc.2，`latest` 仍
-  `0.1.0-rc.2`，确认 **0.1.0 未进入 registry**。
-- 后续恢复条件：npm 账号提供 OTP，或使用带 bypass-2fa 权限的
-  granular token（注入方式沿用临时 npmrc，不打印 token），然后从
-  core → adapter → plugin 依次发布 tarball。
+- 第一次尝试（默认 npm 凭据）被 2FA 策略拒绝：
+  `E403 ... Two-factor authentication or granular access token with
+bypass 2fa enabled is required ...`；立即停止，`npm view` 复核
+  registry 未出现 0.1.0。
+- 用户提供 npm 时效令牌后，经权限 600 的临时 npmrc 注入
+  （`npm whoami` = kirkchinese；令牌未打印、未写入仓库）。
+- 按 core → adapter → plugin 顺序用已 pack 的 0.1.0 tarball
+  `npm publish <tgz> --access public`，三包均 `+ published`；
+  `npm view` 确认三包 `latest` 均为 `0.1.0`，versions 含
+  `0.1.0-rc.1/0.1.0-rc.2/0.1.0`。
+- 真实 registry 空环境验收：新 DSH_HOME +
+  `dsh plugin --profile smoke add @claude2dsh/plugin@0.1.0` 成功；
+  导入一个真实备份主会话 `imported=1 failed=0 turns=15 events=247`，
+  `sessionPersistence.inspect` eventCount=247。
+- GitHub 推送被 workflow-scope 门禁拒绝一次；用户通过 device flow
+  （URL + 一次性 code）确认后 `gh auth refresh -s workflow` 完成，
+  `git push origin main` 成功（98c97cf..HEAD）。
+- 临时 npmrc 与临时发布目录在发布确认后会清理；代码中未残留任何
+  令牌。

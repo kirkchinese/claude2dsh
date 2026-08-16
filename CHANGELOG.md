@@ -2,6 +2,12 @@
 
 ## 0.1.0 — 2026-08-16
 
+### Released
+
+- Published to npm: `@claude2dsh/core@0.1.0`,
+  `@claude2dsh/adapter-claude-code@0.1.0`, `@claude2dsh/plugin@0.1.0`;
+  verified with a clean `dsh plugin add` + one-session import.
+
 ### Added
 
 - Bidirectional conflict baseline: when both Claude and DSH sides grew after the last sync watermark, import/sync reports `conflict` and auto-mirror pauses with a persisted record; neither side is overwritten.

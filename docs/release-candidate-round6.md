@@ -42,11 +42,9 @@ plugin 18）、四个 e2e、`npm whoami=kirkchinese`、
 core↔adapter↔plugin 依赖为 `^0.1.0`，无 workspace 协议，hook 上游
 仍精确锁 `0.1.0-rc.6`。
 
-实际发布动作已获用户确认并开始，但 core 发布被 npm 2FA 策略拒绝
-（E403：需要 OTP 或带 bypass-2fa 权限的 granular token）。按失败即停
-纪律，未发布任何包、未 push、未打 tag；registry 上三包仍只有
-rc.1/rc.2。恢复条件：提供 OTP 或具备 bypass-2fa 权限的 token 后，
-从 core → adapter → plugin 依次发布 tarball。
+实际发布已完成：三包 0.1.0 已发布且 `npm view latest` 均为
+`0.1.0`；真实 registry 空环境 quickstart 通过；main 已 push，
+tag `v0.1.0` 已创建（GitHub release 随后创建）。
 
 ## 待用户拍板的四项
 
