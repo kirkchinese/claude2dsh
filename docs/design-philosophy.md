@@ -21,7 +21,7 @@ Claude2DSH 的每一项默认值、每个安装步骤、每段文档都先回答
 
 | 障碍                                              | 现状                                                                         | 设计决策                                                                                                          |
 | ------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| 默认 profile 无 UI                                | quickstart 创建 dsh-base + plugin headless profile，用户"看不到界面"         | 默认改为有头：quickstart/一键脚本默认生成含 dsh-web-app 的 web profile；headless 保留为高级选项并在文档说明。     |
+| 默认 profile 无 UI                                | quickstart 创建 dsh-base + plugin headless profile，用户"看不到界面"         | 默认改为有头且不建立隔离：一键脚本默认装进用户主 `web` profile，安装后就是主要环境；headless 仅作高级选项。       |
 | koffi build script 导致 `dsh plugin add` 返回失败 | pnpm 忽略构建脚本但依赖已装；dsh 的 bundle reconcile 只在 pnpm exit 0 时执行 | 一键安装脚本在 pnpm 非零退出后检查依赖并补齐 `dsh.profile.bundles`；或直接使用已带 web-app 的官方 `web` profile。 |
 | Capabilities 不可操作                             | 只列工具与参数，没有入口/场景/结果                                           | README 重写：每项能力一句话场景 + 入口 + 可见结果。                                                               |
 | autoSync 默认关                                   | 默认关闭，用户不知道何时开启                                                 | 保持默认关（安全），但 Settings 页面顶部给出开关与解释；文档写清开启后果。                                        |
