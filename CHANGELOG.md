@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Foolproof design criteria (`docs/design-philosophy.md`) and rewritten bilingual README with capability how-tos and FAQ.
+- One-command default headed installer (`scripts/install-claude2dsh.sh`) that repairs the profile manifest when pnpm ignores koffi's build script.
+- First-run Web migration guide (language → source → preview → execute → result), Chinese default and bilingual Settings.
+- Round-8 empty-environment headed acceptance script.
+
+### Changed
+
+- Import preview reports `previewed` separately instead of counting previews as skipped.
+
 ## 0.2.0-rc.1 — 2026-08-16
 
 ### Added
