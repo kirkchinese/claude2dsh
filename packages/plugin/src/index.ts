@@ -44,6 +44,15 @@ const SKILLS_IMPORT_DESCRIPTION = [
   'Source skills are symlinks in real Claude layouts, so files are dereferenced and copied.',
 ].join('\n')
 
+function genericResult(title: string, summary: string): { card: 'generic'; title: string; content: { type: 'text'; text: string }[] } {
+  return { card: 'generic', title, content: [{ type: 'text', text: summary }] }
+}
+
+function importResultView(_args: unknown, value: unknown): { card: 'generic'; title: string; content: { type: 'text'; text: string }[] } {
+  const report = value as { imported?: number; alreadyImported?: number; appended?: number; skipped?: number; failed?: number; total?: number }
+  return genericResult('Claude Code import', `imported=${report.imported ?? 0} already=${report.alreadyImported ?? 0} appended=${report.appended ?? 0} skipped=${report.skipped ?? 0} failed=${report.failed ?? 0}`)
+}
+
 function jsonToolOutput(): { schema: { type: 'json' }; render: (args: unknown, value: unknown) => { type: 'text'; text: string }[] } {
   return {
     schema: { type: 'json' as const },
@@ -74,6 +83,8 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       sessionId: { type: 'string', description: 'Override the target DSH session id for a single-file import.' },
     },
     output: jsonToolOutput(),
+    presentCall: (args) => ({ card: 'generic', title: 'Import Claude Code sessions', kind: 'other', rawInput: (args as { path?: unknown }).path }),
+    presentResult: importResultView,
     async execute(args) {
       const report = await importClaudeSessions(ctx, args)
       return report as unknown as JsonValue
@@ -115,6 +126,11 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       dryRun: { type: 'boolean', description: 'Compute and validate the append without writing.' },
     },
     output: jsonToolOutput(),
+    presentCall: (args) => ({ card: 'generic', title: 'Sync DSH session to Claude Code', kind: 'other', rawInput: (args as { sessionId?: unknown }).sessionId }),
+    presentResult: (_args, value) => {
+      const v = value as { status?: string; appendedRecords?: number; appendedEvents?: number; reason?: string }
+      return genericResult('Sync to Claude Code', `status=${v.status ?? 'unknown'} records=${v.appendedRecords ?? 0} events=${v.appendedEvents ?? 0}${v.reason ? ` reason=${v.reason}` : ''}`)
+    },
     async execute(args) {
       const result = await syncClaudeSession(ctx, args, resolveDshHome())
       return result as unknown as JsonValue
