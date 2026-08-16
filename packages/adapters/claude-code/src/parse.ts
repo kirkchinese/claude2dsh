@@ -146,8 +146,16 @@ function mapAssistantBlocks(content: unknown, step: MutableStep): void {
 }
 
 function mapToolResultBlocks(content: unknown, result: { content: NormalizedContentBlock[]; skippedBlocks: number }): void {
+  if (typeof content === 'string') {
+    if (content.length > 0) result.content.push({ type: 'text', text: content })
+    return
+  }
   if (!Array.isArray(content)) return
   for (const block of content) {
+    if (typeof block === 'string') {
+      if (block.length > 0) result.content.push({ type: 'text', text: block })
+      continue
+    }
     if (typeof block !== 'object' || block === null) continue
     const raw = block as RawJson
     if (raw.type === 'text' && typeof raw.text === 'string') {
