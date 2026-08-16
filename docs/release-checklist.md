@@ -32,18 +32,36 @@
 - README 最低内容：官方教程只要求 manifest + patch + 入口文件；
   本项目按要求额外提供能力表、quickstart、局限与安全边界。
 
-## 本项目发布清单（发布时逐项执行）
+## 本项目发布清单（当前候选版本）
 
-- [ ] `git grep` 隐私审计：无 ~、真实项目名、真实会话
-      UUID、token 模式。
-- [ ] 三包 `pnpm -r build`，确认 `lib/` 已生成。
-- [ ] 根 `pnpm run check`；workspace build/typecheck/test；四个 e2e。
-- [ ] `pnpm pack --dry-run` 三包，确认 files 白名单。
-- [ ] `npm whoami` 确认账号。
-- [ ] 按 core → adapter → plugin 依次 `npm publish --access public`，
+当前 npm latest：`0.1.0-rc.2`（已发布并在真实 registry 空环境验收）。
+下一正式版候选：`0.1.0`（rc.2 的同范围正式化 + 本轮硬化；最终版本号待用户确认）。
+
+发布前检查（本地，不接触 registry）：
+
+- [x] `git grep` 隐私审计：无真实用户主目录路径、真实会话 UUID、
+      真实凭据/token 模式（仅命中文档中的匿名化说明与测试脚本中的
+      `ANTHROPIC_API_KEY=dummy`）。
+- [x] 三包 `pnpm -r build`，确认 `lib/` 已生成。
+- [x] 根 `pnpm run check`；`pnpm -r build/typecheck/test`；
+      四个 `scripts/e2e-round*.sh` 全绿（core 4、adapter 11、plugin 18）。
+- [x] `pnpm pack` 三包并解包核对：files 白名单无 src/test/tsconfig；
+      manifest 中 workspace 协议已转换为 `^<version>`（core/adapter/plugin
+      互依赖）与精确 `@deepseek-ai/dsh-hooks-claude-code@0.1.0-rc.6`。
+- [x] `npm whoami` = `kirkchinese`。
+- [x] `node scripts/check-dsh-compat.mjs` = `DSH_COMPAT_OK ... rc.6`。
+
+发布动作（仅凭用户确认后执行；npm publish 不能直接发布 workspace
+manifest，必须走 `pnpm pack` 后的 tarball）：
+
+- [ ] 三包版本号从 `0.1.0-rc.2` 升到确认的正式版本号，CHANGELOG 的
+      Unreleased 段改为该版本并填日期；提交并打 tag。
+- [ ] `pnpm -r build` 后按 core → adapter → plugin 顺序：
+      `pnpm --dir <pkg> pack --pack-destination <tmp>` →
+      `npm publish <tmp>/<pkg>-<version>.tgz --access public`；
       每发布一包立即 `npm view <name>@<version>`。
 - [ ] 全新临时目录执行 quickstart：
-      `dsh plugin --profile smoke add @claude2dsh/plugin`，
+      `dsh plugin --profile smoke add @claude2dsh/plugin@<version>`，
       导入一个备份样本并 `sessionPersistence.inspect` 通过。
-- [ ] 创建公开 GitHub 仓库并 push 清理后的 main；tag `v0.1.0-rc.1`；
-      发布 GitHub release。
+- [ ] GitHub 创建 release（tag 与发布 commit 一致），release notes 沿用
+      CHANGELOG 并保留诚实局限（hook 7/30、视觉模型未实测）。
