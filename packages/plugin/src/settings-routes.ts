@@ -48,39 +48,52 @@ function safeMessage(error: unknown): string {
 
 /** Register GET/POST handlers for the browser settings page. */
 export function registerClaude2dshSettingsRoutes(ctx: Context, runtime: SettingsRuntime): void {
-  const webServer = ctx.get('webServer') as { register(spec: unknown): () => void } | undefined
-  if (webServer === undefined) return
-  const dispose = webServer.register({
-    kind: 'exact',
-    path: CLAUDE2DSH_SETTINGS_PATH,
-    handler: async (req: IncomingMessage, res: ServerResponse) => {
-      if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
-      if (req.method === 'GET') return json(res, 200, runtime.get())
-      if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-      try {
-        const patch = await readJson(req)
-        await runtime.update(patch)
-        json(res, 200, runtime.get())
-      } catch (error) {
-        json(res, 400, { error: safeMessage(error) })
-      }
-    },
-  })
-  const disposeSources = webServer.register({
-    kind: 'exact',
-    path: CLAUDE2DSH_SESSION_SOURCES_PATH,
-    handler: async (req: IncomingMessage, res: ServerResponse) => {
-      if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
-      if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
-      try {
-        json(res, 200, { sessions: (await loadSessionSourceMap()).sessions })
-      } catch (error) {
-        json(res, 500, { error: safeMessage(error) })
-      }
-    },
-  })
+  let registered = false
+  let disposed = false
+  const disposers: Array<() => void> = []
+  const registerNow = (): boolean => {
+    if (registered || disposed) return true
+    const webServer = ctx.get('webServer') as { register(spec: unknown): () => void } | undefined
+    if (webServer === undefined) return false
+    registered = true
+    const dispose = webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_SETTINGS_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method === 'GET') return json(res, 200, runtime.get())
+        if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+        try {
+          const patch = await readJson(req)
+          await runtime.update(patch)
+          json(res, 200, runtime.get())
+        } catch (error) {
+          json(res, 400, { error: safeMessage(error) })
+        }
+      },
+    })
+    disposers.push(dispose)
+    disposers.push(webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_SESSION_SOURCES_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+        try {
+          json(res, 200, { sessions: (await loadSessionSourceMap()).sessions })
+        } catch (error) {
+          json(res, 500, { error: safeMessage(error) })
+        }
+      },
+    }))
+    return true
+  }
+  const timer = setInterval(() => {
+    if (registerNow()) clearInterval(timer)
+  }, 100)
   ctx.effect(() => () => {
-    dispose()
-    disposeSources()
+    disposed = true
+    clearInterval(timer)
+    for (const dispose of disposers) dispose()
   }, 'claude2dsh: settings routes')
 }
