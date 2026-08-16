@@ -112,7 +112,7 @@ export async function mergeClaudeSession(ctx: Context, args: MergeSessionArgs, d
   const headers = await ctx.sessionPersistence.list()
   const persisted = new Set(headers.map((header) => String(header.id)))
   const mergedId = targetSuffix(persisted, `${args.sessionId}-merged`)
-  const meta = { ...stored.meta, id: mergedId, seedLength: stored.meta.seedLength } as SessionHeader
+  const meta = { ...stored.meta, id: mergedId } as SessionHeader
   await ctx.sessionPersistence.create({ ...meta, id: mergedId as SessionId })
   await ctx.sessionPersistence.append(mergedId as SessionId, plan.events as unknown as SessionEvent[])
   await saveSessionSource({ sessionId: mergedId, kind: 'claude-merged', sourcePath, recordedAt: Date.now() }, dshHome)

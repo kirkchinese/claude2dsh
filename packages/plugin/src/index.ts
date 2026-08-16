@@ -9,7 +9,7 @@
  */
 import { writeFile } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionId, UserMessage } from '@deepseek-ai/dsh-session'
+import { Session, type SessionId, type UserMessage } from '@deepseek-ai/dsh-session'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import { defineTool, type ToolResult } from '@deepseek-ai/dsh-tools'
 import { claudeCodeAdapter } from '@claude2dsh/adapter-claude-code'
@@ -447,8 +447,9 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       if (appendEventsPath !== undefined && appendEventsPath.length > 0 && process.env.CLAUDE2DSH_TEST_APPEND_AFTER_EXPORT !== '1') {
         await appendSyntheticTurn()
       }
-      let mergeReport: Awaited<ReturnType<typeof mergeClaudeSession>> | Awaited<ReturnType<typeof mergeDshToClaude>> | undefined
+      let mergeReport: Awaited<ReturnType<typeof mergeClaudeSession>> | Awaited<ReturnType<typeof mergeDshToClaude>> | { status: string; error: string } | undefined
       if (process.env.CLAUDE2DSH_TEST_MERGE === '1') {
+        try {
         const mergeId = process.env.CLAUDE2DSH_TEST_MERGE_SESSION ?? exportReport?.sessionId ?? report.items.find((item) => item.status === 'imported')?.sessionId
         if (mergeId === undefined) throw new Error('CLAUDE2DSH_TEST_MERGE requires an imported or exported session')
         const mergeDryRun = process.env.CLAUDE2DSH_TEST_MERGE_DRY_RUN === '1'
@@ -460,6 +461,17 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
             ...(process.env.CLAUDE2DSH_TEST_MERGE_PATH !== undefined ? { path: process.env.CLAUDE2DSH_TEST_MERGE_PATH } : {}),
             dryRun: mergeDryRun,
           }, resolveDshHome())
+        }
+        if (mergeReport.status === 'merged' && mergeReport.mergedSessionId !== undefined && process.env.CLAUDE2DSH_TEST_MERGE_DIRECTION !== 'dsh-to-claude') {
+          const mergedView = await ready.sessionPersistence.inspect(mergeReport.mergedSessionId as SessionId)
+          mergeReport = {
+            ...mergeReport,
+            mergedEventCount: mergedView.events.length,
+            mergedDerivedMessages: Session.create(mergeReport.mergedSessionId as SessionId, mergedView.events as never).deriveMessages().length,
+          } as typeof mergeReport
+        }
+        } catch (error) {
+          mergeReport = { status: 'error', error: error instanceof Error ? error.message : String(error) }
         }
       }
       let resumeReport: { sessionId: string; prompt: string; events: number; messages: number; status: string; error?: string } | undefined
