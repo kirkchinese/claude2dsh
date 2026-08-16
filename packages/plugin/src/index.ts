@@ -11,7 +11,7 @@ import { writeFile } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolResult } from '@deepseek-ai/dsh-tools'
 import { claudeCodeAdapter } from '@claude2dsh/adapter-claude-code'
 import { importClaudeSessions } from './session-import.ts'
 import { exportClaudeSession } from './export-claude.ts'
@@ -48,12 +48,14 @@ function genericResult(title: string, summary: string): { card: 'generic'; title
   return { card: 'generic', title, content: [{ type: 'text', text: summary }] }
 }
 
-function importResultView(_args: unknown, value: { content: { type: string; text?: string }[] }): { card: 'generic'; title: string; content: { type: 'text'; text: string }[] } {
-  let report: { imported?: number; alreadyImported?: number; appended?: number; skipped?: number; failed?: number } = {}
+function parseResultText(value: ToolResult): unknown {
   const raw = value.content.find((block) => block.type === 'text')?.text
-  if (raw !== undefined) {
-    try { report = JSON.parse(raw) as typeof report } catch { /* raw text stays fallback */ }
-  }
+  if (raw === undefined) return undefined
+  try { return JSON.parse(raw) } catch { return undefined }
+}
+
+function importResultView(_args: unknown, value: ToolResult): { card: 'generic'; title: string; content: { type: 'text'; text: string }[] } {
+  const report = (parseResultText(value) ?? {}) as { imported?: number; alreadyImported?: number; appended?: number; skipped?: number; failed?: number }
   return genericResult('Claude Code import', `imported=${report.imported ?? 0} already=${report.alreadyImported ?? 0} appended=${report.appended ?? 0} skipped=${report.skipped ?? 0} failed=${report.failed ?? 0}`)
 }
 
@@ -131,8 +133,8 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
     },
     output: jsonToolOutput(),
     presentCall: (args) => ({ card: 'generic', title: 'Sync DSH session to Claude Code', kind: 'other', rawInput: (args as { sessionId?: unknown }).sessionId }),
-    presentResult: (_args, value) => {
-      const v = value as { status?: string; appendedRecords?: number; appendedEvents?: number; reason?: string }
+    presentResult: (_args, value: ToolResult) => {
+      const v = (parseResultText(value) ?? {}) as { status?: string; appendedRecords?: number; appendedEvents?: number; reason?: string }
       return genericResult('Sync to Claude Code', `status=${v.status ?? 'unknown'} records=${v.appendedRecords ?? 0} events=${v.appendedEvents ?? 0}${v.reason ? ` reason=${v.reason}` : ''}`)
     },
     async execute(args) {
@@ -153,8 +155,8 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
     },
     output: jsonToolOutput(),
     presentCall: (args) => ({ card: 'generic', title: 'Claude2DSH auto-mirror', kind: 'other', rawInput: (args as { action?: unknown }).action }),
-    presentResult: (_args, value) => {
-      const state = value as { paused?: boolean; reason?: string; conflicts?: unknown[]; pending?: unknown[] }
+    presentResult: (_args, value: ToolResult) => {
+      const state = (parseResultText(value) ?? {}) as { paused?: boolean; reason?: string; conflicts?: unknown[]; pending?: unknown[] }
       return genericResult('Claude2DSH auto-mirror', `paused=${state.paused ?? false} reason=${state.reason ?? 'none'} conflicts=${state.conflicts?.length ?? 0} pending=${state.pending?.length ?? 0}`)
     },
     async execute(args) {
@@ -335,9 +337,15 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       let presenters: Record<string, unknown> | undefined
       if (process.env.CLAUDE2DSH_TEST_PRESENTERS === '1') {
         const importDef = ready.tools.get('claude2dsh_import')
+        const autoSyncDef = ready.tools.get('claude2dsh_autosync')
+        const probeArgs = { path: process.env.CLAUDE2DSH_TEST_IMPORT ?? '/tmp/sample.jsonl' }
+        const probeResult: ToolResult = { content: [{ type: 'text', text: JSON.stringify({ imported: report.imported, alreadyImported: report.alreadyImported, appended: report.appended, skipped: report.skipped, failed: report.failed }) }], isError: false }
+        const autoSyncProbeResult: ToolResult = { content: [{ type: 'text', text: JSON.stringify({ paused: true, reason: 'probe', conflicts: [], pending: [] }) }], isError: false }
         presenters = {
-          importCall: importDef?.presentCall?.({ path: '/tmp/sample.jsonl' }),
-          importResult: importDef?.presentResult?.({}, { content: [{ type: 'text', text: JSON.stringify(report.items[0] ?? { imported: 0, alreadyImported: 0, appended: 0, skipped: 0, failed: 0 }) }], isError: false }),
+          importCall: importDef?.presentCall?.(probeArgs),
+          importResult: importDef?.presentResult?.(probeArgs, probeResult),
+          autoSyncCall: autoSyncDef?.presentCall?.({ action: 'status' }),
+          autoSyncResult: autoSyncDef?.presentResult?.({ action: 'status' }, autoSyncProbeResult),
         }
       }
       if (testReport !== undefined) {
