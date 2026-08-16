@@ -719,3 +719,10 @@ preview=preview`。真实 registry 版可用
 - 根 `pnpm run check`、workspace build/typecheck、core 8/adapter 13/
   plugin 30 全绿。
 - e2e R1/R2/R3/R4/R7/R8 全绿；真实模型调用 0 轮。
+
+### 0.2.0-rc.2 发布尝试（失败即停）
+
+- 四个 rc.2 tarball 已 pack；默认 npm 凭据发布 root 被
+  `E403 Two-factor authentication ... required` 拒绝。
+- 未发布任何包、未 push、未打 tag；`npm view` 四包 latest 仍为
+  0.2.0-rc.1。等待可用 OTP / bypass-2FA token 后重试。
