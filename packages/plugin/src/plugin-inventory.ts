@@ -97,15 +97,30 @@ async function findFiles(root: string, suffix: string): Promise<string[]> {
   return out
 }
 
+function safeSegment(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed === '.' || trimmed === '..') return ''
+  if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.startsWith('.')) return ''
+  return trimmed.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
+function safeSkillName(namespace: string, name: string): string {
+  const ns = safeSegment(namespace)
+  const n = safeSegment(name)
+  if (ns.length === 0 || n.length === 0) return ''
+  const targetName = `${ns}-${n}`.replace(/^-+|-+$/g, '')
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(targetName) ? targetName : ''
+}
+
 async function migrateSkill(filePath: string, namespace: string, destination: string): Promise<boolean> {
   try {
     const body = await readFile(filePath, 'utf8')
     const match = /^---\n([\s\S]*?)\n---\n?/.exec(body)
     const meta = match?.[1] === undefined ? {} : (parseYaml(match[1]) as JsonMap | undefined) ?? {}
-    const name = typeof meta.name === 'string' ? meta.name : basename(filePath).replace(/\.md$/i, '')
-    const description = typeof meta.description === 'string' && meta.description.trim().length > 0 ? meta.description : `Migrated from Claude Code plugin ${namespace}: ${name}`
-    const targetName = `${namespace}-${name}`.replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '')
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(targetName)) return false
+    const rawName = typeof meta.name === 'string' ? meta.name : basename(filePath).replace(/\.md$/i, '')
+    const description = typeof meta.description === 'string' && meta.description.trim().length > 0 ? meta.description : `Migrated from Claude Code plugin ${namespace}: ${rawName}`
+    const targetName = safeSkillName(namespace, rawName)
+    if (targetName.length === 0) return false
     const target = join(destination, targetName, 'SKILL.md')
     await mkdir(dirname(target), { recursive: true })
     const frontmatter = `---\nname: ${targetName}\ndescription: ${JSON.stringify(description)}\n---\n\n`
@@ -149,7 +164,7 @@ export async function inventoryClaudePlugins(args: PluginInventoryArgs, dshHome:
       const skillsRoot = join(plugin.path, 'skills')
       const skillFiles = (await findFiles(skillsRoot, '.md')).filter((file) => basename(file) === 'SKILL.md')
       for (const file of skillFiles) {
-        const namespace = plugin.plugin.split('@')[0]?.replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '') ?? 'plugin'
+        const namespace = plugin.plugin.split('@')[0] ?? 'plugin'
         if (await migrateSkill(file, namespace, destination)) migratedSkills += 1
       }
     }
