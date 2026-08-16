@@ -630,3 +630,18 @@ bash scripts/e2e-round7-merge.sh
 
 结果：根 check 全绿；core 8/8、adapter 13/13、plugin 29/29；五个
 e2e 全绿（ROUND1/2/3/4/7）；真实模型调用 0 轮。
+
+### 0.2.0-rc.1 发布准备补充
+
+- 用户决定：不提交 radar PR（curated PR 刚合并，改动小）；Settings 内
+  实现 session sources 面板；版本 `0.2.0-rc.1`；DSH-Session-Move 采用
+  互操作方案。
+- 新端点 `/plugins/claude2dsh/session-sources` 在 web profile 实测 200，
+  返回 `claude-main` 记录；Playwright 实测 Settings → Claude2DSH 页面
+  显示 Session sources 表格（`docs/assets/settings-ui-sources.png`）。
+- `claude2dsh_session_move_inspect` 单测：无 `ctx.sessionMove` →
+  unsupported；有服务 → inspected。
+- 版本 bump：根包与三包 `0.2.0-rc.1`；pack manifest 无 workspace 协议；
+  plugin tarball 含 `lib/client.js`。
+- 回归：根 check、workspace build/typecheck、core 8/adapter 13/plugin 30、
+  e2e R1/R2/R3/R4/R7 全绿；`DSH_COMPAT_OK`。未发布、未打 tag。
