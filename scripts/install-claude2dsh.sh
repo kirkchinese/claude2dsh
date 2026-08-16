@@ -5,13 +5,14 @@ set -euo pipefail
 
 PROFILE="${CLAUDE2DSH_PROFILE:-claude2dsh}"
 PLUGIN_VERSION="${CLAUDE2DSH_VERSION:-0.2.0-rc.1}"
+PLUGIN_SPEC="${CLAUDE2DSH_PLUGIN_SPEC:-@claude2dsh/plugin@$PLUGIN_VERSION}"
 WEB_APP_VERSION="${CLAUDE2DSH_WEB_APP_VERSION:-0.1.0-rc.6}"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 HEADLESS="${CLAUDE2DSH_HEADLESS:-}"
 
 if [ "$HEADLESS" != "" ]; then
   echo "== installing headless profile '$PROFILE' =="
-  dsh plugin --profile "$PROFILE" add "@claude2dsh/plugin@$PLUGIN_VERSION"
+  dsh plugin --profile "$PROFILE" add "$PLUGIN_SPEC"
   echo "OK. Run: dsh --profile $PROFILE"
   exit 0
 fi
@@ -19,7 +20,7 @@ fi
 echo "== installing headed profile '$PROFILE' (base + dsh-web-app + claude2dsh) =="
 set +e
 dsh plugin --profile "$PROFILE" add \
-  "@claude2dsh/plugin@$PLUGIN_VERSION" \
+  "$PLUGIN_SPEC" \
   "@deepseek-ai/dsh-web-app@$WEB_APP_VERSION"
 pnpm_exit=$?
 set -e

@@ -13,7 +13,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== headed installer (real npm packages, isolated DSH_HOME) =="
-DSH_HOME="$E2E_HOME" CLAUDE2DSH_PORT="$PORT" bash scripts/install-claude2dsh.sh >"$E2E_HOME/install.log" 2>&1
+DSH_HOME="$E2E_HOME" CLAUDE2DSH_PORT="$PORT" CLAUDE2DSH_PLUGIN_SPEC="${CLAUDE2DSH_PLUGIN_SPEC:-link:$PWD/packages/plugin}" bash scripts/install-claude2dsh.sh >"$E2E_HOME/install.log" 2>&1
 
 curl -fsS "http://127.0.0.1:$PORT/plugins/claude2dsh/settings" >"$E2E_HOME/settings.json"
 curl -fsS "http://127.0.0.1:$PORT/" >"$E2E_HOME/index.html"
