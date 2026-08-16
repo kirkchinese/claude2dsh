@@ -50,6 +50,10 @@ Settings panel: the plugin contributes a **Claude2DSH** page to the dsh Settings
 - Auto mirror is **opt-in and default off**. Enable with `autoSync.enabled: true` in the plugin row. It watches Claude transcripts and mirrors DSH turns to the safe export copy; it never writes the real `~/.claude`. When both sides grew after the sync point it pauses and reports a conflict instead of overwriting either side; use `claude2dsh_autosync` to inspect/resume.
 - Full plugin-runtime compatibility is a roadmap goal. Automatic conflict merging is now an explicit opt-in tool; the automatic mirror still pauses and reports rather than guessing.
 
+## Interop
+
+- `claude2dsh_session_move_inspect` talks to `dsh-session-move` when it is mounted; it never moves anything itself. After migration, use dsh-session-move for cold-session workspace moves. Full move capability depends on that project's DSH patch series; see `docs/session-move-interop.md`.
+
 ## Safety boundaries
 
 - `~/.claude` is read-only for migration. Export/sync never write the original Claude directory by default.

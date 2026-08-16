@@ -50,6 +50,10 @@ Settings 面板：插件在 DSH Settings UI 中提供 **Claude2DSH** 页面，�
 - Auto mirror **默认关闭、需显式开启**。启用 `autoSync.enabled: true` 后监控 Claude 转录，并把 DSH 轮次镜像到安全导出副本；绝不写真实 `~/.claude`。双端在同步点后同时增长时暂停并报告冲突；用 `claude2dsh_autosync` 查看/恢复。
 - 完整插件运行时兼容性是 roadmap 目标。自动合并冲突现在由显式 `claude2dsh_merge` 工具承担；自动镜像仍只暂停报告，不猜测。
 
+## 互操作
+
+- `claude2dsh_session_move_inspect` 在安装了 `dsh-session-move` 时调用其 inspect；本工具自身绝不移动会话。迁移完成后如需跨工作区移动冷会话，请使用 dsh-session-move；完整移动能力依赖该项目 DSH 补丁系列，见 `docs/session-move-interop.md`。
+
 ## 安全边界
 
 - 迁移对 `~/.claude` 只读；导出/同步默认绝不写原始 Claude 目录。

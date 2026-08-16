@@ -26,6 +26,7 @@ import { importClaudeMemory } from './memory-import.ts'
 import { loadSidecarMap } from './sidecar.ts'
 import { loadSessionSourceMap, saveSessionSource } from './session-sources.ts'
 import { mergeClaudeSession, mergeDshToClaude } from './merge-session.ts'
+import { inspectSessionMove } from './session-move-interop.ts'
 import { createSettingsRuntime } from './settings-service.ts'
 import { registerClaude2dshSettingsRoutes } from './settings-routes.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
@@ -246,6 +247,23 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       const result = args.direction === 'dsh-to-claude'
         ? await mergeDshToClaude(ctx, args, resolveDshHome())
         : await mergeClaudeSession(ctx, args, resolveDshHome())
+      return result as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_session_move_inspect',
+    description: [
+      'Optional interoperability with dsh-session-move: inspect whether a cold DSH session can move between workspaces.',
+      'This tool never moves anything. Without dsh-session-move mounted it reports unsupported with an install hint.',
+    ].join('\n'),
+    parameters: {
+      sessionId: { type: 'string', required: true, description: 'DSH session id to inspect.' },
+      targetWorkspaceId: { type: 'string', required: true, description: 'Destination DSH workspace id.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const result = await inspectSessionMove(ctx, args)
       return result as unknown as JsonValue
     },
   }))
