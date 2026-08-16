@@ -24,7 +24,7 @@ import { registerImageReprojection } from './image-reproject.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
 
 export const name = 'claude2dsh-import'
-export const inject = ['sessionPersistence', 'tools', 'attachments', 'llm']
+export const inject = ['sessionPersistence', 'sessions', 'tools', 'attachments', 'llm']
 
 /** Plugin configuration. `autoSync` is beta and defaults to disabled. */
 export interface PluginConfig {

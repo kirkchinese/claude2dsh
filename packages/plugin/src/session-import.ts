@@ -28,7 +28,7 @@ export interface SessionImportArgs {
 
 export interface SessionImportItem {
   readonly path: string
-  readonly status: 'imported' | 'already-imported' | 'appended' | 'skipped' | 'source-changed' | 'source-shrunk' | 'failed' | 'preview'
+  readonly status: 'imported' | 'already-imported' | 'appended' | 'skipped' | 'source-changed' | 'source-shrunk' | 'conflict' | 'failed' | 'preview'
   readonly sessionId?: string
   readonly turns?: number
   readonly events?: number
@@ -211,6 +211,16 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
             sessionId: known.targetId,
             turns: parsed.session.turns.length,
             reason: 'could not read stored DSH event count; append skipped',
+          })
+          continue
+        }
+        if (storedLength > known.events) {
+          pushItem(report, {
+            path: sourcePath,
+            status: 'conflict',
+            sessionId: known.targetId,
+            turns: parsed.session.turns.length,
+            reason: `both sides grew after the last sync point (source turns now ${parsed.session.turns.length}, DSH events ${storedLength} > recorded ${known.events}); auto-append paused, no data changed`,
           })
           continue
         }

@@ -15,6 +15,7 @@ import { watch, type FSWatcher } from 'chokidar'
 import { importClaudeSessions } from './session-import.ts'
 import { syncClaudeSession } from './sync-claude.ts'
 import { loadRegistry, resolveDshHome } from './registry.ts'
+import { loadAutoSyncState, pauseAutoSync, saveAutoSyncState, type AutoSyncState } from './auto-sync-state.ts'
 
 export interface AutoSyncConfig {
   /** Beta switch. Defaults to false when the config section is absent. */
@@ -33,6 +34,15 @@ function resolveClaudeProjectsRoot(config: AutoSyncConfig, env: NodeJS.ProcessEn
   return join(homedir(), '.claude', 'projects')
 }
 
+function isLiveSession(ctx: Context, id: string): boolean {
+  const sessions = (ctx as unknown as { sessions?: { get(id: string): unknown } }).sessions
+  return sessions?.get(id) !== undefined
+}
+
+function logState(state: AutoSyncState): void {
+  if (state.paused) console.warn(`[claude2dsh] auto-sync paused: ${state.reason ?? 'unknown reason'}`)
+}
+
 /**
  * Activate the beta mirror. All effects are owned by the calling plugin fiber.
  * @param ctx - plugin context.
@@ -41,10 +51,19 @@ function resolveClaudeProjectsRoot(config: AutoSyncConfig, env: NodeJS.ProcessEn
 export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: NodeJS.ProcessEnv = process.env): void {
   const root = resolveClaudeProjectsRoot(config, env)
   const debounceMs = Math.max(50, config.debounceMs ?? 500)
+  const dshHome = resolveDshHome(env)
   let watcher: FSWatcher | undefined
   let pending: ReturnType<typeof setTimeout> | undefined
+  let state = loadAutoSyncState(dshHome)
+
+  const persistState = async (): Promise<void> => {
+    const loaded = await state
+    await saveAutoSyncState(loaded, dshHome)
+  }
 
   ctx.effect(() => {
+    void state.then(logState)
+    void processPendingQueue(ctx, root, debounceMs, dshHome, state)
     watcher = watch(root, {
       ignoreInitial: true,
       depth: 2,
@@ -54,7 +73,9 @@ export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: Node
       if (pending !== undefined) clearTimeout(pending)
       pending = setTimeout(() => {
         pending = undefined
-        void runClaudeImport(ctx, root)
+        void queueItem(state, 'import', root, dshHome)
+          .then(() => runClaudeImport(ctx, root, dshHome, state))
+          .finally(() => dequeueItem(state, 'import', root, dshHome))
       }, debounceMs)
     }
     watcher.on('add', schedule)
@@ -67,7 +88,9 @@ export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: Node
         pendingSync.add(id)
         setTimeout(() => {
           pendingSync.delete(id)
-          void runDshSync(ctx, id)
+          void queueItem(state, 'sync', id, dshHome)
+            .then(() => runDshSync(ctx, id, dshHome, state))
+            .finally(() => dequeueItem(state, 'sync', id, dshHome))
         }, debounceMs)
       })
     }
@@ -77,29 +100,86 @@ export function activateAutoSync(ctx: Context, config: AutoSyncConfig, env: Node
       watcher = undefined
     }
   }, 'claude2dsh auto-sync watcher')
+
+  void persistState
 }
 
 const pendingSync = new Set<string>()
 
-async function runClaudeImport(ctx: Context, root: string): Promise<void> {
-  try {
-    const registry = await loadRegistry(resolveDshHome())
-    const report = await importClaudeSessions(ctx, { path: root, includeSubagents: false }, resolveDshHome())
-    const changed = report.items.filter((item) => item.status === 'imported' || item.status === 'appended')
-    if (changed.length > 0) {
-      console.info(`[claude2dsh] auto-import: ${changed.length} session(s) updated`)
+async function queueItem(state: Promise<AutoSyncState>, kind: 'import' | 'sync', id: string, dshHome: string): Promise<AutoSyncState> {
+  const loaded = await state
+  if (!loaded.pending.some((item) => item.kind === kind && item.id === id)) {
+    loaded.pending = [...loaded.pending, { kind, id, queuedAt: Date.now() }]
+    await saveAutoSyncState(loaded, dshHome)
+  }
+  return loaded
+}
+
+async function dequeueItem(state: Promise<AutoSyncState>, kind: 'import' | 'sync', id: string, dshHome: string): Promise<AutoSyncState> {
+  const loaded = await state
+  loaded.pending = loaded.pending.filter((item) => !(item.kind === kind && item.id === id))
+  await saveAutoSyncState(loaded, dshHome)
+  return loaded
+}
+
+async function processPendingQueue(ctx: Context, root: string, debounceMs: number, dshHome: string, state: Promise<AutoSyncState>): Promise<void> {
+  const loaded = await state
+  if (loaded.pending.length === 0) return
+  for (const item of [...loaded.pending]) {
+    if (item.kind === 'import') {
+      await runClaudeImport(ctx, root, dshHome, state)
+      await dequeueItem(state, 'import', item.id, dshHome)
+    } else {
+      await runDshSync(ctx, item.id, dshHome, state)
+      await dequeueItem(state, 'sync', item.id, dshHome)
     }
+  }
+}
+
+async function runClaudeImport(ctx: Context, root: string, dshHome: string, state: Promise<AutoSyncState>): Promise<void> {
+  const loaded = await state
+  if (loaded.paused) {
+    console.warn(`[claude2dsh] auto-import skipped: paused (${loaded.reason ?? 'conflict'})`)
+    return
+  }
+  try {
+    const report = await importClaudeSessions(ctx, { path: root, includeSubagents: false }, dshHome)
+    const conflicts = report.items.filter((item) => item.status === 'conflict')
+    if (conflicts.length > 0) {
+      const first = conflicts[0]
+      if (first !== undefined) {
+        await pauseAutoSync(loaded, 'bidirectional conflict detected; resolve with explicit tools', {
+          at: Date.now(),
+          kind: 'claude-to-dsh',
+          sessionId: first.sessionId ?? 'unknown',
+          detail: first.reason ?? 'both sides grew after the sync point',
+        }, dshHome)
+      }
+      console.error(`[claude2dsh] auto-import paused: ${conflicts.length} conflict(s); no data changed`)
+      return
+    }
+    const changed = report.items.filter((item) => item.status === 'imported' || item.status === 'appended')
+    if (changed.length > 0) console.info(`[claude2dsh] auto-import: ${changed.length} session(s) updated`)
     if (report.failed > 0) console.warn(`[claude2dsh] auto-import failed for ${report.failed} file(s)`)
   } catch (error) {
     console.warn('[claude2dsh] auto-import skipped:', error instanceof Error ? error.message : String(error))
   }
 }
 
-async function runDshSync(ctx: Context, sessionId: string): Promise<void> {
+async function runDshSync(ctx: Context, sessionId: string, dshHome: string, state: Promise<AutoSyncState>): Promise<void> {
+  const loaded = await state
+  if (loaded.paused) {
+    console.warn(`[claude2dsh] auto-sync skipped for ${sessionId}: paused (${loaded.reason ?? 'conflict'})`)
+    return
+  }
+  if (isLiveSession(ctx, sessionId)) {
+    console.info(`[claude2dsh] auto-sync skipped for ${sessionId}: live session`)
+    return
+  }
   try {
-    const registry = await loadRegistry(resolveDshHome())
+    const registry = await loadRegistry(dshHome)
     if (registry.exports[sessionId] === undefined) return
-    const result = await syncClaudeSession(ctx, { sessionId, target: 'copy' }, resolveDshHome())
+    const result = await syncClaudeSession(ctx, { sessionId, target: 'copy' }, dshHome)
     if (result.status === 'synced') {
       console.info(`[claude2dsh] auto-sync: ${sessionId} appended ${result.appendedRecords ?? 0} record(s)`)
     } else if (result.status === 'skipped' || result.status === 'refused') {
@@ -108,4 +188,14 @@ async function runDshSync(ctx: Context, sessionId: string): Promise<void> {
   } catch (error) {
     console.warn('[claude2dsh] auto-sync skipped:', error instanceof Error ? error.message : String(error))
   }
+}
+
+/** Exported for tests and future explicit status/resume tools. */
+export async function getAutoSyncState(dshHome = resolveDshHome()): Promise<AutoSyncState> {
+  return loadAutoSyncState(dshHome)
+}
+
+export async function resumeAutoSync(dshHome = resolveDshHome()): Promise<AutoSyncState> {
+  const state = await loadAutoSyncState(dshHome)
+  return import('./auto-sync-state.ts').then(({ resumeAutoSync }) => resumeAutoSync(state, dshHome))
 }
