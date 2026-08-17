@@ -3,7 +3,7 @@
 set -euo pipefail
 
 E2E_HOME="$(mktemp -d /tmp/claude2dsh-e2e-r8.XXXXXX)"
-PORT="${CLAUDE2DSH_E2E_PORT:-0}"
+PORT="${CLAUDE2DSH_E2E_PORT:-$(node -e "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")}"
 SOURCE_BACKUP="${CLAUDE2DSH_SOURCE_BACKUP:-/tmp/claude2dsh-source-backup}"
 cleanup() {
   pid="${E2E_HOME}/profiles/web/claude2dsh-web.pid"
