@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Hook bridge now declares its upstream peers, so the Settings “save candidate and enable next boot” path boots in a fresh profile instead of failing with a missing `@deepseek-ai/dsh-hook-protocol`.
+- Imported subagent transcripts now carry a durable one-shot `subagent/descriptor`, so DSH lists them as readable one-shot children instead of “corrupted session record”.
+- Settings validation errors show the validator message instead of a raw JSON body.
+
+### Added
+
+- Settings now has a session picker with one-click **Export to Claude** and **Sync to Claude**, so the reverse path no longer requires a model/agent execution.
+- Settings clarifies image modes, auto-mirror boundaries, write-back targets, hook scan scope, and session-source filtering.
+
 ## 0.2.0-rc.3 — 2026-08-17
 
 ### Changed
