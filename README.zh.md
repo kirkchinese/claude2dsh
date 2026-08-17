@@ -15,7 +15,7 @@
 Claude Code 是多工具迁移层的第一个会话源适配器。Claude2DSH 保留有用的会话结构，通过 DSH 原生持久化 API 写入，并默认把原始 Claude 目录视为只读源。
 
 > [!NOTE]
-> `0.2.0-rc.2` 是候选发布版。Awesome badge 只表示项目被精选列表 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 收录在 **Sessions & Messages（会话与消息）** 分类。自动雷达 [awesome-dsh-plugins](https://github.com/AdamPlatin123/awesome-dsh-plugins) 尚未标记“运行级验证”；badge 不代表已经获得该验证。
+> `0.2.0-rc.3` 是候选发布版。Awesome badge 只表示项目被精选列表 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 收录在 **Sessions & Messages（会话与消息）** 分类。自动雷达 [awesome-dsh-plugins](https://github.com/AdamPlatin123/awesome-dsh-plugins) 尚未标记“运行级验证”；badge 不代表已经获得该验证。
 
 ## 为什么选择 Claude2DSH
 
@@ -42,7 +42,7 @@ flowchart LR
 
 ```sh
 # 把已发布插件安装进 DSH 内置的有头 profile
-dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.2
+dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.3
 
 # 启动浏览器 UI；终端会打印本地 URL
 dsh web
@@ -73,7 +73,7 @@ flowchart LR
 
 ![真实 Claude2DSH 预览导入报告，显示一个不含隐私、等待导入的合成会话](assets/migration-preview.png)
 
-下面是真实成功结果。截图来自 `0.2.0-rc.2` 界面，输入为不含隐私的合成 Claude 转录。
+下面是真实成功结果。截图来自 `0.2.0-rc.3` 界面，输入为不含隐私的合成 Claude 转录。
 
 ![真实 Claude2DSH 导入结果，显示合成会话新导入一项且失败为零](assets/migration-result.png)
 
@@ -135,7 +135,7 @@ Claude2DSH 把首次迁移与安全关键默认值放在同一个设置页：
 
 ## 当前局限
 
-- **候选发布状态：** 当前公开包为 `0.2.0-rc.2`；项目尚未把接口与磁盘格式承诺为稳定兼容层。
+- **候选发布状态：** 当前公开包为 `0.2.0-rc.3`；项目尚未把接口与磁盘格式承诺为稳定兼容层。
 - **Hook bridge：** 上游只支持 **Claude Code 30 个 hook 事件中的 7 个**、仅 `type: "command"` handler，且已支持事件也只有部分语义。完整 hook 兼容是路线图目标，不是现状承诺。
 - **视觉模型验收：** 原生图片路径已实现，但尚未在真实支持视觉的 DSH 模型路由上验收；随附 DeepSeek adapter 声明仅文本输入。
 - **自动镜像：** 默认关闭、需显式开启；DSH 轮次只写安全 Claude 导出副本。双端同时增长时暂停并报告冲突，不代表会自动合并。

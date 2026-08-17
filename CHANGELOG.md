@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0-rc.3 — 2026-08-17
+
+### Changed
+
+- Image `auto` policy follows the current DSH session route instead of a hardcoded text-only route; empty provider/model means follow session, manual values remain overrides.
+- Import search is recursive by default and source-root resolution is `CLAUDE_CONFIG_DIR`-aware; the first-run guide shows the discovered root and counts.
+- Settings image section shows a live capability probe with an explicit degradation/upgrade reason; import items record the same reason.
+
+### Added
+
+- Read-only Claude hook auto-discovery: scans Claude settings and plugin hooks, previews mappable command hooks, reports skipped non-command entries, and saves an opt-in candidate for the next boot.
+
 ## 0.2.0-rc.2 — 2026-08-16
 
 ### Added
