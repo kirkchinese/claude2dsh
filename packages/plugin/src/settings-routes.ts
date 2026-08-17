@@ -5,11 +5,19 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SettingsRuntime } from './settings-service.ts'
 import { loadSessionSourceMap } from './session-sources.ts'
 import { importClaudeSessions } from './session-import.ts'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { currentSessionRoute, probeImageRoute } from './image-policy.ts'
+import { discoverClaudeHooks, saveDiscoveredHooks } from './hook-discovery.ts'
 import { resolveDshHome } from './registry.ts'
 
 export const CLAUDE2DSH_SETTINGS_PATH = '/plugins/claude2dsh/settings'
 export const CLAUDE2DSH_SESSION_SOURCES_PATH = '/plugins/claude2dsh/session-sources'
 export const CLAUDE2DSH_IMPORT_PATH = '/plugins/claude2dsh/import'
+export const CLAUDE2DSH_IMAGE_PROBE_PATH = '/plugins/claude2dsh/image-probe'
+export const CLAUDE2DSH_IMPORT_DEFAULTS_PATH = '/plugins/claude2dsh/import-defaults'
+export const CLAUDE2DSH_HOOK_SCAN_PATH = '/plugins/claude2dsh/hook-scan'
+export const CLAUDE2DSH_HOOK_APPLY_PATH = '/plugins/claude2dsh/hook-scan/apply'
 
 function trustedRequest(req: IncomingMessage): boolean {
   const remote = req.socket.remoteAddress
@@ -78,16 +86,91 @@ export function registerClaude2dshSettingsRoutes(ctx: Context, runtime: Settings
     disposers.push(dispose)
     disposers.push(webServer.register({
       kind: 'exact',
+      path: CLAUDE2DSH_HOOK_SCAN_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+        try {
+          json(res, 200, await discoverClaudeHooks())
+        } catch (error) {
+          json(res, 500, { error: safeMessage(error) })
+        }
+      },
+    }))
+    disposers.push(webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_HOOK_APPLY_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+        try {
+          const report = await discoverClaudeHooks()
+          const configPath = await saveDiscoveredHooks(report.config, resolveDshHome())
+          await runtime.update({ hooks: { configPath } })
+          json(res, 200, { configPath, scannedFiles: report.scannedFiles, supportedCommands: report.supportedCommands, skipped: report.skipped, activation: `CLAUDE2DSH_HOOKS_CONFIG=${configPath} dsh --profile web` })
+        } catch (error) {
+          json(res, 400, { error: safeMessage(error) })
+        }
+      },
+    }))
+    disposers.push(webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_IMPORT_DEFAULTS_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+        const configDir = process.env.CLAUDE_CONFIG_DIR
+        const sourceRoot = configDir !== undefined && configDir.trim().length > 0
+          ? join(configDir, 'projects')
+          : join(homedir(), '.claude', 'projects')
+        json(res, 200, { sourceRoot, recursive: runtime.get().importDefaults.recursive })
+      },
+    }))
+    disposers.push(webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_IMAGE_PROBE_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+        try {
+          const settings = runtime.get().importDefaults
+          const manual = settings.imageProvider.trim().length > 0 && settings.imageModel.trim().length > 0
+          const route = manual
+            ? { provider: settings.imageProvider.trim(), model: settings.imageModel.trim(), source: 'manual' as const }
+            : currentSessionRoute(ctx) !== undefined
+              ? { provider: currentSessionRoute(ctx)!.provider, model: currentSessionRoute(ctx)!.model, source: 'session' as const }
+              : undefined
+          const supports = route !== undefined ? await probeImageRoute(ctx, route.provider, route.model) : undefined
+          const reason = supports === true
+            ? `route ${route?.provider}/${route?.model} advertises image input`
+            : supports === false
+              ? `route ${route?.provider}/${route?.model} advertises text-only input; images degrade to safe placeholders`
+              : route === undefined
+                ? 'no current DSH session route and no manual probe route configured'
+                : `could not resolve image capabilities for ${route.provider}/${route.model}`
+          json(res, 200, { routeSource: route?.source ?? 'none', provider: route?.provider, model: route?.model, supports, reason })
+        } catch (error) {
+          json(res, 500, { error: safeMessage(error) })
+        }
+      },
+    }))
+    disposers.push(webServer.register({
+      kind: 'exact',
       path: CLAUDE2DSH_IMPORT_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
         try {
           const body = await readJson(req)
-          if (typeof body.path !== 'string' || body.path.trim().length === 0) throw new Error('path must be a non-empty string')
           const defaults = runtime.get().importDefaults
+          const configDir = process.env.CLAUDE_CONFIG_DIR
+          const defaultPath = configDir !== undefined && configDir.trim().length > 0
+            ? join(configDir, 'projects')
+            : join(homedir(), '.claude', 'projects')
+          const sourcePath = typeof body.path === 'string' && body.path.trim().length > 0 ? body.path : defaultPath
           const report = await importClaudeSessions(ctx, {
-            path: body.path,
+            path: sourcePath,
+            recursive: typeof body.recursive === 'boolean' ? body.recursive : defaults.recursive,
             preview: body.preview === true,
             includeSubagents: body.includeSubagents === true ? true : defaults.includeSubagents,
             imageMode: defaults.imageMode,

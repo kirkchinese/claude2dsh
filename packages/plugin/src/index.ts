@@ -100,7 +100,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
     description: SESSION_IMPORT_DESCRIPTION,
     parameters: {
       path: { type: 'string', required: true, description: 'Path to ~/.claude/projects, a project directory, or one <sessionId>.jsonl transcript.' },
-      recursive: { type: 'boolean', description: 'Recurse into project subdirectories when the root has no direct transcripts.' },
+      recursive: { type: 'boolean', description: 'Recurse into nested project directories; defaults to the Settings value (true).' },
       includeSubagents: { type: 'boolean', description: 'Also import subagent and workflow agent transcripts as child DSH sessions.' },
       imageMode: { type: 'string', enum: ['auto', 'placeholder', 'native'], description: 'Image policy: auto probes model inputModalities (default), placeholder always degrades safely, native forces attachment blocks.' },
       imageProvider: { type: 'string', description: 'Provider route probed by imageMode auto/native.' },
@@ -117,6 +117,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       const defaults = settings.get().importDefaults
       const report = await importClaudeSessions(ctx, {
         ...args,
+        ...(args.recursive === undefined ? { recursive: defaults.recursive } : {}),
         ...(args.includeSubagents === undefined ? { includeSubagents: defaults.includeSubagents } : {}),
         ...(args.imageMode === undefined ? { imageMode: defaults.imageMode } : {}),
         ...(args.imageProvider === undefined ? { imageProvider: defaults.imageProvider } : {}),

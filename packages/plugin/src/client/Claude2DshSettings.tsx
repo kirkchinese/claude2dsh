@@ -5,6 +5,10 @@ import { useCallback, useEffect, useState } from 'react'
 const SETTINGS_PATH = '/plugins/claude2dsh/settings'
 const SOURCES_PATH = '/plugins/claude2dsh/session-sources'
 const IMPORT_PATH = '/plugins/claude2dsh/import'
+const IMAGE_PROBE_PATH = '/plugins/claude2dsh/image-probe'
+const IMPORT_DEFAULTS_PATH = '/plugins/claude2dsh/import-defaults'
+const HOOK_SCAN_PATH = '/plugins/claude2dsh/hook-scan'
+const HOOK_APPLY_PATH = '/plugins/claude2dsh/hook-scan/apply'
 
 interface SessionSourceRecord {
   sessionId: string
@@ -16,7 +20,7 @@ interface SessionSourceRecord {
 
 interface SettingsShape {
   autoSync: { enabled: boolean; claudeProjectsRoot: string; debounceMs: number; dshToClaude: boolean }
-  importDefaults: { imageMode: 'auto' | 'placeholder' | 'native'; imageProvider: string; imageModel: string; includeSubagents: boolean; sidecarMaxBytes: number }
+  importDefaults: { imageMode: 'auto' | 'placeholder' | 'native'; imageProvider: string; imageModel: string; includeSubagents: boolean; sidecarMaxBytes: number; recursive: boolean }
   writeback: { target: 'copy' | 'source'; allowOriginalClaudeDir: boolean; exportDir: string }
   hooks: { configPath: string; pluginRoot: string; projectDir: string }
   ui: { language: 'zh' | 'en' }
@@ -35,7 +39,7 @@ interface ImportReport {
 
 const empty: SettingsShape = {
   autoSync: { enabled: false, claudeProjectsRoot: '', debounceMs: 500, dshToClaude: true },
-  importDefaults: { imageMode: 'auto', imageProvider: 'deepseek-official', imageModel: 'deepseek-v4-flash', includeSubagents: false, sidecarMaxBytes: 64 * 1024 * 1024 },
+  importDefaults: { imageMode: 'auto', imageProvider: '', imageModel: '', includeSubagents: false, sidecarMaxBytes: 64 * 1024 * 1024, recursive: true },
   writeback: { target: 'copy', allowOriginalClaudeDir: false, exportDir: '' },
   hooks: { configPath: '', pluginRoot: '', projectDir: '' },
   ui: { language: 'zh' },
@@ -49,11 +53,11 @@ const COPY = {
     save: '保存设置', reload: '重新加载', settingsSaved: '已保存',
     autoMirror: '自动镜像', enabled: '启用', projectsRoot: 'Claude projects 目录（空=默认）',
     debounce: '防抖毫秒（最小 50）', dshToClaude: '把 DSH 轮次镜像回 Claude 副本',
-    importDefaults: '导入默认值', imageMode: '图片模式', imageProvider: '图片 provider', imageModel: '图片模型',
+    importDefaults: '导入默认值', imageMode: '图片模式', imageProvider: '能力探测路由 provider（可选；留空跟随当前会话）', imageModel: '能力探测路由模型（可选；留空跟随当前会话）', imageProbe: '图片能力探测结论', recursiveSearch: '递归搜索子目录', sourceFound: '发现',
     includeSubagentsDefault: '默认导入子会话', sidecarMax: 'sidecar 单文件最大字节',
     writeback: '导出 / 写回', syncTarget: '同步目标', allowOriginal: '允许写回真实 ~/.claude（危险）',
     exportDir: '导出目录（空=默认）', hooks: 'Claude hook bridge（启动时生效）',
-    hooksHint: '可选 hook 行仍通过启动环境变量 CLAUDE2DSH_HOOKS_CONFIG 激活；这些值在下次启动时生效。',
+    hooksHint: '可选 hook 行仍通过启动环境变量 CLAUDE2DSH_HOOKS_CONFIG 激活；这些值在下次启动时生效。', hookScan: '扫描 hooks', hookApply: '保存候选并下次启动启用', hookScanned: '扫描文件', hookSupported: '可映射 command', hookSkipped: '跳过',
     hooksPath: 'hooks.json 路径', pluginRoot: '插件根目录', projectDir: '项目目录',
     sessionSources: '会话来源', noSources: '还没有导入会话。', sessionId: '会话 ID', kind: '来源', sourcePathCol: '来源路径',
     noImportYet: '尚未执行导入。', previewed: '预览', imported: '新导入', already: '已存在', appended: '追加', skipped: '跳过', failed: '失败',
@@ -66,11 +70,11 @@ const COPY = {
     save: 'Save settings', reload: 'Reload', settingsSaved: 'Saved',
     autoMirror: 'Auto mirror', enabled: 'Enabled', projectsRoot: 'Claude projects root (empty = default)',
     debounce: 'Debounce ms (min 50)', dshToClaude: 'Mirror DSH turns to the Claude copy',
-    importDefaults: 'Import defaults', imageMode: 'Image mode', imageProvider: 'Image provider', imageModel: 'Image model',
+    importDefaults: 'Import defaults', imageMode: 'Image mode', imageProvider: 'Probe route provider (optional; empty follows the current session)', imageModel: 'Probe route model (optional; empty follows the current session)', imageProbe: 'Image capability probe', recursiveSearch: 'Recursive search', sourceFound: 'Discovery',
     includeSubagentsDefault: 'Include subagents by default', sidecarMax: 'Sidecar max bytes per file',
     writeback: 'Export / write-back', syncTarget: 'Sync target', allowOriginal: 'Allow writing real ~/.claude (danger)',
     exportDir: 'Export directory (empty = default)', hooks: 'Claude hook bridge (boot-time row)',
-    hooksHint: 'The optional hook row still activates through CLAUDE2DSH_HOOKS_CONFIG at boot; these values apply after the next restart.',
+    hooksHint: 'The optional hook row still activates through CLAUDE2DSH_HOOKS_CONFIG at boot; these values apply after the next restart.', hookScan: 'Scan hooks', hookApply: 'Save candidate and enable next boot', hookScanned: 'Scanned files', hookSupported: 'Supported commands', hookSkipped: 'Skipped',
     hooksPath: 'hooks.json path', pluginRoot: 'Plugin root', projectDir: 'Project dir',
     sessionSources: 'Session sources', noSources: 'No imported sessions recorded yet.', sessionId: 'Session ID', kind: 'Kind', sourcePathCol: 'Source path',
     noImportYet: 'No import has been run yet.', previewed: 'Previewed', imported: 'Imported', already: 'Already imported', appended: 'Appended', skipped: 'Skipped', failed: 'Failed',
@@ -99,6 +103,10 @@ export function Claude2DshSettings(): React.JSX.Element {
   const [guideSubagents, setGuideSubagents] = useState(false)
   const [guideBusy, setGuideBusy] = useState(false)
   const [guideResult, setGuideResult] = useState<ImportReport | undefined>()
+  const [importDefaults, setImportDefaults] = useState<{ sourceRoot: string; recursive: boolean }>({ sourceRoot: '~/.claude/projects', recursive: true })
+  const [imageProbe, setImageProbe] = useState<{ routeSource?: string; provider?: string; model?: string; supports?: boolean; reason?: string } | undefined>()
+  const [hookScan, setHookScan] = useState<{ scannedFiles?: number; supportedCommands?: number; skipped?: number; entries?: Array<{ sourcePath: string; event: string; supported: boolean; reason?: string; command?: string }> } | undefined>()
+  const [hookApply, setHookApply] = useState<{ configPath?: string; activation?: string } | undefined>()
 
   const t = useCallback((key: CopyKey): string => COPY[lang][key], [lang])
 
@@ -117,7 +125,29 @@ export function Claude2DshSettings(): React.JSX.Element {
     }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  const loadImportDefaults = useCallback(async () => {
+    try {
+      const response = await fetch(IMPORT_DEFAULTS_PATH, { method: 'GET' })
+      if (response.ok) {
+        const body = await response.json() as { sourceRoot: string; recursive: boolean }
+        setImportDefaults(body)
+        setGuidePath((current) => (current === '~/.claude/projects' || current === '' ? body.sourceRoot : current))
+      }
+    } catch {
+      // keep placeholder
+    }
+  }, [])
+
+  const loadProbe = useCallback(async () => {
+    try {
+      const response = await fetch(IMAGE_PROBE_PATH, { method: 'GET' })
+      if (response.ok) setImageProbe(await response.json() as typeof imageProbe)
+    } catch {
+      setImageProbe(undefined)
+    }
+  }, [])
+
+  useEffect(() => { void load(); void loadProbe(); void loadImportDefaults() }, [load, loadProbe, loadImportDefaults])
   useEffect(() => {
     void fetch(SOURCES_PATH, { method: 'GET' })
       .then(async (response) => {
@@ -141,6 +171,7 @@ export function Claude2DshSettings(): React.JSX.Element {
       setValue(next)
       setLang(next.ui?.language === 'en' ? 'en' : 'zh')
       setStatus('ready')
+      await loadProbe()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
       setStatus('error')
@@ -151,7 +182,7 @@ export function Claude2DshSettings(): React.JSX.Element {
     setGuideBusy(true)
     setError(undefined)
     try {
-      const response = await fetch(IMPORT_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: guidePath, preview, includeSubagents: guideSubagents }) })
+      const response = await fetch(IMPORT_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: guidePath, preview, includeSubagents: guideSubagents, recursive: value.importDefaults.recursive }) })
       if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
       setGuideResult(await response.json() as ImportReport)
       setStatus('ready')
@@ -187,6 +218,8 @@ export function Claude2DshSettings(): React.JSX.Element {
           }}><option value="zh">中文</option><option value="en">English</option></select></div>
         <div style={row}><span style={label}>{t('sourcePath')}</span><input style={input} value={guidePath} onChange={(event) => setGuidePath(event.target.value)} /></div>
         <div style={row}><span style={label}>{t('includeSubagents')}</span><input style={checkbox} type="checkbox" checked={guideSubagents} onChange={(event) => setGuideSubagents(event.target.checked)} /></div>
+        <div style={row}><span style={label}>{t('recursiveSearch')}</span><input style={checkbox} type="checkbox" checked={value.importDefaults.recursive} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, recursive: event.target.checked } }))} /></div>
+        <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('sourceFound')}: {guidePath} · total={guideResult?.total ?? '—'} previewed={guideResult?.previewed ?? '—'} imported={guideResult?.imported ?? '—'} skipped={guideResult?.skipped ?? '—'}</div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button type="button" style={button} disabled={guideBusy} onClick={() => { void runGuide(true) }}>{t('preview')}</button>
           <button type="button" style={button} disabled={guideBusy} onClick={() => { void runGuide(false) }}>{t('execute')}</button>
@@ -212,6 +245,7 @@ export function Claude2DshSettings(): React.JSX.Element {
         <div style={row}><span style={label}>{t('imageMode')}</span><select style={input} value={value.importDefaults.imageMode} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, imageMode: event.target.value as SettingsShape['importDefaults']['imageMode'] } }))}><option value="auto">auto</option><option value="placeholder">placeholder</option><option value="native">native</option></select></div>
         <div style={row}><span style={label}>{t('imageProvider')}</span><input style={input} value={value.importDefaults.imageProvider} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, imageProvider: event.target.value } }))} /></div>
         <div style={row}><span style={label}>{t('imageModel')}</span><input style={input} value={value.importDefaults.imageModel} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, imageModel: event.target.value } }))} /></div>
+        <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('imageProbe')}: {imageProbe?.reason ?? '…'}</div>
         <div style={row}><span style={label}>{t('includeSubagentsDefault')}</span><input style={checkbox} type="checkbox" checked={value.importDefaults.includeSubagents} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, includeSubagents: event.target.checked } }))} /></div>
         <div style={row}><span style={label}>{t('sidecarMax')}</span><input style={input} type="number" min={1} value={value.importDefaults.sidecarMaxBytes} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, sidecarMaxBytes: Number(event.target.value) } }))} /></div>
       </section>
@@ -226,6 +260,15 @@ export function Claude2DshSettings(): React.JSX.Element {
       <section style={card}>
         <h3 style={{ margin: 0 }}>{t('hooks')}</h3>
         <p style={{ margin: 0, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('hooksHint')}</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" style={button} onClick={() => { void fetch(HOOK_SCAN_PATH).then(async (r) => { if (r.ok) setHookScan(await r.json() as typeof hookScan); else setError(`${r.status} ${await r.text()}`) }).catch((cause) => setError(String(cause))) }}>{t('hookScan')}</button>
+          <button type="button" style={button} onClick={() => { void fetch(HOOK_APPLY_PATH, { method: 'POST' }).then(async (r) => { const body = await r.json() as typeof hookApply; if (r.ok) setHookApply(body); else setError(`${r.status} ${JSON.stringify(body)}`) }).catch((cause) => setError(String(cause))) }}>{t('hookApply')}</button>
+        </div>
+        {hookScan !== undefined ? <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('hookScanned')}={hookScan.scannedFiles ?? 0} · {t('hookSupported')}={hookScan.supportedCommands ?? 0} · {t('hookSkipped')}={hookScan.skipped ?? 0}</div> : null}
+        {(hookScan?.entries ?? []).slice(0, 8).map((entry, index) => (
+          <div key={index} style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>{entry.supported ? '✓' : '✗'} {entry.event} · {entry.command ?? entry.reason ?? entry.sourcePath}</div>
+        ))}
+        {hookApply !== undefined ? <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{hookApply.configPath}<br />{hookApply.activation}</div> : null}
         <div style={row}><span style={label}>{t('hooksPath')}</span><input style={input} value={value.hooks.configPath} onChange={(event) => patch((draft) => ({ ...draft, hooks: { ...draft.hooks, configPath: event.target.value } }))} /></div>
         <div style={row}><span style={label}>{t('pluginRoot')}</span><input style={input} value={value.hooks.pluginRoot} onChange={(event) => patch((draft) => ({ ...draft, hooks: { ...draft.hooks, pluginRoot: event.target.value } }))} /></div>
         <div style={row}><span style={label}>{t('projectDir')}</span><input style={input} value={value.hooks.projectDir} onChange={(event) => patch((draft) => ({ ...draft, hooks: { ...draft.hooks, projectDir: event.target.value } }))} /></div>

@@ -20,6 +20,7 @@ export interface Claude2DshSettings {
     readonly imageModel: string
     readonly includeSubagents: boolean
     readonly sidecarMaxBytes: number
+    readonly recursive: boolean
   }
   readonly writeback: {
     readonly target: 'copy' | 'source'
@@ -39,7 +40,7 @@ export interface Claude2DshSettings {
 export function defaultClaude2dshSettings(): Claude2DshSettings {
   return {
     autoSync: { enabled: false, claudeProjectsRoot: '', debounceMs: 500, dshToClaude: true },
-    importDefaults: { imageMode: 'auto', imageProvider: 'deepseek-official', imageModel: 'deepseek-v4-flash', includeSubagents: false, sidecarMaxBytes: 64 * 1024 * 1024 },
+    importDefaults: { imageMode: 'auto', imageProvider: '', imageModel: '', includeSubagents: false, sidecarMaxBytes: 64 * 1024 * 1024, recursive: true },
     writeback: { target: 'copy', allowOriginalClaudeDir: false, exportDir: '' },
     hooks: { configPath: '', pluginRoot: '', projectDir: '' },
     ui: { language: 'zh' },
@@ -55,10 +56,11 @@ export const claude2dshSettingsSchema: z<Claude2DshSettings> = z.object({
   }),
   importDefaults: z.object({
     imageMode: z.union(['auto', 'placeholder', 'native'] as const).default('auto'),
-    imageProvider: z.string().default('deepseek-official'),
-    imageModel: z.string().default('deepseek-v4-flash'),
+    imageProvider: z.string().default(''),
+    imageModel: z.string().default(''),
     includeSubagents: z.boolean().default(false),
     sidecarMaxBytes: z.number().step(1).min(1).default(64 * 1024 * 1024),
+    recursive: z.boolean().default(true),
   }),
   writeback: z.object({
     target: z.union(['copy', 'source'] as const).default('copy'),

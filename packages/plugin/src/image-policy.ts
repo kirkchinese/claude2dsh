@@ -18,11 +18,21 @@ export interface ImagePolicyResult {
   readonly degraded: number
   readonly provider?: string
   readonly model?: string
+  /** How the probe route was selected: current DSH session, manual override, or none. */
+  readonly routeSource: 'session' | 'manual' | 'none'
   readonly reason?: string
 }
 
 interface LlmLike {
   resolveModelInfo(provider: string, model: string): Promise<{ inputModalities?: readonly string[] }>
+}
+
+interface AgentLike {
+  options?: { provider?: string; model?: string }
+}
+
+interface AgentsLike {
+  currentInitiator?(): AgentLike | undefined
 }
 
 interface AttachmentLike {
@@ -33,11 +43,33 @@ interface AttachmentLike {
   }): Promise<NormalizedImageAttachment>
 }
 
-async function routeSupportsImages(ctx: Context, provider: string, model: string): Promise<boolean> {
+async function routeSupportsImages(ctx: Context, provider: string, model: string): Promise<boolean | undefined> {
   const llm = (ctx as unknown as { llm?: LlmLike }).llm
-  if (llm === undefined) return false
-  const info = await llm.resolveModelInfo(provider, model)
-  return info.inputModalities?.includes('image') === true
+  if (llm === undefined) return undefined
+  try {
+    const info = await llm.resolveModelInfo(provider, model)
+    return info.inputModalities?.includes('image') === true
+  } catch {
+    return undefined
+  }
+}
+
+/** Probe one route's image capability through the host LLM service. */
+export async function probeImageRoute(ctx: Context, provider: string, model: string): Promise<boolean | undefined> {
+  return routeSupportsImages(ctx, provider, model)
+}
+
+/** Current DSH session route, when one is live and carries an explicit model. */
+export function currentSessionRoute(ctx: Context): { provider: string; model: string } | undefined {
+  const agents = (ctx as unknown as { agents?: AgentsLike }).agents
+  const initiator = agents?.currentInitiator?.()
+  const agent = (ctx as unknown as { agent?: AgentLike }).agent ?? initiator
+  const provider = agent?.options?.provider
+  const model = agent?.options?.model
+  if (typeof provider === 'string' && provider.length > 0 && typeof model === 'string' && model.length > 0) {
+    return { provider, model }
+  }
+  return undefined
 }
 
 async function materialize(
@@ -61,14 +93,34 @@ export async function applyImagePolicy(
   options: { imageMode?: ImageMode; imageProvider?: string; imageModel?: string },
 ): Promise<ImagePolicyResult> {
   const mode = options.imageMode ?? 'auto'
-  const provider = options.imageProvider ?? 'deepseek-official'
-  const model = options.imageModel ?? 'deepseek-v4-flash'
+  const manualProvider = options.imageProvider?.trim() ?? ''
+  const manualModel = options.imageModel?.trim() ?? ''
+  const sessionRoute = currentSessionRoute(ctx)
+  const probe = manualProvider.length > 0 && manualModel.length > 0
+    ? { provider: manualProvider, model: manualModel, source: 'manual' as const }
+    : sessionRoute !== undefined
+      ? { provider: sessionRoute.provider, model: sessionRoute.model, source: 'session' as const }
+      : undefined
+  const provider = probe?.provider
+  const model = probe?.model
   const attachments = (ctx as unknown as { attachments?: AttachmentLike }).attachments
 
   let saved = 0
   let degraded = 0
-  const useNative = mode === 'native' || (mode === 'auto' && await routeSupportsImages(ctx, provider, model))
+  const supports = mode === 'auto' && provider !== undefined && model !== undefined
+    ? await routeSupportsImages(ctx, provider, model)
+    : undefined
+  const useNative = mode === 'native' || supports === true
   const effective: ImagePolicyResult['mode'] = useNative ? 'native' : 'placeholder'
+  const reason = mode === 'auto'
+    ? supports === true
+      ? `route ${provider}/${model} advertises image input; images are kept native`
+      : supports === false
+        ? `route ${provider}/${model} advertises text-only input; images degrade to safe placeholders`
+        : probe === undefined
+          ? 'no current DSH session route and no manual probe route configured; images degrade to safe placeholders'
+          : `could not resolve image capabilities for ${provider}/${model}; images degrade to safe placeholders`
+    : undefined
 
   const process = async (block: Extract<NormalizedContentBlock, { type: 'image' }>): Promise<NormalizedContentBlock | undefined> => {
     let materialized: NormalizedContentBlock | undefined
@@ -108,5 +160,13 @@ export async function applyImagePolicy(
   const next: NormalizedSession = { ...session, turns }
   // Transfer the mapped readonly model back into the mutable runtime object the caller owns.
   Object.assign(session, next)
-  return { mode: effective, saved, degraded, provider, model }
+  return {
+    mode: effective,
+    saved,
+    degraded,
+    routeSource: probe?.source ?? 'none',
+    ...(provider !== undefined ? { provider } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+  }
 }

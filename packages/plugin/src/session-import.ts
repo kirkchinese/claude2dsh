@@ -41,6 +41,7 @@ export interface SessionImportItem {
   readonly imageMode?: 'native' | 'placeholder'
   readonly imagesSaved?: number
   readonly imagesDegraded?: number
+  readonly imageReason?: string
   readonly sidecarReferenced?: number
   readonly sidecarCopied?: number
   readonly sidecarReused?: number
@@ -139,6 +140,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
         ...(imagePolicy.mode !== undefined ? { imageMode: imagePolicy.mode } : {}),
         ...(imagePolicy.saved > 0 ? { imagesSaved: imagePolicy.saved } : {}),
         ...(imagePolicy.degraded > 0 ? { imagesDegraded: imagePolicy.degraded } : {}),
+        ...(imagePolicy.reason !== undefined ? { imageReason: imagePolicy.reason } : {}),
       }
       if (parsed.session.turns.length === 0) {
         pushItem(report, {
