@@ -33,8 +33,8 @@
   },
   "scripts": {
     "clean": "node --eval \"import('node:fs/promises').then(({ rm }) => Promise.all(['lib', 'coverage'].map((path) => rm(path, { force: true, recursive: true }))))\"",
-    "format": "prettier --check package.json tsconfig.json tsconfig.build.json eslint.config.js vitest.config.ts README.md cordis.patch.yml src test .agents/notes/implemented/architecture/*.md",
-    "format:write": "prettier --write package.json tsconfig.json tsconfig.build.json eslint.config.js vitest.config.ts README.md cordis.patch.yml src test .agents/notes/implemented/architecture/*.md",
+    "format": "prettier --check package.json tsconfig.json tsconfig.build.json eslint.config.js vitest.config.ts README.md cordis.patch.yml src test",
+    "format:write": "prettier --write package.json tsconfig.json tsconfig.build.json eslint.config.js vitest.config.ts README.md cordis.patch.yml src test",
     "lint": "eslint src test",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run",
