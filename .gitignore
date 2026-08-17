@@ -12,3 +12,6 @@ coverage/
 # local-only agent instruction files (never commit/push)
 AGENTS.md
 AGENTS_.md
+
+# Local development/validation documents are not published in the public repository.
+/docs/
