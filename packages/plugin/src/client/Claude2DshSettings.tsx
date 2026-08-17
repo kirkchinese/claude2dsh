@@ -9,6 +9,9 @@ const IMAGE_PROBE_PATH = '/plugins/claude2dsh/image-probe'
 const IMPORT_DEFAULTS_PATH = '/plugins/claude2dsh/import-defaults'
 const HOOK_SCAN_PATH = '/plugins/claude2dsh/hook-scan'
 const HOOK_APPLY_PATH = '/plugins/claude2dsh/hook-scan/apply'
+const SESSIONS_PATH = '/plugins/claude2dsh/sessions'
+const EXPORT_PATH = '/plugins/claude2dsh/export'
+const SYNC_PATH = '/plugins/claude2dsh/sync'
 
 interface SessionSourceRecord {
   sessionId: string
@@ -45,6 +48,16 @@ const empty: SettingsShape = {
   ui: { language: 'zh' },
 }
 
+async function responseError(response: Response): Promise<string> {
+  const text = await response.text()
+  try {
+    const parsed = JSON.parse(text) as { error?: string; message?: string }
+    return parsed.error ?? parsed.message ?? text
+  } catch {
+    return text
+  }
+}
+
 const COPY = {
   zh: {
     language: '语言', firstRun: '首次迁移向导', firstRunHint: '中文为默认语言；本向导只读导入，绝不写 ~/.claude。',
@@ -55,7 +68,7 @@ const COPY = {
     debounce: '防抖毫秒（最小 50）', dshToClaude: '把 DSH 轮次镜像回 Claude 副本',
     importDefaults: '导入默认值', imageMode: '图片模式', imageProvider: '能力探测路由 provider（可选；留空跟随当前会话）', imageModel: '能力探测路由模型（可选；留空跟随当前会话）', imageProbe: '图片能力探测结论', recursiveSearch: '递归搜索子目录', sourceFound: '发现',
     includeSubagentsDefault: '默认导入子会话', sidecarMax: 'sidecar 单文件最大字节',
-    writeback: '导出 / 写回', syncTarget: '同步目标', allowOriginal: '允许写回真实 ~/.claude（危险）',
+    writeback: '导出 / 写回', syncTarget: '同步目标', allowOriginal: '允许写回真实 ~/.claude（危险）', exportClaude: '导出到 Claude', syncClaude: '同步到 Claude', selectSession: '会话', writeResult: '结果',
     exportDir: '导出目录（空=默认）', hooks: 'Claude hook bridge（启动时生效）',
     hooksHint: '可选 hook 行仍通过启动环境变量 CLAUDE2DSH_HOOKS_CONFIG 激活；这些值在下次启动时生效。', hookScan: '扫描 hooks', hookApply: '保存候选并下次启动启用', hookScanned: '扫描文件', hookSupported: '可映射 command', hookSkipped: '跳过',
     hooksPath: 'hooks.json 路径', pluginRoot: '插件根目录', projectDir: '项目目录',
@@ -72,7 +85,7 @@ const COPY = {
     debounce: 'Debounce ms (min 50)', dshToClaude: 'Mirror DSH turns to the Claude copy',
     importDefaults: 'Import defaults', imageMode: 'Image mode', imageProvider: 'Probe route provider (optional; empty follows the current session)', imageModel: 'Probe route model (optional; empty follows the current session)', imageProbe: 'Image capability probe', recursiveSearch: 'Recursive search', sourceFound: 'Discovery',
     includeSubagentsDefault: 'Include subagents by default', sidecarMax: 'Sidecar max bytes per file',
-    writeback: 'Export / write-back', syncTarget: 'Sync target', allowOriginal: 'Allow writing real ~/.claude (danger)',
+    writeback: 'Export / write-back', syncTarget: 'Sync target', allowOriginal: 'Allow writing real ~/.claude (danger)', exportClaude: 'Export to Claude', syncClaude: 'Sync to Claude', selectSession: 'Session', writeResult: 'Result',
     exportDir: 'Export directory (empty = default)', hooks: 'Claude hook bridge (boot-time row)',
     hooksHint: 'The optional hook row still activates through CLAUDE2DSH_HOOKS_CONFIG at boot; these values apply after the next restart.', hookScan: 'Scan hooks', hookApply: 'Save candidate and enable next boot', hookScanned: 'Scanned files', hookSupported: 'Supported commands', hookSkipped: 'Skipped',
     hooksPath: 'hooks.json path', pluginRoot: 'Plugin root', projectDir: 'Project dir',
@@ -107,13 +120,16 @@ export function Claude2DshSettings(): React.JSX.Element {
   const [imageProbe, setImageProbe] = useState<{ routeSource?: string; provider?: string; model?: string; supports?: boolean; reason?: string } | undefined>()
   const [hookScan, setHookScan] = useState<{ scannedFiles?: number; supportedCommands?: number; skipped?: number; entries?: Array<{ sourcePath: string; event: string; supported: boolean; reason?: string; command?: string }> } | undefined>()
   const [hookApply, setHookApply] = useState<{ configPath?: string; activation?: string } | undefined>()
+  const [sessions, setSessions] = useState<Array<{ sessionId: string; cwd?: string; origin?: string }>>([])
+  const [selectedSession, setSelectedSession] = useState('')
+  const [writeResult, setWriteResult] = useState<Record<string, unknown> | undefined>()
 
   const t = useCallback((key: CopyKey): string => COPY[lang][key], [lang])
 
   const load = useCallback(async () => {
     try {
       const response = await fetch(SETTINGS_PATH, { method: 'GET' })
-      if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+      if (!response.ok) throw new Error(await responseError(response))
       const next = await response.json() as SettingsShape
       setValue(next)
       setLang(next.ui?.language === 'en' ? 'en' : 'zh')
@@ -149,9 +165,12 @@ export function Claude2DshSettings(): React.JSX.Element {
 
   useEffect(() => { void load(); void loadProbe(); void loadImportDefaults() }, [load, loadProbe, loadImportDefaults])
   useEffect(() => {
+    void fetch(SESSIONS_PATH).then(async (r) => { if (r.ok) { const b = await r.json() as { sessions: typeof sessions }; setSessions(b.sessions); setSelectedSession((current) => current || b.sessions[0]?.sessionId || '') } }).catch(() => {})
+  }, [])
+  useEffect(() => {
     void fetch(SOURCES_PATH, { method: 'GET' })
       .then(async (response) => {
-        if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+        if (!response.ok) throw new Error(await responseError(response))
         return response.json() as Promise<{ sessions: Record<string, SessionSourceRecord> }>
       })
       .then((body) => setSources(Object.values(body.sessions).sort((a, b) => a.sessionId.localeCompare(b.sessionId))))
@@ -166,7 +185,7 @@ export function Claude2DshSettings(): React.JSX.Element {
     try {
       setError(undefined)
       const response = await fetch(SETTINGS_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) })
-      if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+      if (!response.ok) throw new Error(await responseError(response))
       const next = await response.json() as SettingsShape
       setValue(next)
       setLang(next.ui?.language === 'en' ? 'en' : 'zh')
@@ -183,7 +202,7 @@ export function Claude2DshSettings(): React.JSX.Element {
     setError(undefined)
     try {
       const response = await fetch(IMPORT_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: guidePath, preview, includeSubagents: guideSubagents, recursive: value.importDefaults.recursive }) })
-      if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+      if (!response.ok) throw new Error(await responseError(response))
       setGuideResult(await response.json() as ImportReport)
       setStatus('ready')
       if (!preview) {
@@ -258,11 +277,24 @@ export function Claude2DshSettings(): React.JSX.Element {
       </section>
 
       <section style={card}>
+        <h3 style={{ margin: 0 }}>{t('exportClaude')} / {t('syncClaude')}</h3>
+        <div style={row}><span style={label}>{t('selectSession')}</span>
+          <select style={input} value={selectedSession} onChange={(event) => setSelectedSession(event.target.value)}>
+            {sessions.map((item) => <option key={item.sessionId} value={item.sessionId}>{item.sessionId}{item.origin === 'subagent' ? ' · subagent' : ''}</option>)}
+          </select></div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" style={button} onClick={() => { void fetch(EXPORT_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: selectedSession }) }).then(async (r) => setWriteResult(await r.json())).catch((cause) => setError(String(cause))) }}>{t('exportClaude')}</button>
+          <button type="button" style={button} onClick={() => { void fetch(SYNC_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: selectedSession, dryRun: true }) }).then(async (r) => setWriteResult(await r.json())).catch((cause) => setError(String(cause))) }}>{t('syncClaude')}</button>
+        </div>
+        {writeResult !== undefined ? <pre style={{ margin: 0, fontSize: 11, whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 180 }}>{JSON.stringify(writeResult, null, 2)}</pre> : null}
+      </section>
+
+      <section style={card}>
         <h3 style={{ margin: 0 }}>{t('hooks')}</h3>
         <p style={{ margin: 0, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('hooksHint')}</p>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button type="button" style={button} onClick={() => { void fetch(HOOK_SCAN_PATH).then(async (r) => { if (r.ok) setHookScan(await r.json() as typeof hookScan); else setError(`${r.status} ${await r.text()}`) }).catch((cause) => setError(String(cause))) }}>{t('hookScan')}</button>
-          <button type="button" style={button} onClick={() => { void fetch(HOOK_APPLY_PATH, { method: 'POST' }).then(async (r) => { const body = await r.json() as typeof hookApply; if (r.ok) setHookApply(body); else setError(`${r.status} ${JSON.stringify(body)}`) }).catch((cause) => setError(String(cause))) }}>{t('hookApply')}</button>
+          <button type="button" style={button} onClick={() => { void fetch(HOOK_SCAN_PATH).then(async (r) => { if (r.ok) setHookScan(await r.json() as typeof hookScan); else setError(await responseError(r)) }).catch((cause) => setError(String(cause))) }}>{t('hookScan')}</button>
+          <button type="button" style={button} onClick={() => { void fetch(HOOK_APPLY_PATH, { method: 'POST' }).then(async (r) => { const body = await r.json() as typeof hookApply & { error?: string }; if (r.ok) setHookApply(body); else setError(body?.error ?? JSON.stringify(body ?? {})) }).catch((cause) => setError(String(cause))) }}>{t('hookApply')}</button>
         </div>
         {hookScan !== undefined ? <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('hookScanned')}={hookScan.scannedFiles ?? 0} · {t('hookSupported')}={hookScan.supportedCommands ?? 0} · {t('hookSkipped')}={hookScan.skipped ?? 0}</div> : null}
         {(hookScan?.entries ?? []).slice(0, 8).map((entry, index) => (

@@ -9,6 +9,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { currentSessionRoute, probeImageRoute } from './image-policy.ts'
 import { discoverClaudeHooks, saveDiscoveredHooks } from './hook-discovery.ts'
+import { exportClaudeSession } from './export-claude.ts'
+import { syncClaudeSession } from './sync-claude.ts'
 import { resolveDshHome } from './registry.ts'
 
 export const CLAUDE2DSH_SETTINGS_PATH = '/plugins/claude2dsh/settings'
@@ -18,6 +20,9 @@ export const CLAUDE2DSH_IMAGE_PROBE_PATH = '/plugins/claude2dsh/image-probe'
 export const CLAUDE2DSH_IMPORT_DEFAULTS_PATH = '/plugins/claude2dsh/import-defaults'
 export const CLAUDE2DSH_HOOK_SCAN_PATH = '/plugins/claude2dsh/hook-scan'
 export const CLAUDE2DSH_HOOK_APPLY_PATH = '/plugins/claude2dsh/hook-scan/apply'
+export const CLAUDE2DSH_SESSIONS_PATH = '/plugins/claude2dsh/sessions'
+export const CLAUDE2DSH_EXPORT_PATH = '/plugins/claude2dsh/export'
+export const CLAUDE2DSH_SYNC_PATH = '/plugins/claude2dsh/sync'
 
 function trustedRequest(req: IncomingMessage): boolean {
   const remote = req.socket.remoteAddress
@@ -84,6 +89,63 @@ export function registerClaude2dshSettingsRoutes(ctx: Context, runtime: Settings
       },
     })
     disposers.push(dispose)
+    disposers.push(webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_SESSIONS_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+        try {
+          const headers = await ctx.sessionPersistence.list()
+          json(res, 200, { sessions: headers.map((header) => ({ sessionId: String(header.id), cwd: header.cwd, origin: header.origin, delegationDepth: header.delegationDepth, createdAt: header.createdAt })) })
+        } catch (error) {
+          json(res, 500, { error: safeMessage(error) })
+        }
+      },
+    }))
+    disposers.push(webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_EXPORT_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+        try {
+          const body = await readJson(req)
+          if (typeof body.sessionId !== 'string' || body.sessionId.trim().length === 0) throw new Error('sessionId must be a non-empty string')
+          const result = await exportClaudeSession(ctx, {
+            sessionId: body.sessionId,
+            ...(typeof body.outputDir === 'string' && body.outputDir.trim().length > 0 ? { outputDir: body.outputDir } : {}),
+            allowOriginalClaudeDir: body.allowOriginalClaudeDir === true,
+            force: body.force === true,
+          }, resolveDshHome())
+          json(res, 200, result)
+        } catch (error) {
+          json(res, 400, { error: safeMessage(error) })
+        }
+      },
+    }))
+    disposers.push(webServer.register({
+      kind: 'exact',
+      path: CLAUDE2DSH_SYNC_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+        if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+        try {
+          const body = await readJson(req)
+          if (typeof body.sessionId !== 'string' || body.sessionId.trim().length === 0) throw new Error('sessionId must be a non-empty string')
+          const result = await syncClaudeSession(ctx, {
+            sessionId: body.sessionId,
+            target: body.target === 'source' ? 'source' : 'copy',
+            allowOriginalClaudeDir: body.allowOriginalClaudeDir === true,
+            force: body.force === true,
+            dryRun: body.dryRun === true,
+          }, resolveDshHome())
+          json(res, 200, result)
+        } catch (error) {
+          json(res, 400, { error: safeMessage(error) })
+        }
+      },
+    }))
     disposers.push(webServer.register({
       kind: 'exact',
       path: CLAUDE2DSH_HOOK_SCAN_PATH,
