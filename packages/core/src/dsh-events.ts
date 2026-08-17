@@ -219,6 +219,17 @@ export function synthesizeDshSession(input: NormalizedSession): SynthesizedSessi
   const events: SynthesizedSessionEvent[] = []
   const stats: SynthesizeStats = { turns: 0, steps: 0, messages: 0, toolCalls: 0, toolResults: 0, synthesizedToolResults: 0 }
 
+  if (input.origin === 'subagent') {
+    const firstPrompt = input.turns[0]?.prompt ?? 'Claude subagent'
+    const label = normalizeTitle(input.title) ?? truncateUtf8(firstPrompt, MAX_TITLE_BYTES)
+    events.push(event('subagent/descriptor', events.length, input.createdAt, {
+      version: 2,
+      mode: 'one-shot',
+      provider: 'claude2dsh',
+      label,
+    }))
+  }
+
   for (const turn of input.turns) {
     stats.turns += 1
     const turnTime = turn.timestamp ?? input.createdAt

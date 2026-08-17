@@ -92,3 +92,19 @@ test('truncates titles by UTF-8 bytes and normalizes whitespace', () => {
   const data = titleEvent.data as { title: string }
   assert.ok(Buffer.byteLength(data.title, 'utf8') <= 80)
 })
+
+test('subagent synthesis prepends a one-shot subagent descriptor', () => {
+  const session: Parameters<typeof synthesizeDshSession>[0] = {
+    id: 'claude-sub',
+    source: { tool: 'claude-code', path: '/tmp/sub.jsonl', sessionId: 'sub' },
+    createdAt: 1,
+    origin: 'subagent',
+    parentSession: 'claude-parent',
+    turns: [{ number: 1, prompt: 'subagent work', steps: [] }],
+  }
+  const synth = synthesizeDshSession(session)
+  const descriptor = synth.events.find((event) => event.type === 'subagent/descriptor')
+  assert.ok(descriptor !== undefined)
+  assert.deepEqual(descriptor.data, { version: 2, mode: 'one-shot', provider: 'claude2dsh', label: 'subagent work' })
+  assert.equal(descriptor.seq, 0)
+})
