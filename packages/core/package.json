@@ -1,6 +1,6 @@
 {
   "name": "@claude2dsh/core",
-  "version": "0.2.0-rc.4",
+  "version": "0.2.0-rc.5",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

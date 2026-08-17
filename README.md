@@ -15,7 +15,7 @@
 Claude Code is the first source adapter in a multi-tool migration layer. Claude2DSH preserves the useful conversation structure, writes through DSH's native persistence APIs, and keeps the original Claude directory read-only by default.
 
 > [!NOTE]
-> `0.2.0-rc.4` is a release candidate. The Awesome badge means the project is included in the curated [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) list under **Sessions & Messages**. The automatic [awesome-dsh-plugins](https://github.com/AdamPlatin123/awesome-dsh-plugins) radar has not marked it as runtime-verified; the badge does not claim that verification.
+> `0.2.0-rc.5` is a release candidate. The Awesome badge means the project is included in the curated [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) list under **Sessions & Messages**. The automatic [awesome-dsh-plugins](https://github.com/AdamPlatin123/awesome-dsh-plugins) radar has not marked it as runtime-verified; the badge does not claim that verification.
 
 ## Why Claude2DSH
 
@@ -42,7 +42,7 @@ Requirements: Node.js `>=22.19.0`, pnpm, and the `dsh` CLI.
 
 ```sh
 # Install the published plugin into DSH's built-in headed profile
-dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.4
+dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.5
 
 # Start the browser UI; the terminal prints the local URL
 dsh web
@@ -73,7 +73,7 @@ Preview is read-only and returns an itemized plan before any DSH write.
 
 ![Real Claude2DSH Preview import report in the default Chinese UI, showing one privacy-safe synthetic session ready to import](assets/migration-preview.png)
 
-This is what a successful run looks like. The screenshot comes from the real `0.2.0-rc.4` UI using a synthetic, privacy-safe Claude transcript.
+This is what a successful run looks like. The screenshot comes from the real `0.2.0-rc.5` UI using a synthetic, privacy-safe Claude transcript.
 
 ![Real Claude2DSH import result in the default Chinese UI, showing one newly imported synthetic session and zero failures](assets/migration-result.png)
 
@@ -135,7 +135,7 @@ The following real screenshots use the default Chinese UI and synthetic data; la
 
 ## Current limitations
 
-- **Release-candidate status:** the public package is `0.2.0-rc.4`; interfaces and on-disk formats are not presented as a stable compatibility promise yet.
+- **Release-candidate status:** the public package is `0.2.0-rc.5`; interfaces and on-disk formats are not presented as a stable compatibility promise yet.
 - **Hook bridge:** the upstream bridge supports **7 of Claude Code's 30 hook events**, only `type: "command"` handlers, and partial semantics per supported event. Full hook compatibility is a roadmap goal, not a current claim.
 - **Vision acceptance:** the native image path is implemented, but it has not been accepted against a real vision-capable DSH model route. The shipped DeepSeek adapter declares text-only input.
 - **Auto mirror:** it is opt-in and off by default. It writes DSH turns only to the safe Claude export copy; when both sides grow, it pauses and reports a conflict. Automatic merge is not implied.

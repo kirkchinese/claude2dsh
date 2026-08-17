@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0-rc.5 — 2026-08-17
+
+### Fixed
+
+- The npm package now carries every official DSH peer required by the optional hook bridge, so a clean `dsh plugin --profile web add` boots with `CLAUDE2DSH_HOOKS_CONFIG` and reports no peer issues. 0.2.0-rc.4 is deprecated because it omitted these peers.
+
 ## 0.2.0-rc.4 — 2026-08-17
 
 ### Fixed
