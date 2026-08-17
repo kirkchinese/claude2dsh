@@ -8,9 +8,9 @@
 [![Node.js >=22.19](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=nodedotjs&logoColor=white)](package.json)
 [![license: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
-[简体中文](README.zh.md) · [Design philosophy](docs/design-philosophy.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
+[简体中文](README.zh.md)
 
-![Abstract bridge carrying conversation nodes and software assets from an amber source environment into a cyan destination environment](docs/assets/hero.webp)
+![Abstract bridge carrying conversation nodes and software assets from an amber source environment into a cyan destination environment](assets/hero.webp)
 
 Claude Code is the first source adapter in a multi-tool migration layer. Claude2DSH preserves the useful conversation structure, writes through DSH's native persistence APIs, and keeps the original Claude directory read-only by default.
 
@@ -23,9 +23,9 @@ Claude Code is the first source adapter in a multi-tool migration layer. Claude2
 | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Claude turns become DSH-native session events that DSH can inspect, replay, and resume. | Skills, user-global instructions, project memory, tool-output sidecars, subagent transcripts, and plugin assets have explicit migration paths. | Export and sync target a safe copy under `$DSH_HOME` by default. Concurrent edits pause instead of overwriting either side. |
 
-The governing principle is **foolproof out of the box**: the default path produces a visible result without requiring users to understand profiles or bundles first, while dangerous write-back remains explicitly gated. See the full [design criteria](docs/design-philosophy.md).
+The governing principle is **zero-configuration by default**: the default path produces a visible result without requiring users to understand profiles or bundles first, while dangerous write-back remains explicitly gated.
 
-![Architecture diagram showing read-only Claude Code import through the Claude adapter and normalized IR into native DSH sessions, plus explicit export through a safe copy](docs/assets/architecture.png)
+![Architecture diagram showing read-only Claude Code import through the Claude adapter and normalized IR into native DSH sessions, plus explicit export through a safe copy](assets/architecture.png)
 
 ## Quickstart
 
@@ -47,23 +47,23 @@ Then:
 4. Choose a language, confirm the Claude sessions directory, and optionally include subagent/workflow transcripts.
 5. Click **Preview import**, inspect the counts and item report, then click **Run import**.
 
-![Five-step quickstart from installing the published plugin through previewing and importing a native resumable DSH session](docs/assets/quickstart-flow.png)
+![Five-step quickstart from installing the published plugin through previewing and importing a native resumable DSH session](assets/quickstart-flow.png)
 
 The first screen is the migration guide; Chinese is the default UI language and English is selectable.
 
-![Real Claude2DSH first-run migration guide in English, showing language, source directory, subagent option, Preview import, Run import, and Auto mirror defaults](docs/assets/migration-wizard-en.png)
+![Real Claude2DSH first-run migration guide in English, showing language, source directory, subagent option, Preview import, Run import, and Auto mirror defaults](assets/migration-wizard-en.png)
 
 Preview is read-only and returns an itemized plan before any DSH write.
 
-![Real Claude2DSH Preview import report in the default Chinese UI, showing one privacy-safe synthetic session ready to import](docs/assets/migration-preview.png)
+![Real Claude2DSH Preview import report in the default Chinese UI, showing one privacy-safe synthetic session ready to import](assets/migration-preview.png)
 
 This is what a successful run looks like. The screenshot comes from the real `0.2.0-rc.2` UI using a synthetic, privacy-safe Claude transcript.
 
-![Real Claude2DSH import result in the default Chinese UI, showing one newly imported synthetic session and zero failures](docs/assets/migration-result.png)
+![Real Claude2DSH import result in the default Chinese UI, showing one newly imported synthetic session and zero failures](assets/migration-result.png)
 
 ### Repository helper
 
-If you cloned this repository, the helper performs the same install into the main `web` profile and starts the UI on port `18781`:
+If you cloned this repository, the helper performs the same install into the main `web` profile and starts the UI on the default local port:
 
 ```sh
 bash scripts/install-claude2dsh.sh
@@ -104,9 +104,9 @@ The Claude2DSH settings page keeps the first migration and safety-critical defau
 
 The following real screenshots use the default Chinese UI and synthetic data; labels switch with the language selector.
 
-![Claude2DSH Settings sections for Auto mirror, Import defaults, and Export or write-back, with safe defaults visible](docs/assets/settings-import-export.png)
+![Claude2DSH Settings sections for Auto mirror, Import defaults, and Export or write-back, with safe defaults visible](assets/settings-import-export.png)
 
-![Claude2DSH Settings sections for the startup hook bridge and session sources, showing one privacy-safe synthetic Claude main session](docs/assets/settings-hooks-sources.png)
+![Claude2DSH Settings sections for the startup hook bridge and session sources, showing one privacy-safe synthetic Claude main session](assets/settings-hooks-sources.png)
 
 ## Safety model
 
@@ -126,18 +126,6 @@ The following real screenshots use the default Chinese UI and synthetic data; la
 - **Plugin compatibility:** inventory and selected assets can migrate, but arbitrary Claude plugin runtime behavior is not automatically portable to DSH.
 - **Source adapters:** Claude Code is currently the only adapter. Codex and other tools remain roadmap work.
 - **Session-list decoration:** DSH has no per-session sidebar-row extension point, so source identity is shown in Settings and through `claude2dsh_session_sources` instead.
-
-## Validation evidence
-
-The project records reproducible checks in [docs/validation.md](docs/validation.md); these are not marketing estimates.
-
-| Acceptance path                      | Recorded result                                                                                                                      |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Main Claude transcripts              | 57 imported, 1 non-conversation skipped, 22,163 native events; every imported session inspected and resumed through DSH              |
-| Claude skills                        | 39 copied skills discovered through DSH's native skill registry; a repeated import created no duplicates                             |
-| Main + subagent/workflow transcripts | 782 imported, 1 skipped, 86,866 events; all 782 sessions inspected successfully                                                      |
-| Bidirectional continuity             | Claude → DSH → Claude was exercised with real Claude and DSH model calls in isolated homes                                           |
-| Published UI path                    | `@claude2dsh/plugin@0.2.0-rc.2` installed from npm into an isolated `web` profile; Settings and Preview import returned successfully |
 
 ## FAQ
 
@@ -162,29 +150,6 @@ Both can execute work after the first import. They stay opt-in so the user sees 
 
 </details>
 
-## Documentation
-
-| Document                                             | Purpose                                                        |
-| ---------------------------------------------------- | -------------------------------------------------------------- |
-| [Design philosophy](docs/design-philosophy.md)       | Out-of-box and safety criteria                                 |
-| [Architecture](docs/architecture.md)                 | Adapter, normalized IR, persistence, and reverse serialization |
-| [Validation record](docs/validation.md)              | Reproducible evidence from each acceptance round               |
-| [Roadmap](docs/roadmap.md)                           | Completed work and explicit future targets                     |
-| [Gap list](docs/gap-list.md)                         | Target-state capability comparison                             |
-| [Session Move interop](docs/session-move-interop.md) | Read-only integration with `dsh-session-move`                  |
-| [Release checklist](docs/release-checklist.md)       | Packaging and release requirements                             |
-| [Changelog](CHANGELOG.md)                            | Published and unreleased changes                               |
-
-## Development
-
-```sh
-pnpm install
-pnpm run check
-pnpm -r build && pnpm -r typecheck && pnpm -r test
-```
-
-The end-to-end scripts use isolated DSH homes and source-data copies. See [the validation record](docs/validation.md) for the exact command matched to each acceptance path.
-
 ## License and acknowledgements
 
-[MIT](LICENSE). Claude2DSH is a clean-room implementation informed by the public behavior of [`dsh-chat-import`](https://github.com/Nwflower/dsh-chat-import) (MIT) and [`dsh-claude-move`](https://github.com/PerryLink/dsh-claude-move) (Apache-2.0). Thanks to both projects for useful reference points. Hook compatibility delegates to the official DeepSeek Harness Claude Code hook bridge package.
+[MIT](LICENSE). The project was designed independently and benefited from the published work of [`dsh-chat-import`](https://github.com/Nwflower/dsh-chat-import) (MIT) and [`dsh-claude-move`](https://github.com/PerryLink/dsh-claude-move) (Apache-2.0); thanks to both projects for useful reference points. Hook compatibility delegates to the official DeepSeek Harness Claude Code hook bridge package.

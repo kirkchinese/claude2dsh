@@ -58,7 +58,7 @@ NODE
   fi
 fi
 
-PORT="${CLAUDE2DSH_PORT:-18781}"
+PORT="${CLAUDE2DSH_PORT:-3080}"
 if [ "$PORT" = "0" ]; then
   PORT=$(node -e "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")
 fi
@@ -66,7 +66,13 @@ PROFILE_DIR="$DSH_HOME/profiles/$PROFILE"
 PIDFILE="$PROFILE_DIR/claude2dsh-web.pid"
 LOG="$PROFILE_DIR/claude2dsh-web.log"
 
-if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+if curl -fsS "http://127.0.0.1:$PORT/plugins/claude2dsh/settings" >/dev/null 2>&1; then
+  echo "main web profile already serves Claude2DSH on $PORT"
+elif node -e "const net=require('node:net');const s=net.connect({host:'127.0.0.1',port:Number(process.argv[1])},()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(1))" "$PORT"; then
+  echo "ERROR: port $PORT is already in use by another process." >&2
+  echo "Stop that dsh web process and restart it so the new plugin composition loads, or set CLAUDE2DSH_PORT=0 for a free port." >&2
+  exit 1
+elif [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
   echo "already running: $(cat "$PIDFILE")"
 else
   echo "== starting your web UI on http://127.0.0.1:$PORT =="
