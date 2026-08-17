@@ -63,7 +63,7 @@ This is what a successful run looks like. The screenshot comes from the real `0.
 
 ### Repository helper
 
-If you cloned this repository, the helper performs the same install into the main `web` profile and starts the UI on the default local port:
+If you cloned this repository, the helper performs the same install into the main `web` profile and starts the UI on DSH's default local port (`3080`):
 
 ```sh
 bash scripts/install-claude2dsh.sh

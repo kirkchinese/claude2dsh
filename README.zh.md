@@ -63,7 +63,7 @@ dsh web
 
 ### 仓库辅助脚本
 
-如果已经克隆本仓库，辅助脚本会执行同样的主 `web` profile 安装，并在默认本地端口启动 UI：
+如果已经克隆本仓库，辅助脚本会执行同样的主 `web` profile 安装，并在 DSH 默认本地端口（`3080`）启动 UI：
 
 ```sh
 bash scripts/install-claude2dsh.sh
