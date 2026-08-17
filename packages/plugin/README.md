@@ -5,7 +5,7 @@ DeepSeek Harness plugin for Claude2DSH. It imports Claude Code conversations and
 ## Install
 
 ```sh
-dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.3
+dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.4
 dsh web
 ```
 
