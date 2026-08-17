@@ -19,9 +19,9 @@
 - pack 四包 manifest 0.2.0-rc.2，无 workspace 协议，plugin 含
   `lib/client.js` 与 cordis.patch.yml。
 - Playwright 实测首次迁移向导与执行结果；round8 脚本 curl 证据。
-- 未发布、未打 tag；npm latest 仍 0.2.0-rc.1。
+- 已发布：npm latest=0.2.0-rc.2；GitHub pre-release 已创建。
 
 ## 发布状态
 
 - npm 四包已发布且 latest=0.2.0-rc.2；主 `web` profile 空环境验收通过。
-- GitHub push/tag/pre-release 随后执行。
+- GitHub push/tag/pre-release 已完成。

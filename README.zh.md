@@ -18,7 +18,7 @@
 
 ```sh
 # 1. 把插件装进内置有头 profile
-dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.1
+dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.2
 
 # 2. 启动浏览器 UI（终端会打印 http://127.0.0.1:3080）
 dsh web
@@ -41,7 +41,7 @@ bash scripts/install-claude2dsh.sh
 没有浏览器的自动化环境直接用工具：
 
 ```sh
-dsh plugin --profile claude2dsh add @claude2dsh/plugin@0.2.0-rc.1
+dsh plugin --profile claude2dsh add @claude2dsh/plugin@0.2.0-rc.2
 CLAUDE2DSH_TEST_IMPORT=~/.claude/projects dsh --profile claude2dsh
 ```
 

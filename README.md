@@ -18,7 +18,7 @@ Requirements: Node.js `>=22.19.0`, pnpm, and the `dsh` CLI.
 
 ```sh
 # 1. Install the plugin into the built-in headed profile
-dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.1
+dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.2
 
 # 2. Start the browser UI (prints http://127.0.0.1:3080)
 dsh web
@@ -41,7 +41,7 @@ The script installs the plugin into your main `web` profile and starts the brows
 Automation that has no browser can use the tools directly:
 
 ```sh
-dsh plugin --profile claude2dsh add @claude2dsh/plugin@0.2.0-rc.1
+dsh plugin --profile claude2dsh add @claude2dsh/plugin@0.2.0-rc.2
 CLAUDE2DSH_TEST_IMPORT=~/.claude/projects dsh --profile claude2dsh
 ```
 
