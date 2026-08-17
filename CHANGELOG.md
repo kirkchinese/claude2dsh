@@ -4,7 +4,7 @@
 
 ### Added
 
-- Foolproof design criteria (`docs/design-philosophy.md`) and rewritten bilingual README with capability how-tos and FAQ.
+- Zero-configuration-by-default criteria and rewritten bilingual README with capability how-tos and FAQ.
 - One-command default headed installer (`scripts/install-claude2dsh.sh`) that repairs the profile manifest when pnpm ignores koffi's build script.
 - First-run Web migration guide (language → source → preview → execute → result), Chinese default and bilingual Settings.
 - Round-8 empty-environment headed acceptance script.
