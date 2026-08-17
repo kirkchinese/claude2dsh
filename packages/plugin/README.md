@@ -19,7 +19,7 @@ The bundle registers a `claude2dsh` settings namespace and a **Claude2DSH** page
 - `claude2dsh_session_sources`: list/resolve source markers (`claude-main`/`claude-subagent`/`claude-merged`).
 - `claude2dsh_plugin_inventory`: read-only inventory of installed Claude Code plugins; `apply:true` copies only declarative SKILL.md assets. Hooks and app-server runtime code are never executed.
 - `claude2dsh_autosync`: `status` shows the mirror's pause state, reason, recent conflicts and pending queue; `resume` clears a conflict pause after the two sides were reconciled with explicit tools.
-- `claude2dsh_import` image policy: `imageMode:"auto"` probes the target model's `inputModalities`. Image-capable models receive native DSH attachment blocks; text-only models receive safe placeholders while attachments are retained and re-projected on model switch.
+- `claude2dsh_import` image policy: `imageMode:"auto"` follows the current DSH session route. Leave Settings provider/model empty to follow the live session, or fill them to probe an explicit route; text-only routes degrade images to safe placeholders while attachments are retained and re-projected on model switch. Each import item records the route and reason.
 
 ## Safety
 
@@ -28,4 +28,4 @@ The bundle registers a `claude2dsh` settings namespace and a **Claude2DSH** page
 ## Optional features
 
 - **Auto mirror (default off)**: set `autoSync.enabled: true` in the plugin row config to watch the Claude projects directory and mirror completed DSH turns to the safe export copy. The real `~/.claude` directory is never written by auto-sync. Live sessions are skipped, the pending queue survives restart, and double-side growth pauses the mirror with a conflict report (`claude2dsh_autosync` inspects/resumes).
-- **Claude hook bridge (default off)**: set `CLAUDE2DSH_HOOKS_CONFIG=/path/to/hooks.json` before boot to activate the upstream `@deepseek-ai/dsh-hooks-claude-code` bridge. Invalid or unreadable config fails boot with the exact path and reason. Only command handlers for the seven mapped hook events are supported; hook outcomes are persisted as `hook/invoked` + `hook/result` session-log events. See that package's README for the exact subset.
+- **Claude hook bridge (default off)**: set `CLAUDE2DSH_HOOKS_CONFIG=/path/to/hooks.json` before boot to activate the upstream `@deepseek-ai/dsh-hooks-claude-code` bridge. Invalid or unreadable config fails boot with the exact path and reason. The Settings page can read-only scan Claude settings/plugin hooks, preview mappable command handlers, and save a candidate for the next boot. Only command handlers for the seven mapped hook events are supported; hook outcomes are persisted as `hook/invoked` + `hook/result` session-log events. See that package's README for the exact subset.
