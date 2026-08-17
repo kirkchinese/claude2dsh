@@ -61,9 +61,10 @@ export async function probeImageRoute(ctx: Context, provider: string, model: str
 
 /** Current DSH session route, when one is live and carries an explicit model. */
 export function currentSessionRoute(ctx: Context): { provider: string; model: string } | undefined {
-  const agents = (ctx as unknown as { agents?: AgentsLike }).agents
+  const reflect = ctx as unknown as { get?(name: string, strict?: boolean): unknown }
+  const agents = reflect.get?.('agents', false) as AgentsLike | undefined
   const initiator = agents?.currentInitiator?.()
-  const agent = (ctx as unknown as { agent?: AgentLike }).agent ?? initiator
+  const agent = (reflect.get?.('agent', false) as AgentLike | undefined) ?? initiator
   const provider = agent?.options?.provider
   const model = agent?.options?.model
   if (typeof provider === 'string' && provider.length > 0 && typeof model === 'string' && model.length > 0) {

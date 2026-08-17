@@ -89,23 +89,23 @@ bash scripts/install-claude2dsh.sh
 
 ## 能力：什么场景、怎么用
 
-| 能力             | 使用场景                                                  | 入口与可见结果                                                                                                      |
-| ---------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 会话导入         | 首次迁移，或 Claude 转录新增轮次后                        | **设置 → Claude2DSH → 首次迁移**，或 `claude2dsh_import`；报告 `previewed/imported/already/appended/skipped/failed` |
-| 技能导入         | 让 Claude skills 成为 DSH 原生可发现资产                  | `claude2dsh_import_skills`；技能复制到 `$DSH_HOME/skills` 并进入 DSH 技能发现                                       |
-| 全局上下文       | 把用户全局 `~/.claude/CLAUDE.md` 迁入 DSH 全局指令        | `claude2dsh_import_context`；先预览，绝不覆盖内容不同的 `$DSH_HOME/AGENTS.md`                                       |
-| 项目记忆         | 让一个项目的 `MEMORY.md` 与 `memory/*.md` 在 DSH 中可发现 | `claude2dsh_import_memory`；每个项目生成一个 DSH 技能包                                                             |
-| 导出回 Claude    | 想在 Claude Code 继续某个 DSH 会话                        | `claude2dsh_export`；在 `$DSH_HOME/claude2dsh/exports` 写入经校验的 JSONL 副本                                      |
-| 同步回写         | 把 DSH 新轮次追加到已有 Claude 导出副本                   | `claude2dsh_sync`；报告追加的轮次、事件与 JSONL 记录数                                                              |
-| 自动镜像         | 持续监控 Claude 新轮次，并把 DSH 轮次镜像到安全副本       | **设置 → 自动镜像**；`claude2dsh_autosync` 查看状态或恢复暂停队列                                                   |
-| 冲突合并         | 同步水位后双端都增长，且任一版本都不能丢                  | `claude2dsh_merge`；计算或创建新的合并副本，不修改两侧原件                                                          |
-| 工具输出 sidecar | 转录引用了较大的持久化工具输出                            | `claude2dsh_sidecars`；列出/解析复制文件，并记录缺失或超限项                                                        |
-| 会话来源         | 区分 Claude 主会话、子会话与合并会话                      | **设置 → 会话来源**，或 `claude2dsh_session_sources`；显示来源类型与路径                                            |
-| 插件盘点         | 不运行 Claude 插件代码，只检查其中的资产                  | `claude2dsh_plugin_inventory`；dry-run 报告技能、命令、agent、prompt、hook 与 marketplace                           |
-| 图片策略         | 保留转录图片，同时尊重所选模型的输入模态                  | 默认 `imageMode: "auto"`；在**设置 → 导入默认值**调整策略                                                           |
-| Hook bridge      | 复用当前已支持的 Claude command hook 子集                 | 设置 `CLAUDE2DSH_HOOKS_CONFIG`，并填写**设置 → Claude hook bridge**启动字段；调用与结果进入会话日志                 |
+| 能力             | 使用场景                                                  | 入口与可见结果                                                                                                                                                    |
+| ---------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 会话导入         | 首次迁移，或 Claude 转录新增轮次后                        | **设置 → Claude2DSH → 首次迁移**，或 `claude2dsh_import`；报告 `previewed/imported/already/appended/skipped/failed`                                               |
+| 技能导入         | 让 Claude skills 成为 DSH 原生可发现资产                  | `claude2dsh_import_skills`；技能复制到 `$DSH_HOME/skills` 并进入 DSH 技能发现                                                                                     |
+| 全局上下文       | 把用户全局 `~/.claude/CLAUDE.md` 迁入 DSH 全局指令        | `claude2dsh_import_context`；先预览，绝不覆盖内容不同的 `$DSH_HOME/AGENTS.md`                                                                                     |
+| 项目记忆         | 让一个项目的 `MEMORY.md` 与 `memory/*.md` 在 DSH 中可发现 | `claude2dsh_import_memory`；每个项目生成一个 DSH 技能包                                                                                                           |
+| 导出回 Claude    | 想在 Claude Code 继续某个 DSH 会话                        | `claude2dsh_export`；在 `$DSH_HOME/claude2dsh/exports` 写入经校验的 JSONL 副本                                                                                    |
+| 同步回写         | 把 DSH 新轮次追加到已有 Claude 导出副本                   | `claude2dsh_sync`；报告追加的轮次、事件与 JSONL 记录数                                                                                                            |
+| 自动镜像         | 持续监控 Claude 新轮次，并把 DSH 轮次镜像到安全副本       | **设置 → 自动镜像**；`claude2dsh_autosync` 查看状态或恢复暂停队列                                                                                                 |
+| 冲突合并         | 同步水位后双端都增长，且任一版本都不能丢                  | `claude2dsh_merge`；计算或创建新的合并副本，不修改两侧原件                                                                                                        |
+| 工具输出 sidecar | 转录引用了较大的持久化工具输出                            | `claude2dsh_sidecars`；列出/解析复制文件，并记录缺失或超限项                                                                                                      |
+| 会话来源         | 区分 Claude 主会话、子会话与合并会话                      | **设置 → 会话来源**，或 `claude2dsh_session_sources`；显示来源类型与路径                                                                                          |
+| 插件盘点         | 不运行 Claude 插件代码，只检查其中的资产                  | `claude2dsh_plugin_inventory`；dry-run 报告技能、命令、agent、prompt、hook 与 marketplace                                                                         |
+| 图片策略         | 保留转录图片，同时尊重所选模型的输入模态                  | `imageMode: "auto"` 自动跟随当前 DSH 会话路由；探测路由 provider/model 留空即跟随会话，填写则覆盖。Settings 页面显示当前探测结论，每个导入条目记录降级/升格原因。 |
+| Hook bridge      | 复用当前已支持的 Claude command hook 子集                 | **设置 → Claude hook bridge** 只读扫描 Claude 设置与插件 hooks，预览可映射的 command hook，并可保存候选供下次启动启用；不支持类型会报告并跳过                     |
 
-会话导入具备幂等性：再次运行会报告已存在，不会复制一份。项目级 `CLAUDE.md` 不需要复制，因为 DSH 已原生读取它；只有用户全局上下文需要转换。
+会话导入具备幂等性：再次运行会报告已存在，不会复制一份。默认递归搜索并感知 `CLAUDE_CONFIG_DIR`（回退到 `~/.claude/projects`），首启向导会显示实际来源目录与发现/导入数量。项目级 `CLAUDE.md` 不需要复制，因为 DSH 已原生读取它；只有用户全局上下文需要转换。
 
 ## Settings 界面导览
 
