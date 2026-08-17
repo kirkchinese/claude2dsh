@@ -2,6 +2,15 @@
 
 DeepSeek Harness plugin for Claude2DSH. It imports Claude Code conversations and skills into DSH as native resumable sessions, and exports/syncs DSH sessions back into Claude Code JSONL.
 
+## Install
+
+```sh
+dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.3
+dsh web
+```
+
+Then open **Settings → Claude2DSH**.
+
 ## Settings
 
 The bundle registers a `claude2dsh` settings namespace and a **Claude2DSH** page in the DSH Settings UI. It edits auto-mirror, import defaults, export/write-back and hook-bridge fields. The host schema validates every save; invalid values return a 400 with the schema error. Tool arguments and `CLAUDE2DSH_*` environment variables remain call-time overrides.

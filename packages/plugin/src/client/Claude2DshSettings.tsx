@@ -74,6 +74,12 @@ const COPY = {
     hooksPath: 'hooks.json 路径', pluginRoot: '插件根目录', projectDir: '项目目录',
     sessionSources: '会话来源', noSources: '还没有导入会话。', sessionId: '会话 ID', kind: '来源', sourcePathCol: '来源路径',
     noImportYet: '尚未执行导入。', previewed: '预览', imported: '新导入', already: '已存在', appended: '追加', skipped: '跳过', failed: '失败',
+    notScanned: '尚未扫描', subagentHint: '子会话会以 one-shot 子代理记录导入，可在父会话的子代理列表中查看。',
+    imageModesHint: 'auto：探测后选择 · placeholder：始终使用安全文本占位 · native：强制图片块',
+    autoMirrorHint: '监控 Claude projects，并仅把完成的 DSH 轮次镜像到安全导出副本；绝不写真实 ~/.claude。',
+    writebackHint: 'copy 写 DSH_HOME 下的安全导出副本；source 指向原始 Claude 转录，还需要打开下方危险开关。',
+    hookScanHint: '扫描读取 $CLAUDE_CONFIG_DIR 设置与已装插件 hook 文件；下方三个字段是启动输入，不是扫描输入。',
+    filterSources: '筛选会话',
     readOnly: '只读导入；所有写入仅进入 DSH。',
   },
   en: {
@@ -86,11 +92,17 @@ const COPY = {
     importDefaults: 'Import defaults', imageMode: 'Image mode', imageProvider: 'Probe route provider (optional; empty follows the current session)', imageModel: 'Probe route model (optional; empty follows the current session)', imageProbe: 'Image capability probe', recursiveSearch: 'Recursive search', sourceFound: 'Discovery',
     includeSubagentsDefault: 'Include subagents by default', sidecarMax: 'Sidecar max bytes per file',
     writeback: 'Export / write-back', syncTarget: 'Sync target', allowOriginal: 'Allow writing real ~/.claude (danger)', exportClaude: 'Export to Claude', syncClaude: 'Sync to Claude', selectSession: 'Session', writeResult: 'Result',
-    exportDir: 'Export directory (empty = default)', hooks: 'Claude hook bridge (boot-time row)',
+    exportDir: 'Export directory (empty = default)', hooks: 'Claude hook bridge (applies at next boot)',
     hooksHint: 'The optional hook row still activates through CLAUDE2DSH_HOOKS_CONFIG at boot; these values apply after the next restart.', hookScan: 'Scan hooks', hookApply: 'Save candidate and enable next boot', hookScanned: 'Scanned files', hookSupported: 'Supported commands', hookSkipped: 'Skipped',
     hooksPath: 'hooks.json path', pluginRoot: 'Plugin root', projectDir: 'Project dir',
     sessionSources: 'Session sources', noSources: 'No imported sessions recorded yet.', sessionId: 'Session ID', kind: 'Kind', sourcePathCol: 'Source path',
     noImportYet: 'No import has been run yet.', previewed: 'Previewed', imported: 'Imported', already: 'Already imported', appended: 'Appended', skipped: 'Skipped', failed: 'Failed',
+    notScanned: 'not scanned yet', subagentHint: 'Subagents are imported as one-shot subagent records and appear under the parent session.',
+    imageModesHint: 'auto: probe and choose · placeholder: always safe text placeholder · native: force image blocks',
+    autoMirrorHint: 'Watches Claude projects and mirrors completed DSH turns only to the safe export copy; never writes the real ~/.claude.',
+    writebackHint: 'copy writes the safe export under DSH_HOME; source targets the original Claude transcript and also requires the danger switch below.',
+    hookScanHint: 'Scan reads $CLAUDE_CONFIG_DIR settings and installed plugin hook files. The three fields below are startup inputs, not scan inputs.',
+    filterSources: 'Filter sessions',
     readOnly: 'Read-only import; all writes stay inside DSH.',
   },
 } as const
@@ -123,6 +135,7 @@ export function Claude2DshSettings(): React.JSX.Element {
   const [sessions, setSessions] = useState<Array<{ sessionId: string; cwd?: string; origin?: string }>>([])
   const [selectedSession, setSelectedSession] = useState('')
   const [writeResult, setWriteResult] = useState<Record<string, unknown> | undefined>()
+  const [sourceFilter, setSourceFilter] = useState('')
 
   const t = useCallback((key: CopyKey): string => COPY[lang][key], [lang])
 
@@ -237,6 +250,7 @@ export function Claude2DshSettings(): React.JSX.Element {
           }}><option value="zh">中文</option><option value="en">English</option></select></div>
         <div style={row}><span style={label}>{t('sourcePath')}</span><input style={input} value={guidePath} onChange={(event) => setGuidePath(event.target.value)} /></div>
         <div style={row}><span style={label}>{t('includeSubagents')}</span><input style={checkbox} type="checkbox" checked={guideSubagents} onChange={(event) => setGuideSubagents(event.target.checked)} /></div>
+        <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>{t('subagentHint')}</div>
         <div style={row}><span style={label}>{t('recursiveSearch')}</span><input style={checkbox} type="checkbox" checked={value.importDefaults.recursive} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, recursive: event.target.checked } }))} /></div>
         <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('sourceFound')}: {guidePath} · total={guideResult?.total ?? '—'} previewed={guideResult?.previewed ?? '—'} imported={guideResult?.imported ?? '—'} skipped={guideResult?.skipped ?? '—'}</div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -246,13 +260,14 @@ export function Claude2DshSettings(): React.JSX.Element {
         {guideResult !== undefined ? (
           <pre style={{ margin: 0, fontSize: 12, whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 240 }}>
             {`${t('previewed')}=${guideResult.previewed ?? 0} ${t('imported')}=${guideResult.imported ?? 0} ${t('already')}=${guideResult.alreadyImported ?? 0} ${t('appended')}=${guideResult.appended ?? 0} ${t('skipped')}=${guideResult.skipped ?? 0} ${t('failed')}=${guideResult.failed ?? 0}\n` +
-            (guideResult.items ?? []).slice(0, 20).map((item) => `${item.status}\t${item.sessionId ?? ''}\t${item.path ?? ''}`).join('\n')}
+            (guideResult.items ?? []).slice(0, 20).map((item) => `${item.status}\t${item.sessionId ?? ''}\t${item.path ?? ''}${item.reason ? `\t${item.reason}` : ''}`).join('\n')}
           </pre>
         ) : <p style={{ margin: 0, fontSize: 12 }}>{t('noImportYet')}</p>}
       </section>
 
       <section style={card}>
         <h3 style={{ margin: 0 }}>{t('autoMirror')}</h3>
+        <p style={{ margin: 0, fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>{t('autoMirrorHint')}</p>
         <div style={row}><span style={label}>{t('enabled')}</span><input style={checkbox} type="checkbox" checked={value.autoSync.enabled} onChange={(event) => patch((draft) => ({ ...draft, autoSync: { ...draft.autoSync, enabled: event.target.checked } }))} /></div>
         <div style={row}><span style={label}>{t('projectsRoot')}</span><input style={input} value={value.autoSync.claudeProjectsRoot} onChange={(event) => patch((draft) => ({ ...draft, autoSync: { ...draft.autoSync, claudeProjectsRoot: event.target.value } }))} /></div>
         <div style={row}><span style={label}>{t('debounce')}</span><input style={input} type="number" min={50} value={value.autoSync.debounceMs} onChange={(event) => patch((draft) => ({ ...draft, autoSync: { ...draft.autoSync, debounceMs: Number(event.target.value) } }))} /></div>
@@ -262,6 +277,7 @@ export function Claude2DshSettings(): React.JSX.Element {
       <section style={card}>
         <h3 style={{ margin: 0 }}>{t('importDefaults')}</h3>
         <div style={row}><span style={label}>{t('imageMode')}</span><select style={input} value={value.importDefaults.imageMode} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, imageMode: event.target.value as SettingsShape['importDefaults']['imageMode'] } }))}><option value="auto">auto</option><option value="placeholder">placeholder</option><option value="native">native</option></select></div>
+        <p style={{ margin: 0, fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>{t('imageModesHint')}</p>
         <div style={row}><span style={label}>{t('imageProvider')}</span><input style={input} value={value.importDefaults.imageProvider} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, imageProvider: event.target.value } }))} /></div>
         <div style={row}><span style={label}>{t('imageModel')}</span><input style={input} value={value.importDefaults.imageModel} onChange={(event) => patch((draft) => ({ ...draft, importDefaults: { ...draft.importDefaults, imageModel: event.target.value } }))} /></div>
         <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('imageProbe')}: {imageProbe?.reason ?? '…'}</div>
@@ -271,6 +287,7 @@ export function Claude2DshSettings(): React.JSX.Element {
 
       <section style={card}>
         <h3 style={{ margin: 0 }}>{t('writeback')}</h3>
+        <p style={{ margin: 0, fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>{t('writebackHint')}</p>
         <div style={row}><span style={label}>{t('syncTarget')}</span><select style={input} value={value.writeback.target} onChange={(event) => patch((draft) => ({ ...draft, writeback: { ...draft.writeback, target: event.target.value as 'copy' | 'source' } }))}><option value="copy">copy</option><option value="source">source</option></select></div>
         <div style={row}><span style={label}>{t('allowOriginal')}</span><input style={checkbox} type="checkbox" checked={value.writeback.allowOriginalClaudeDir} onChange={(event) => patch((draft) => ({ ...draft, writeback: { ...draft.writeback, allowOriginalClaudeDir: event.target.checked } }))} /></div>
         <div style={row}><span style={label}>{t('exportDir')}</span><input style={input} value={value.writeback.exportDir} onChange={(event) => patch((draft) => ({ ...draft, writeback: { ...draft.writeback, exportDir: event.target.value } }))} /></div>
@@ -292,6 +309,7 @@ export function Claude2DshSettings(): React.JSX.Element {
       <section style={card}>
         <h3 style={{ margin: 0 }}>{t('hooks')}</h3>
         <p style={{ margin: 0, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('hooksHint')}</p>
+        <p style={{ margin: 0, fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>{t('hookScanHint')}</p>
         <div style={{ display: 'flex', gap: 10 }}>
           <button type="button" style={button} onClick={() => { void fetch(HOOK_SCAN_PATH).then(async (r) => { if (r.ok) setHookScan(await r.json() as typeof hookScan); else setError(await responseError(r)) }).catch((cause) => setError(String(cause))) }}>{t('hookScan')}</button>
           <button type="button" style={button} onClick={() => { void fetch(HOOK_APPLY_PATH, { method: 'POST' }).then(async (r) => { const body = await r.json() as typeof hookApply & { error?: string }; if (r.ok) setHookApply(body); else setError(body?.error ?? JSON.stringify(body ?? {})) }).catch((cause) => setError(String(cause))) }}>{t('hookApply')}</button>
@@ -309,10 +327,12 @@ export function Claude2DshSettings(): React.JSX.Element {
       <section style={card}>
         <h3 style={{ margin: 0 }}>{t('sessionSources')}</h3>
         {sources.length === 0 ? <p style={{ margin: 0, fontSize: 12 }}>{t('noSources')}</p> : (
+        <>
+        <input style={input} placeholder={t('filterSources')} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} />
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
             <thead><tr>{[t('sessionId'), t('kind'), t('sourcePathCol')].map((head) => <th key={head} style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' }}>{head}</th>)}</tr></thead>
             <tbody>
-              {sources.map((item) => (
+              {sources.filter((item) => `${item.sessionId} ${item.kind} ${item.sourcePath}`.toLowerCase().includes(sourceFilter.toLowerCase())).map((item) => (
                 <tr key={item.sessionId}>
                   <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' }}>{item.sessionId}</td>
                   <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' }}>{item.kind}</td>
@@ -321,7 +341,7 @@ export function Claude2DshSettings(): React.JSX.Element {
               ))}
             </tbody>
           </table>
-        )}
+        </>)}
       </section>
 
       <div style={{ display: 'flex', gap: 10 }}>

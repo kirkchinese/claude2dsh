@@ -65,7 +65,7 @@ flowchart LR
     S5 --> R["DSH 原生会话<br/>会话来源中可见"]
 ```
 
-首屏就是迁移向导；界面默认中文，也可切换 English。
+**设置 → Claude2DSH** 的第一个分区就是迁移向导；界面默认中文，也可切换 English。若 3080 已被占用，运行 `dsh web --port 0` 并打开 DSH 打印的 URL。
 
 ![真实 Claude2DSH 首次迁移向导中文界面，包含语言、来源目录、子会话选项、预览导入、执行导入与自动镜像默认值](assets/migration-wizard.png)
 

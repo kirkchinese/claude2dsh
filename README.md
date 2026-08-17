@@ -65,7 +65,7 @@ flowchart LR
     S5 --> R["Native DSH sessions<br/>listed in Session sources"]
 ```
 
-The first screen is the migration guide; Chinese is the default UI language and English is selectable.
+The first section of **Settings → Claude2DSH** is the migration guide; Chinese is the default UI language and English is selectable. If port 3080 is already in use, run `dsh web --port 0` and open the URL printed by DSH.
 
 ![Real Claude2DSH first-run migration guide in English, showing language, source directory, subagent option, Preview import, Run import, and Auto mirror defaults](assets/migration-wizard-en.png)
 
