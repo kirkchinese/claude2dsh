@@ -25,7 +25,16 @@ Claude Code 是多工具迁移层的第一个会话源适配器。Claude2DSH 保
 
 项目坚持**零配置开箱即用**：默认路径不要求用户先理解 profile 或 bundle，也能看到明确结果；危险写回仍必须显式授权。
 
-![架构图：Claude Code 会话经只读导入、Claude 适配器和归一化 IR 进入 DSH 原生会话；导出则显式写入安全副本](assets/architecture.png)
+```mermaid
+flowchart LR
+    A["Claude Code JSONL<br/>~/.claude/projects<br/>只读"] --> B["Claude adapter<br/>发现 · 解析 · 归一化"]
+    B --> C["归一化会话 IR<br/>轮次 · 步骤 · 工具 · 图片"]
+    C --> D["DSH 事件合成<br/>原生会话事件"]
+    D --> E[("DSH 会话<br/>$DSH_HOME/sessions")]
+    E --> F["导出 / 同步<br/>安全副本"]
+    F --> G["Claude Code JSONL<br/>可续聊转录"]
+    E --> H["Settings UI + 工具<br/>导入 · 导出 · 同步 · 合并"]
+```
 
 ## 快速开始
 
@@ -47,7 +56,14 @@ dsh web
 4. 选择语言，确认 Claude 会话目录，并按需勾选 subagent/workflow 子会话。
 5. 先点**预览导入**检查统计与逐项报告，再点**执行导入**。
 
-![从安装已发布插件到预览并导入 DSH 原生可续聊会话的五步快速开始流程](assets/quickstart-flow.png)
+```mermaid
+flowchart LR
+    S1["安装插件<br/>dsh plugin --profile web add ..."] --> S2["启动 UI<br/>dsh web"]
+    S2 --> S3["打开 设置 → Claude2DSH"]
+    S3 --> S4["预览导入"]
+    S4 --> S5["执行导入"]
+    S5 --> R["DSH 原生会话<br/>会话来源中可见"]
+```
 
 首屏就是迁移向导；界面默认中文，也可切换 English。
 

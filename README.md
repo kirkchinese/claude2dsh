@@ -25,7 +25,16 @@ Claude Code is the first source adapter in a multi-tool migration layer. Claude2
 
 The governing principle is **zero-configuration by default**: the default path produces a visible result without requiring users to understand profiles or bundles first, while dangerous write-back remains explicitly gated.
 
-![Architecture diagram showing read-only Claude Code import through the Claude adapter and normalized IR into native DSH sessions, plus explicit export through a safe copy](assets/architecture.png)
+```mermaid
+flowchart LR
+    A["Claude Code JSONL<br/>~/.claude/projects<br/>read-only"] --> B["Claude adapter<br/>discover · parse · normalize"]
+    B --> C["Normalized session IR<br/>turns · steps · tools · images"]
+    C --> D["DSH event synthesis<br/>native session events"]
+    D --> E[("DSH sessions<br/>$DSH_HOME/sessions")]
+    E --> F["Export / sync<br/>safe copy"]
+    F --> G["Claude Code JSONL<br/>resumable transcript"]
+    E --> H["Settings UI + tools<br/>import · export · sync · merge"]
+```
 
 ## Quickstart
 
@@ -47,7 +56,14 @@ Then:
 4. Choose a language, confirm the Claude sessions directory, and optionally include subagent/workflow transcripts.
 5. Click **Preview import**, inspect the counts and item report, then click **Run import**.
 
-![Five-step quickstart from installing the published plugin through previewing and importing a native resumable DSH session](assets/quickstart-flow.png)
+```mermaid
+flowchart LR
+    S1["Install plugin<br/>dsh plugin --profile web add ..."] --> S2["Start UI<br/>dsh web"]
+    S2 --> S3["Open Settings → Claude2DSH"]
+    S3 --> S4["Preview import"]
+    S4 --> S5["Run import"]
+    S5 --> R["Native DSH sessions<br/>listed in Session sources"]
+```
 
 The first screen is the migration guide; Chinese is the default UI language and English is selectable.
 
