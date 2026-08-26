@@ -4,7 +4,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Read-only DSH bundle skeleton for future Claude Code session adapters",
+  "description": "Import Claude Code sessions, skills and plugin assets into DSH as native resumable sessions, and export or sync DSH sessions back to Claude Code JSONL",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
