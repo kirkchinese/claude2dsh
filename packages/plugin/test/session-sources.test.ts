@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { contextWith, fakeHeader, liveContext } from './support/fake-persistence.ts'
 import { importClaudeSessions } from '../src/session-import.ts'
 import { loadSessionSourceMap } from '../src/session-sources.ts'
 
@@ -23,7 +24,7 @@ test('import records claude-main and claude-subagent source markers', async () =
     await writeFile(main, records.map((record) => JSON.stringify(record)).join('\n') + '\n')
     const subRecords = records.map((record) => ({ ...record, sessionId, isSidechain: true }))
     await writeFile(sub, subRecords.map((record) => JSON.stringify(record)).join('\n') + '\n')
-    const mock = { sessionPersistence: { async list() { return [] }, async create() {}, async append() {} } }
+    const mock = liveContext()
     const report = await importClaudeSessions(mock as unknown as Context, { path: dir, recursive: true, includeSubagents: true }, home)
     assert.equal(report.imported, 2)
     const map = await loadSessionSourceMap(home)

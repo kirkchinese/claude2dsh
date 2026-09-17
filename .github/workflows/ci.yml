@@ -27,7 +27,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      # Fails when the newest published harness release leaves the declared peer range.
       - run: node scripts/check-dsh-compat.mjs
+
+  acceptance:
+    # The runtime contract lives in the harness, not in our type surface: a
+    # SessionHeader version, a required `stream` array and exclusive write
+    # ownership are all invisible to `tsc`. This job boots both published
+    # channels and imports, exports, syncs and merges a real session.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dsh: ['0.1.5-rc.1', '0.1.6-alpha.1']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install DSH ${{ matrix.dsh }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/kit"
+          npm install --prefix "$RUNNER_TEMP/kit" --no-audit --no-fund "@deepseek-ai/dsh@${{ matrix.dsh }}"
+      - run: bash scripts/e2e-acceptance.sh "$RUNNER_TEMP/kit/node_modules/.bin/dsh"

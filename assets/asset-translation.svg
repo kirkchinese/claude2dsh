@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 600" width="1040" height="600" role="img" aria-label="Claude Code assets on the left translate into DeepSeek Harness surfaces on the right">
+  <defs>
+    <style>
+      .bg { fill: #0b1220; }
+      .ttl { fill: #e8eefc; font: 600 17px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      .sub { fill: #8ea3c6; font: 400 12.5px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      .colh { font: 700 12px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: .09em; }
+      .lh { fill: #f0b45f; }
+      .rh { fill: #56d4dd; }
+      .src { fill: #f6f8fc; font: 600 13.5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+      .dst { fill: #f6f8fc; font: 600 13.5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+      .note { fill: #93a7c9; font: 400 12px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      .newt { fill: #6ee7b7; font: 600 11.5px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      .arrow { stroke: #56d4dd; stroke-width: 1.6; fill: none; marker-end: url(#head); }
+      .arrow-copy { stroke: #7f8fb3; stroke-width: 1.4; fill: none; marker-end: url(#headD); stroke-dasharray: 5 4; }
+      .rowline { stroke: #1b2b47; stroke-width: 1; }
+    </style>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#56d4dd"/>
+    </marker>
+    <marker id="headD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7f8fb3"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1040" height="600"/>
+
+  <text class="ttl" x="34" y="42">What Claude2DSH 0.3.0 moves, and where it lands</text>
+  <text class="sub" x="34" y="64">Every row is read from the Claude tree and written to a DSH-native surface. The original Claude files are never modified.</text>
+
+  <text class="colh lh" x="46" y="98">CLAUDE CODE SOURCE</text>
+  <text class="colh rh" x="726" y="98">DEEPSEEK HARNESS TARGET</text>
+
+  <text class="src" x="46" y="140">~/.claude/projects/**/*.jsonl</text>
+  <text class="note" x="46" y="158">conversation transcripts, subagents</text>
+  <line class="arrow" x1="404" y1="146" x2="716" y2="146"/>
+  <text class="dst" x="726" y="140">native session (format v3)</text>
+  <text class="note" x="726" y="158">resumable, replayable, listed in DSH</text>
+  <line class="rowline" x1="34" y1="176" x2="1006" y2="176"/>
+
+  <text class="src" x="46" y="204">~/.claude/skills/&lt;n&gt;/SKILL.md</text>
+  <text class="note" x="46" y="222">skill bundles, dereferenced</text>
+  <line class="arrow-copy" x1="404" y1="210" x2="716" y2="210"/>
+  <text class="dst" x="726" y="204">$DSH_HOME/skills/&lt;n&gt;/SKILL.md</text>
+  <text class="note" x="726" y="222">copied verbatim, conflicts reported</text>
+  <line class="rowline" x1="34" y1="240" x2="1006" y2="240"/>
+
+  <text class="src" x="46" y="268">~/.claude/agents/*.md</text>
+  <text class="note" x="46" y="286">delegated persona + tool list</text>
+  <line class="arrow" x1="404" y1="274" x2="716" y2="274"/>
+  <text class="dst" x="726" y="268">skill cc-agent-&lt;name&gt;</text>
+  <text class="note" x="726" y="286">instructions kept, origin in metadata<tspan class="newt"> · new in 0.3.0</tspan></text>
+  <line class="rowline" x1="34" y1="304" x2="1006" y2="304"/>
+
+  <text class="src" x="46" y="332">~/.claude/commands/**/*.md</text>
+  <text class="note" x="46" y="350">slash commands, namespaced</text>
+  <line class="arrow" x1="404" y1="338" x2="716" y2="338"/>
+  <text class="dst" x="726" y="332">skill cc-cmd-&lt;ns&gt;-&lt;name&gt;</text>
+  <text class="note" x="726" y="350">disable-model-invocation: true<tspan class="newt"> · new in 0.3.0</tspan></text>
+  <line class="rowline" x1="34" y1="368" x2="1006" y2="368"/>
+
+  <text class="src" x="46" y="396">~/.claude.json → mcpServers</text>
+  <text class="note" x="46" y="414">stdio and HTTP translate, SSE reported</text>
+  <line class="arrow" x1="404" y1="402" x2="716" y2="402"/>
+  <text class="dst" x="726" y="396">…/claude2dsh/mcp.patch.yml</text>
+  <text class="note" x="726" y="414">one dsh-mcp-client row per server<tspan class="newt"> · new in 0.3.0</tspan></text>
+  <line class="rowline" x1="34" y1="432" x2="1006" y2="432"/>
+
+  <text class="src" x="46" y="460">~/.claude/CLAUDE.md · MEMORY.md</text>
+  <text class="note" x="46" y="478">global instructions, project memory</text>
+  <line class="arrow-copy" x1="404" y1="466" x2="716" y2="466"/>
+  <text class="dst" x="726" y="460">$DSH_HOME/AGENTS.md · memory skill</text>
+  <text class="note" x="726" y="478">never overwrites different content</text>
+  <line class="rowline" x1="34" y1="496" x2="1006" y2="496"/>
+
+  <text class="src" x="46" y="524">~/.claude/plugins/**</text>
+  <text class="note" x="46" y="542">declarative assets only</text>
+  <line class="arrow-copy" x1="404" y1="530" x2="716" y2="530"/>
+  <text class="dst" x="726" y="524">skills · agents · commands</text>
+  <text class="note" x="726" y="542">runtime code never executed or copied</text>
+  <line class="rowline" x1="34" y1="560" x2="1006" y2="560"/>
+</svg>

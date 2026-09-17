@@ -5,9 +5,11 @@ import { basename, dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionHeader } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { SUBAGENT_DESCRIPTOR_VERSION } from '@deepseek-ai/dsh-subagent'
 import { synthesizeDshSession, tailSessionEvents, planTurnMerge } from '@claude2dsh/core'
 import type { ForeignSessionView } from '@claude2dsh/core'
 import { readClaudeSession, serializeClaudeJsonl, slugifyClaudeCwd } from '@claude2dsh/adapter-claude-code'
+import { createStoredSession, inspectStoredSession, listSessionHeaders } from './persistence.ts'
 import { loadRegistry, resolveDshHome } from './registry.ts'
 import { loadImageMap, saveImageMap } from './image-map.ts'
 import { loadSidecarMap, writeSidecarMap } from './sidecar.ts'
@@ -62,11 +64,8 @@ function findImportRecord(registry: Awaited<ReturnType<typeof loadRegistry>>, se
 }
 
 async function sessionEvents(ctx: Context, sessionId: string): Promise<{ meta: SessionHeader; events: SessionEvent[] }> {
-  const headers = await ctx.sessionPersistence.list()
-  const header = headers.find((item) => String(item.id) === sessionId)
-  if (header === undefined) throw new Error(`session not found: ${sessionId}`)
-  const read = await ctx.sessionPersistence.readFrom(sessionId as SessionId, 0)
-  return { meta: header, events: read.events as SessionEvent[] }
+  const stored = await inspectStoredSession(ctx, sessionId)
+  return { meta: stored.header, events: stored.events as SessionEvent[] }
 }
 
 function summarizePlan(plan: ReturnType<typeof planTurnMerge>): Pick<MergeSessionResult, 'baseEvents' | 'totalEvents' | 'claudeTurns' | 'dshTurns' | 'conflicts'> {
@@ -94,7 +93,7 @@ export async function mergeClaudeSession(ctx: Context, args: MergeSessionArgs, d
     readClaudeSession({ ref: sourcePath, sourceId: basename(sourcePath).replace(/\.jsonl$/i, '') }),
     sessionEvents(ctx, args.sessionId),
   ])
-  const synthesized = synthesizeDshSession(parsed.session)
+  const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION })
   const claudeTail = tailSessionEvents(synthesized.events, { fromTurn: record.turns + 1, fromSeq: record.events })
   if (claudeTail.events.length === 0) {
     return { status: 'no-claude-growth', reason: claudeTail.droppedIncompleteTurn ? 'new final turn is incomplete' : 'no complete Claude turns after the watermark', sessionId: args.sessionId }
@@ -109,12 +108,11 @@ export async function mergeClaudeSession(ctx: Context, args: MergeSessionArgs, d
     return { status: 'dry-run', reason: 'merged copy computed; no write performed', sessionId: args.sessionId, ...base }
   }
 
-  const headers = await ctx.sessionPersistence.list()
-  const persisted = new Set(headers.map((header) => String(header.id)))
+  const persisted = new Set((await listSessionHeaders(ctx)).map((header) => String(header.id)))
   const mergedId = targetSuffix(persisted, `${args.sessionId}-merged`)
-  const meta = { ...stored.meta, id: mergedId } as SessionHeader
-  await ctx.sessionPersistence.create({ ...meta, id: mergedId as SessionId })
-  await ctx.sessionPersistence.append(mergedId as SessionId, plan.events as unknown as SessionEvent[])
+  // The merged copy keeps the source's header identity facts (creation time, cwd,
+  // lineage) but is its own session: a distinct id, and never a seeded fork.
+  await createStoredSession(ctx, { ...stored.meta, id: mergedId as SessionId, isSeeded: false }, plan.events as unknown as SessionEvent[])
   await saveSessionSource({ sessionId: mergedId, kind: 'claude-merged', sourcePath, recordedAt: Date.now() }, dshHome)
 
   // Keep both migration sidecars reachable from the merged copy.
@@ -165,7 +163,7 @@ export async function mergeDshToClaude(ctx: Context, args: MergeDshToClaudeArgs,
     readClaudeSession({ ref: mapping.filePath, sourceId: mapping.sessionUuid }),
     sessionEvents(ctx, args.sessionId),
   ])
-  const synthesized = synthesizeDshSession(parsed.session)
+  const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION })
   const claudeTail = tailSessionEvents(synthesized.events, { fromTurn: mapping.lastWrittenTurn + 1, fromSeq: mapping.lastWrittenSeq })
   if (claudeTail.events.length === 0) {
     return { status: 'no-claude-growth', reason: claudeTail.droppedIncompleteTurn ? 'new final turn is incomplete' : 'no complete Claude turns after the export watermark', sessionId: args.sessionId }

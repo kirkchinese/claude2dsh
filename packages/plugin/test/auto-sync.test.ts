@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { contextWith, fakeHeader, FakePersistence, liveContext } from './support/fake-persistence.ts'
 import { activateAutoSync } from '../src/auto-sync.ts'
 import { loadAutoSyncState, saveAutoSyncState } from '../src/auto-sync-state.ts'
 
@@ -42,23 +43,26 @@ async function writeConflictRegistry(home: string, sourcePath: string): Promise<
   }))
 }
 
-async function conflictContext(appended: { count: number }): Promise<{ ctx: unknown; cleanup: () => void }> {
+async function conflictContext(): Promise<{ ctx: unknown; persistence: FakePersistence; cleanup: () => void }> {
   let effectCleanup: (() => void) | undefined
+  // A stored session longer than the import record: the mirrored side already
+  // advanced, which is what turns the next source change into a conflict.
+  const persistence = new FakePersistence()
+  persistence.seed(
+    fakeHeader(`claude-${sessionId}`),
+    Array.from({ length: 5 }, (_, seq) => ({ type: 'turn/end', seq, time: 1, data: { turn: 1, reason: { kind: 'completed' } } })) as never[],
+  )
   const ctx = {
     effect(fn: () => () => void) {
       effectCleanup = fn()
       return () => effectCleanup?.()
     },
     on() {},
-    sessionPersistence: {
-      async list() { return [{ id: `claude-${sessionId}`, version: 0, createdAt: 0, delegationDepth: 0 }] },
-      async readFrom() { return { meta: { id: `claude-${sessionId}`, version: 0, createdAt: 0, delegationDepth: 0 }, events: Array.from({ length: 5 }, (_, seq) => ({ seq })) } },
-      async append() { appended.count += 1 },
-      async create() { throw new Error('must not create') },
-    },
+    sessionPersistence: persistence,
   }
   return {
     ctx,
+    persistence,
     cleanup: () => effectCleanup?.(),
   }
 }
@@ -77,8 +81,7 @@ test('watcher activation injects a double-side conflict and pauses without touch
   const dir = await mkdtemp(join(tmpdir(), 'c2dsh-autosync-activation-'))
   const home = join(dir, 'dsh-home')
   const sourcePath = join(dir, `${sessionId}.jsonl`)
-  const appended = { count: 0 }
-  const { ctx, cleanup } = await conflictContext(appended)
+  const { ctx, persistence, cleanup } = await conflictContext()
   try {
     await writeConflictRegistry(home, sourcePath)
     activateAutoSync(ctx as unknown as Context, { enabled: true, claudeProjectsRoot: dir, debounceMs: 100, dshToClaude: false }, { DSH_HOME: home })
@@ -89,7 +92,8 @@ test('watcher activation injects a double-side conflict and pauses without touch
     assert.equal(state.conflicts.length, 1)
     assert.equal(state.conflicts[0]?.sessionId, `claude-${sessionId}`)
     assert.match(state.conflicts[0]?.detail ?? '', /both sides/)
-    assert.equal(appended.count, 0)
+    assert.equal(persistence.appendCalls, 0)
+    assert.equal(persistence.createCalls, 0)
     assert.equal(await readFile(sourcePath, 'utf8'), sourceText)
   } finally {
     cleanup()
@@ -102,8 +106,7 @@ test('activation drains a persisted pending queue across restart and then pauses
   const dir = await mkdtemp(join(tmpdir(), 'c2dsh-autosync-restart-'))
   const home = join(dir, 'dsh-home')
   const sourcePath = join(dir, `${sessionId}.jsonl`)
-  const appended = { count: 0 }
-  const { ctx, cleanup } = await conflictContext(appended)
+  const { ctx, persistence, cleanup } = await conflictContext()
   try {
     await writeConflictRegistry(home, sourcePath)
     const sourceText = await writeSource(sourcePath)
@@ -114,7 +117,8 @@ test('activation drains a persisted pending queue across restart and then pauses
     const state = await waitUntilPaused(home)
     assert.equal(state.paused, true)
     assert.equal(state.pending.length, 0)
-    assert.equal(appended.count, 0)
+    assert.equal(persistence.appendCalls, 0)
+    assert.equal(persistence.createCalls, 0)
     assert.equal(await readFile(sourcePath, 'utf8'), sourceText)
   } finally {
     cleanup()

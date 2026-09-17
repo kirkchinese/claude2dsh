@@ -1,11 +1,11 @@
 /** Durable Claude2DSH settings namespace + web transport facade. */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { PluginConfig } from './index.ts'
 
-export const CLAUDE2DSH_SETTINGS_NS = settingsNamespace('claude2dsh')
+/** Settings namespace owned by this plugin; the host validates its format. */
+export const CLAUDE2DSH_SETTINGS_NS = 'claude2dsh' as const
 
 export interface Claude2DshSettings {
   readonly autoSync: {

@@ -16,3 +16,7 @@ AGENTS_.md
 # Local development/validation documents are not published in the public repository.
 /docs/
 /.agents/
+
+# local acceptance lab and npm cache scratch (never published)
+/.lab/
+/.npm-cache/

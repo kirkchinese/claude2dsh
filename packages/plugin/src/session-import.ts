@@ -3,13 +3,15 @@ import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionHeader } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { SUBAGENT_DESCRIPTOR_VERSION } from '@deepseek-ai/dsh-subagent'
 import { synthesizeDshSession, tailSessionEvents } from '@claude2dsh/core'
 import { discoverClaudeCodeSessions, readClaudeSession } from '@claude2dsh/adapter-claude-code'
 import { loadRegistry, saveRegistryRecord } from './registry.ts'
 import { applyImagePolicy, type ImageMode } from './image-policy.ts'
 import { buildImageMapEntries, saveImageMap } from './image-map.ts'
+import { appendStoredEvents, createStoredSession, listSessionHeaders, storedEventCount } from './persistence.ts'
+import { importedSessionHeader } from './session-header.ts'
 import { copySessionSidecars, findSidecarReferences, type SidecarCopyResult } from './sidecar.ts'
 import { saveSessionSource } from './session-sources.ts'
 
@@ -96,15 +98,6 @@ export function prefixHash(turns: readonly unknown[]): string {
   return createHash('sha256').update(JSON.stringify(turns)).digest('hex')
 }
 
-async function storedEventCount(ctx: Context, targetId: string): Promise<number | undefined> {
-  try {
-    const read = await ctx.sessionPersistence.readFrom(targetId as SessionId, 0)
-    return read.events.length
-  } catch {
-    return undefined
-  }
-}
-
 async function statOrUndefined(path: string): Promise<{ size: number; mtimeMs: number } | undefined> {
   try {
     const info = await stat(path)
@@ -125,7 +118,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
   const sourceRoot = expandHome(args.path)
   const report = emptyReport(args.sessionId !== undefined ? 'single' : 'directory')
   const registry = await loadRegistry(dshHome)
-  const persisted = new Set<string>((await ctx.sessionPersistence.list()).map((header) => String(header.id)))
+  const persisted = new Set<string>((await listSessionHeaders(ctx)).map((header) => String(header.id)))
 
   for await (const discovered of discoverClaudeCodeSessions(sourceRoot, { ...(args.recursive !== undefined ? { recursive: args.recursive } : {}), ...(args.includeSubagents === true ? { includeAuxiliary: true } : {}) })) {
     const sourcePath = discovered.ref
@@ -151,7 +144,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
         continue
       }
 
-      const synthesized = synthesizeDshSession(parsed.session)
+      const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION })
       const imageEntries = buildImageMapEntries(parsed.session, synthesized.events)
       const sidecarReferenced = findSidecarReferences(parsed.session, sourcePath).length
       const sidecarFields = sidecarReferenced > 0 ? { sidecarReferenced } : {}
@@ -251,7 +244,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
           })
           continue
         }
-        await ctx.sessionPersistence.append(known.targetId as SessionId, tail.events as unknown as SessionEvent[])
+        await appendStoredEvents(ctx, known.targetId, tail.events as unknown as SessionEvent[])
         const sidecarReport = sidecarReferenced > 0 ? await copySessionSidecars(parsed.session, sourcePath, known.targetId, dshHome, args.sidecarMaxBytes) : undefined
         await recordSessionSource(known.targetId, sourcePath, parsed.session.origin, parsed.session.parentSession, dshHome)
         if (imageEntries.length > 0) await saveImageMap(known.targetId, imageEntries, dshHome)
@@ -283,10 +276,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
       }
 
       const targetId = args.force === true ? targetSuffix(persisted, parsed.session.id) : targetSuffix(persisted, known?.targetId ?? parsed.session.id)
-      const meta = { ...synthesized.meta, id: targetId } as SessionHeader
-      const brandedTargetId = targetId as SessionId
-      await ctx.sessionPersistence.create({ ...meta, id: brandedTargetId })
-      await ctx.sessionPersistence.append(brandedTargetId, synthesized.events as unknown as SessionEvent[])
+      await createStoredSession(ctx, importedSessionHeader(synthesized.meta, targetId), synthesized.events as unknown as SessionEvent[])
       const sidecarReport = sidecarReferenced > 0 ? await copySessionSidecars(parsed.session, sourcePath, targetId, dshHome, args.sidecarMaxBytes) : undefined
       await recordSessionSource(targetId, sourcePath, parsed.session.origin, parsed.session.parentSession, dshHome)
       if (imageEntries.length > 0) await saveImageMap(targetId, imageEntries, dshHome)

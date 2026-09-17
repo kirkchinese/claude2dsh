@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.3.0 — 2026-09-17
+
+Claude2DSH now targets the DSH releases that replaced the service-level session API with per-session handles and moved the Session log to format v3. **This release is required for DSH 0.1.5 and later, including 0.1.6-alpha.1, and no longer starts on 0.1.0-rc.x.**
+
+### Breaking
+
+- Minimum supported harness is `@deepseek-ai/dsh-session >= 0.1.5-rc.1`; the declared peer range is `>=0.1.5-rc.1 <0.2.0`. The load-time gate now fails with an upgrade instruction instead of a version-regex message.
+- Imported sessions are written in the **current Session log format (v3)**: the header carries `version: 3` and the required `isSeeded: false`, and the on-disk artifact is `session.vN.jsonl[.zstd]`. Sessions written by 0.2.x are v0 files and are read through the harness's own migration chain.
+
+### Fixed
+
+- **Sessions no longer fail to open on resume.** `assistant/message` events now carry the required `stream` array (empty, because a Claude transcript stores the assembled reply and not its deltas). Without it DSH's seed validation rejects the log with `has invalid settlement fields`, and `token-meter` / `session-stats` throw while iterating the stream.
+- Every session read and write goes through DSH's handle-based persistence (`create`/`open` → `handle.read`/`handle.append`/`handle.flush`/`handle.close`); the removed service-level `readFrom`/`append`/`inspect`/`prepare` calls are gone, and `list()` results are read through their `header` field. This also applies to the export, sync, merge, session-source and Web settings paths.
+- A write that collides with a live agent now reports "session is open for writing by a live agent; retry after that agent is idle or closed" instead of leaking a backend ownership error.
+- `subagent/descriptor` is stamped with the harness's current descriptor version (3) instead of a hardcoded 2, so imported subagent sessions are recognized as one-shot children.
+- The settings namespace registers as the plain string `claude2dsh`; the removed `settingsNamespace()` helper is no longer imported.
+- `JsonValue` is imported from `@deepseek-ai/dsh-util-values`, where DSH moved it.
+- The browser half no longer references the removed `@deepseek-ai/dsh-client-runtime`: the client context comes from `@deepseek-ai/cordis`, and `dsh.client.inject` lists module ids that exist in current releases.
+
+### Added
+
+- **`claude2dsh_import_agents`** — translates `~/.claude/agents/*.md` subagent definitions into DSH skills (`cc-agent-<name>`). A Claude subagent is a delegated persona; the skill keeps its instructions and records the origin, model and tool list in frontmatter metadata.
+- **`claude2dsh_import_commands`** — translates `~/.claude/commands/**/*.md` slash commands into DSH skills (`cc-cmd-<namespace>-<name>`), with `disable-model-invocation: true` so a human prompt never enters the model catalog.
+- **`claude2dsh_import_mcp`** — translates `~/.claude.json` and project `.mcp.json` MCP servers into a `dsh-mcp-client` patch layer under `$DSH_HOME/claude2dsh/mcp.patch.yml`, reporting the exact `dsh --patch` command. stdio and streamable-HTTP servers translate; SSE servers are reported as unsupported, and two servers claiming one namespace are reported as a collision rather than emitting a layer that cannot boot.
+- `claude2dsh_plugin_inventory --apply` now also translates a plugin's `agents/` and `commands/` directories, through the same translators as the top-level tools.
+- `scripts/e2e-acceptance.sh` — a five-round, real-profile acceptance (import → native read → idempotency → export → sync → conflict → three-way merge → agents/commands/MCP → generated layer composes) that runs against any installed DSH CLI and is wired into CI for both published channels.
+- `scripts/check-version-compat.mjs` — typechecks the plugin against one or more DSH source checkouts without installing them, so a breaking API change is caught before a release rather than by an issue report.
+- `scripts/sync-guidance-docs.mjs` — refreshes the shared guidance checkout and re-flattens its guides.
+
+### Changed
+
+- The compatibility gate is capability-based: it requires a Session format this build writes and names the exact `npm install -g @deepseek-ai/dsh@latest` remedy.
+- The CI compatibility job now asserts that the newest published DSH release still satisfies the declared peer range, and fails when it does not.
+- Dependencies, peers and the integrator script target the current releases; the installer default is `@claude2dsh/plugin@0.3.0`.
+
+
 ## 0.2.0-rc.5 — 2026-08-17
 
 ### Fixed

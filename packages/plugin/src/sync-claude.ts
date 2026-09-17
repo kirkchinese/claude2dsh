@@ -3,9 +3,9 @@ import { readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import { readClaudeSession, serializeClaudeJsonlTail } from '@claude2dsh/adapter-claude-code'
 import type { ForeignSessionView } from '@claude2dsh/core'
+import { inspectStoredSession } from './persistence.ts'
 import { loadRegistry, resolveDshHome, saveExportMapping, saveRegistryRecord } from './registry.ts'
 import { prefixHash } from './session-import.ts'
 
@@ -125,15 +125,12 @@ export async function syncClaudeSession(ctx: Context, args: SyncClaudeArgs, dshH
     fromSeq = record.events
   }
 
-  const headers = await ctx.sessionPersistence.list()
-  const header = headers.find((item) => String(item.id) === args.sessionId)
-  if (header === undefined) throw new Error(`session not found: ${args.sessionId}`)
-  const read = await ctx.sessionPersistence.readFrom(args.sessionId as SessionId, fromSeq)
+  const stored = await inspectStoredSession(ctx, args.sessionId)
   const view: ForeignSessionView = {
     id: args.sessionId,
-    createdAt: header.createdAt,
-    ...(header.cwd !== undefined ? { cwd: header.cwd } : {}),
-    events: read.events as unknown as ForeignSessionView['events'],
+    createdAt: stored.header.createdAt,
+    ...(stored.header.cwd !== undefined ? { cwd: stored.header.cwd } : {}),
+    events: stored.events.slice(fromSeq) as unknown as ForeignSessionView['events'],
   }
   const tail = serializeClaudeJsonlTail(view, { fromSeq, sessionUuid, anchorUuid: anchor ?? null })
 

@@ -3,9 +3,9 @@ import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import { serializeClaudeJsonl, slugifyClaudeCwd } from '@claude2dsh/adapter-claude-code'
 import type { ForeignSessionView } from '@claude2dsh/core'
+import { inspectStoredSession } from './persistence.ts'
 import { resolveDshHome, saveExportMapping } from './registry.ts'
 
 export interface ExportClaudeArgs {
@@ -43,9 +43,8 @@ function isUnder(parent: string, child: string): boolean {
  * file unless `force: true` is explicit.
  */
 export async function exportClaudeSession(ctx: Context, args: ExportClaudeArgs, dshHome = resolveDshHome()): Promise<ExportClaudeResult> {
-  const headers = await ctx.sessionPersistence.list()
-  const header = headers.find((item) => String(item.id) === args.sessionId)
-  if (header === undefined) throw new Error(`session not found: ${args.sessionId}`)
+  const stored = await inspectStoredSession(ctx, args.sessionId)
+  const header = stored.header
 
   const outputDir = resolve(args.outputDir ?? join(dshHome, 'claude2dsh', 'exports'))
   if (!args.allowOriginalClaudeDir && isUnder(join(homedir(), '.claude'), outputDir)) {
@@ -56,12 +55,11 @@ export async function exportClaudeSession(ctx: Context, args: ExportClaudeArgs, 
     }
   }
 
-  const read = await ctx.sessionPersistence.readFrom(args.sessionId as SessionId, 0)
   const view: ForeignSessionView = {
     id: String(header.id),
     createdAt: header.createdAt,
     ...(header.cwd !== undefined ? { cwd: header.cwd } : {}),
-    events: read.events as unknown as ForeignSessionView['events'],
+    events: stored.events as unknown as ForeignSessionView['events'],
   }
   const sessionUuid = newSessionUuid()
   const out = serializeClaudeJsonl(view, { sessionUuid })
@@ -83,7 +81,7 @@ export async function exportClaudeSession(ctx: Context, args: ExportClaudeArgs, 
     await writeFile(filePath, out.jsonl)
   }
 
-  const turns = read.events.filter((event) => event.type === 'turn/start').length
+  const turns = stored.events.filter((event) => event.type === 'turn/start').length
   const fileInfo = await stat(filePath)
   await saveExportMapping({
     sessionId: args.sessionId,
@@ -91,7 +89,7 @@ export async function exportClaudeSession(ctx: Context, args: ExportClaudeArgs, 
     slug,
     sessionUuid,
     anchorUuid: lastRecordUuid(out.jsonl),
-    lastWrittenSeq: read.events.length,
+    lastWrittenSeq: stored.events.length,
     lastWrittenTurn: turns,
     recordCount: out.recordCount,
     fileSize: fileInfo.size,

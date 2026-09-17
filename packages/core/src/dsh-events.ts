@@ -9,9 +9,8 @@
  */
 import type { NormalizedSession, NormalizedStep, NormalizedTurn } from './types.ts'
 
-/** Minimal on-disk session header accepted by DSH persistence. */
+/** Session metadata an importer supplies; the host stamps its own format version. */
 export interface SynthesizedSessionMeta {
-  readonly version: 0
   readonly id: string
   readonly createdAt: number
   readonly cwd?: string
@@ -46,10 +45,18 @@ export interface SynthesizedSession {
   readonly stats: SynthesizeStats
 }
 
+/** Host-owned stamps the importer supplies because they are protocol constants. */
+export interface SynthesizeOptions {
+  /**
+   * `subagent/descriptor` format version the target host reads. Omitted, no
+   * descriptor is emitted — correct for a session that is not a delegated child,
+   * and for a host that has no subagent descriptor vocabulary at all.
+   */
+  readonly subagentDescriptorVersion?: number
+}
+
 /** Upper bound mirroring the shipped title service default (`maxTitleBytes: 80`). */
 export const MAX_TITLE_BYTES = 80
-
-const SESSION_FORMAT_VERSION = 0 as const
 
 /** Truncate a UTF-8 string to `maxBytes` bytes without splitting a code point. */
 export function truncateUtf8(text: string, maxBytes: number): string {
@@ -123,6 +130,11 @@ function synthesizeStep(
         model: model ?? 'claude-code',
       },
     },
+    // A Claude transcript stores only the assembled reply, never its deltas, so
+    // the imported settlement records an empty model stream: consumers that fold
+    // it (token usage, first-token timing, stats) read "no streamed chunks"
+    // instead of a fabricated timing trace.
+    stream: [],
   }, true))
 
   const callSeqByCallId = new Map<string, number>()
@@ -213,17 +225,18 @@ function pushToolResult(
 /**
  * Synthesize a DSH event log for one normalized session.
  * @param input - normalized session produced by an adapter.
+ * @param options - host-owned protocol stamps; see {@link SynthesizeOptions}.
  * @returns contiguous `seq >= 0` events and a header.
  */
-export function synthesizeDshSession(input: NormalizedSession): SynthesizedSession {
+export function synthesizeDshSession(input: NormalizedSession, options: SynthesizeOptions = {}): SynthesizedSession {
   const events: SynthesizedSessionEvent[] = []
   const stats: SynthesizeStats = { turns: 0, steps: 0, messages: 0, toolCalls: 0, toolResults: 0, synthesizedToolResults: 0 }
 
-  if (input.origin === 'subagent') {
+  if (input.origin === 'subagent' && options.subagentDescriptorVersion !== undefined) {
     const firstPrompt = input.turns[0]?.prompt ?? 'Claude subagent'
     const label = normalizeTitle(input.title) ?? truncateUtf8(firstPrompt, MAX_TITLE_BYTES)
     events.push(event('subagent/descriptor', events.length, input.createdAt, {
-      version: 2,
+      version: options.subagentDescriptorVersion,
       mode: 'one-shot',
       provider: 'claude2dsh',
       label,
@@ -287,7 +300,6 @@ export function synthesizeDshSession(input: NormalizedSession): SynthesizedSessi
   }
 
   const meta: SynthesizedSessionMeta = {
-    version: SESSION_FORMAT_VERSION,
     id: input.id,
     createdAt: input.createdAt,
     delegationDepth: input.origin === 'subagent' ? 1 : 0,

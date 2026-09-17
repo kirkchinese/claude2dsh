@@ -1,10 +1,10 @@
 # Claude2DSH
 
-**Move Claude Code conversations, skills, memory, and plugin assets into DeepSeek Harness as native, resumable sessions — and take DSH turns back to Claude Code JSONL when you need to.**
+**Move Claude Code conversations, skills, agents, commands, memory, and MCP servers into DeepSeek Harness as native, resumable sessions — and take DSH turns back to Claude Code JSONL when you need to.**
 
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 [![npm version](https://img.shields.io/npm/v/%40claude2dsh%2Fplugin?label=npm&color=0ea5e9)](https://www.npmjs.com/package/@claude2dsh/plugin)
-[![status: release candidate](https://img.shields.io/badge/status-release%20candidate-f59e0b)](https://github.com/kirkchinese/claude2dsh/releases)
+[![DSH >=0.1.5-rc.1 <0.2.0](https://img.shields.io/badge/dsh-%3E%3D0.1.5--rc.1%20%3C0.2.0-4f46e5)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node.js >=22.19](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=nodedotjs&logoColor=white)](package.json)
 [![license: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
@@ -14,8 +14,12 @@
 
 Claude Code is the first source adapter in a multi-tool migration layer. Claude2DSH preserves the useful conversation structure, writes through DSH's native persistence APIs, and keeps the original Claude directory read-only by default.
 
-> [!NOTE]
-> `0.2.0-rc.5` is a release candidate. The Awesome badge means the project is included in the curated [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) list under **Sessions & Messages**. The automatic [awesome-dsh-plugins](https://github.com/AdamPlatin123/awesome-dsh-plugins) radar has not marked it as runtime-verified; the badge does not claim that verification.
+> [!IMPORTANT]
+> **`0.3.0` requires DSH `>=0.1.5-rc.1 <0.2.0`** and no longer starts on `0.1.0-rc.x`. DSH 0.1.5 replaced the service-level session API with per-session handles and moved the Session log to format v3; 0.2.x releases predate that change. Upgrade the harness (`npm install -g @deepseek-ai/dsh@latest`) or stay on `claude2dsh@0.2.0-rc.5`.
+
+![Claude Code assets on the left mapping to DeepSeek Harness surfaces on the right, with the three import types added in 0.3.0 marked](assets/asset-translation.svg)
+
+![Compatibility table showing DSH 0.1.5-rc.1 and 0.1.6-alpha.1 verified, the rest of 0.1.5 in range, and 0.1.0-rc.x unsupported](assets/dsh-compatibility.svg)
 
 ## Why Claude2DSH
 
@@ -42,7 +46,7 @@ Requirements: Node.js `>=22.19.0`, pnpm, and the `dsh` CLI.
 
 ```sh
 # Install the published plugin into DSH's built-in headed profile
-dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.5
+dsh plugin --profile web add @claude2dsh/plugin@0.3.0
 
 # Start the browser UI; the terminal prints the local URL
 dsh web
@@ -73,7 +77,7 @@ Preview is read-only and returns an itemized plan before any DSH write.
 
 ![Real Claude2DSH Preview import report in the default Chinese UI, showing one privacy-safe synthetic session ready to import](assets/migration-preview.png)
 
-This is what a successful run looks like. The screenshot comes from the real `0.2.0-rc.5` UI using a synthetic, privacy-safe Claude transcript.
+This is what a successful run looks like. The screenshot comes from a real Claude2DSH UI using a synthetic, privacy-safe Claude transcript.
 
 ![Real Claude2DSH import result in the default Chinese UI, showing one newly imported synthetic session and zero failures](assets/migration-result.png)
 
@@ -101,9 +105,14 @@ Set `CLAUDE2DSH_PROFILE` only when you intentionally want a custom profile. Head
 | Conflict merge       | Both sides grew after the watermark and neither version may be lost         | `claude2dsh_merge`; computes or creates a new merged copy rather than changing either original                                                                                                                                                                                  |
 | Tool-output sidecars | A transcript references large persisted tool results                        | `claude2dsh_sidecars`; lists or resolves copied files and records missing/oversize items                                                                                                                                                                                        |
 | Session sources      | Distinguish Claude main, subagent, and merged sessions                      | **Settings → Session sources**, or `claude2dsh_session_sources`; shows source kind and path                                                                                                                                                                                     |
-| Plugin inventory     | Inspect Claude plugin assets without running Claude plugin code             | `claude2dsh_plugin_inventory`; dry-run reports skills, commands, agents, prompts, hooks, and marketplaces                                                                                                                                                                       |
+| Agent import         | Claude subagent definitions should keep their instructions in DSH           | `claude2dsh_import_agents`; each `~/.claude/agents/*.md` becomes the skill `cc-agent-<name>` with its origin, model, and tool list in frontmatter metadata                                                                                                                      |
+| Command import       | Claude slash commands should stay human-invocable in DSH                    | `claude2dsh_import_commands`; `commands/<ns>/<name>.md` becomes `cc-cmd-<ns>-<name>` with `disable-model-invocation: true`, so a human prompt never enters the model catalog                                                                                                    |
+| MCP server import    | Claude MCP servers should reach DSH without retyping their configuration    | `claude2dsh_import_mcp`; reads `~/.claude.json` and a project `.mcp.json`, and with `apply:true` writes a `dsh-mcp-client` patch layer plus the exact `dsh --patch` command. SSE servers are reported unsupported                                                               |
+| Plugin inventory     | Inspect Claude plugin assets without running Claude plugin code             | `claude2dsh_plugin_inventory`; dry-run reports skills, commands, agents, prompts, hooks, and marketplaces; `apply:true` also translates a plugin's `agents/` and `commands/`                                                                                                    |
 | Image policy         | Preserve transcript images while respecting the selected model's modalities | `imageMode: "auto"` follows the current DSH session route; leave the probe provider/model fields empty to follow the live session, or set them to override. The Settings page shows the current probe conclusion, and every import item records the degradation/upgrade reason. |
 | Hook bridge          | Reuse the supported subset of Claude command hooks                          | **Settings → Claude hook bridge** scans Claude settings and plugin hooks read-only, previews mappable command hooks, and can save a candidate for the next boot; unsupported types are reported and skipped                                                                     |
+
+A translation is not an equivalence, and the report says so: a Claude subagent becomes a DSH skill rather than a preset, and a Claude slash command becomes a user-invocable skill. The original frontmatter values are preserved in skill metadata so the difference is inspectable.
 
 Session import is idempotent: running it again reports an existing session instead of duplicating it. The default search is recursive and respects `CLAUDE_CONFIG_DIR` (falling back to `~/.claude/projects`), and the first-run guide displays the discovered source root and result counts. Project-level `CLAUDE.md` is not copied because DSH already reads it natively; only user-global context needs conversion.
 
@@ -135,7 +144,7 @@ The following real screenshots use the default Chinese UI and synthetic data; la
 
 ## Current limitations
 
-- **Release-candidate status:** the public package is `0.2.0-rc.5`; interfaces and on-disk formats are not presented as a stable compatibility promise yet.
+- **Harness range:** `0.3.0` supports DSH `>=0.1.5-rc.1 <0.2.0` and refuses to load outside it. Interfaces and on-disk formats are still not presented as a stable compatibility promise; a future Session format change will need a matching plugin release.
 - **Hook bridge:** the upstream bridge supports **7 of Claude Code's 30 hook events**, only `type: "command"` handlers, and partial semantics per supported event. Full hook compatibility is a roadmap goal, not a current claim.
 - **Vision acceptance:** the native image path is implemented, but it has not been accepted against a real vision-capable DSH model route. The shipped DeepSeek adapter declares text-only input.
 - **Auto mirror:** it is opt-in and off by default. It writes DSH turns only to the safe Claude export copy; when both sides grow, it pauses and reports a conflict. Automatic merge is not implied.
@@ -165,6 +174,14 @@ Not during migration. Export and sync also target a safe copy under `$DSH_HOME` 
 Both can execute work after the first import. They stay opt-in so the user sees and accepts their scope first; the hook bridge is also limited to the documented 7/30 command-only subset.
 
 </details>
+
+## Sibling project
+
+Claude2DSH is part of a small family of DSH plugins by the same author for people who work across several agent tools:
+
+- **[CiteCiter](https://github.com/kirkchinese/CiteCiter)** — citation and evidence management for DSH sessions. Where Claude2DSH moves a whole conversation between harnesses, CiteCiter keeps the sources behind an answer traceable and quotable. Both plugins follow the same rules: public DSH extension points only, nothing written into a foreign tool's directory without explicit authorization, and a real-profile acceptance run before every release.
+
+If you migrated a Claude Code corpus into DSH, CiteCiter is the natural next install for the sessions that end up citing documents.
 
 ## License and acknowledgements
 

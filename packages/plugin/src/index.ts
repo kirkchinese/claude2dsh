@@ -10,7 +10,7 @@
 import { writeFile } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import { Session, type SessionId, type UserMessage } from '@deepseek-ai/dsh-session'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool, type ToolResult } from '@deepseek-ai/dsh-tools'
 import { claudeCodeAdapter } from '@claude2dsh/adapter-claude-code'
 import { importClaudeSessions } from './session-import.ts'
@@ -27,9 +27,11 @@ import { loadSidecarMap } from './sidecar.ts'
 import { loadSessionSourceMap, saveSessionSource } from './session-sources.ts'
 import { mergeClaudeSession, mergeDshToClaude } from './merge-session.ts'
 import { inspectSessionMove } from './session-move-interop.ts'
+import { appendStoredEvents, inspectStoredSession, listSessionHeaders, readSessionEvents } from './persistence.ts'
 import { createSettingsRuntime } from './settings-service.ts'
 import { registerClaude2dshSettingsRoutes } from './settings-routes.ts'
 import { inventoryClaudePlugins } from './plugin-inventory.ts'
+import { importClaudeAgents, importClaudeCommands, importClaudeMcpServers } from './assets-import.ts'
 
 export const name = 'claude2dsh-import'
 export const inject = ['sessionPersistence', 'sessions', 'tools', 'attachments', 'llm']
@@ -362,6 +364,59 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
     },
   }))
 
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_import_agents',
+    description: [
+      'Translate Claude Code subagent definitions (~/.claude/agents/*.md) into DSH skills.',
+      'A Claude subagent is a delegated persona with its own tools; DSH keeps delegation in presets, so the translation carries the instructions as a skill and records the origin in frontmatter metadata.',
+      'Existing skills are never overwritten: identical content is skipped, different content is reported as a conflict.',
+    ].join('\n'),
+    parameters: {
+      path: { type: 'string', description: 'Claude agents root. Defaults to $CLAUDE_CONFIG_DIR/agents or ~/.claude/agents.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const report = await importClaudeAgents(args, resolveDshHome())
+      return report as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_import_commands',
+    description: [
+      'Translate Claude Code slash commands (~/.claude/commands/**/*.md) into DSH user-invocable skills.',
+      'commands/<namespace>/<name>.md becomes skill cc-cmd-<namespace>-<name>, mirroring Claude\'s /<namespace>:<name> shape.',
+      'The translation sets disable-model-invocation:true so a human prompt never enters the model catalog, exactly as a slash command does not.',
+    ].join('\n'),
+    parameters: {
+      path: { type: 'string', description: 'Claude commands root. Defaults to $CLAUDE_CONFIG_DIR/commands or ~/.claude/commands.' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const report = await importClaudeCommands(args, resolveDshHome())
+      return report as unknown as JsonValue
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'claude2dsh_import_mcp',
+    description: [
+      'Translate Claude Code MCP servers (~/.claude.json and a project .mcp.json) into a DSH mcp-client patch layer.',
+      'stdio and streamable-HTTP declarations translate; an SSE server is reported as unsupported because DSH has no SSE transport.',
+      'Dry-run is the default and the layer is never applied to a profile here: apply:true writes $DSH_HOME/claude2dsh/mcp.patch.yml and reports the dsh --patch command to inspect it first.',
+    ].join('\n'),
+    parameters: {
+      path: { type: 'string', description: 'Claude JSON configuration file. Defaults to ~/.claude.json.' },
+      projectDir: { type: 'string', description: 'Project root whose .mcp.json is also scanned.' },
+      apply: { type: 'boolean', description: 'Write the patch layer under $DSH_HOME/claude2dsh (default false).' },
+    },
+    output: jsonToolOutput(),
+    async execute(args) {
+      const report = await importClaudeMcpServers(args, resolveDshHome())
+      return report as unknown as JsonValue
+    },
+  }))
+
   registerImageReprojection(ctx)
 
   if (config.autoSync?.enabled === true) {
@@ -394,13 +449,13 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       const skillsReport = process.env.CLAUDE2DSH_TEST_SKILLS === '1'
         ? await importClaudeSkills(process.env.CLAUDE2DSH_TEST_SKILLS_ROOT ?? testPath, resolveDshHome())
         : undefined
-      const headers = await ready.sessionPersistence.list()
+      const headers = await listSessionHeaders(ctx)
       const inspected: Record<string, { header: unknown; eventCount: number; error?: string }> = {}
       for (const item of report.items) {
         if (item.sessionId !== undefined && item.status !== 'preview' && item.status !== 'failed') {
           try {
-            const view = await ready.sessionPersistence.inspect(item.sessionId as SessionId)
-            inspected[item.sessionId] = { header: view.meta, eventCount: view.events.length }
+            const view = await inspectStoredSession(ready, item.sessionId)
+            inspected[item.sessionId] = { header: view.header, eventCount: view.events.length }
           } catch (error) {
             inspected[item.sessionId] = { header: null, eventCount: -1, error: error instanceof Error ? error.message : String(error) }
           }
@@ -412,9 +467,9 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
         for (const item of report.items) {
           if (item.sessionId === undefined || item.status === 'preview' || item.status === 'failed') continue
           try {
-            const preparation = await ready.sessionPersistence.prepare(item.sessionId as SessionId)
-            preparedSessions[item.sessionId] = preparation.session.deriveMessages().length
-            preparation[Symbol.dispose]()
+            const view = await inspectStoredSession(ready, item.sessionId)
+            const restored = Session.create(view.header.id, view.events as never, view.header)
+            preparedSessions[item.sessionId] = restored.deriveMessages().length
           } catch {
             preparedSessions[item.sessionId] = -1
           }
@@ -440,6 +495,22 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
       if (process.env.CLAUDE2DSH_TEST_MEMORY !== undefined && process.env.CLAUDE2DSH_TEST_MEMORY.length > 0) {
         memoryReport = await importClaudeMemory({ path: process.env.CLAUDE2DSH_TEST_MEMORY, preview: process.env.CLAUDE2DSH_TEST_MEMORY_PREVIEW === '1' }, resolveDshHome())
       }
+      let agentsReport: Awaited<ReturnType<typeof importClaudeAgents>> | undefined
+      if (process.env.CLAUDE2DSH_TEST_AGENTS !== undefined && process.env.CLAUDE2DSH_TEST_AGENTS.length > 0) {
+        agentsReport = await importClaudeAgents({ path: process.env.CLAUDE2DSH_TEST_AGENTS }, resolveDshHome())
+      }
+      let commandsReport: Awaited<ReturnType<typeof importClaudeCommands>> | undefined
+      if (process.env.CLAUDE2DSH_TEST_COMMANDS !== undefined && process.env.CLAUDE2DSH_TEST_COMMANDS.length > 0) {
+        commandsReport = await importClaudeCommands({ path: process.env.CLAUDE2DSH_TEST_COMMANDS }, resolveDshHome())
+      }
+      let mcpReport: Awaited<ReturnType<typeof importClaudeMcpServers>> | undefined
+      if (process.env.CLAUDE2DSH_TEST_MCP !== undefined && process.env.CLAUDE2DSH_TEST_MCP.length > 0) {
+        mcpReport = await importClaudeMcpServers({
+          path: process.env.CLAUDE2DSH_TEST_MCP,
+          ...(process.env.CLAUDE2DSH_TEST_MCP_PROJECT !== undefined ? { projectDir: process.env.CLAUDE2DSH_TEST_MCP_PROJECT } : {}),
+          apply: process.env.CLAUDE2DSH_TEST_MCP_APPLY === '1',
+        }, resolveDshHome())
+      }
       let exportReport: Awaited<ReturnType<typeof exportClaudeSession>> | undefined
       let syncReport: Awaited<ReturnType<typeof syncClaudeSession>> | undefined
       const exportTarget = process.env.CLAUDE2DSH_TEST_EXPORT
@@ -458,9 +529,9 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
         const raw = JSON.parse(await readFile(appendEventsPath, 'utf8')) as Array<{ type: string; time: number; data: Record<string, unknown>; surfaceOp?: 'append'; sourceEventSeqs?: number[] }>
         const sessionId = process.env.CLAUDE2DSH_TEST_APPEND_SESSION ?? exportReport?.sessionId ?? report.items.find((item) => item.status === 'imported')?.sessionId
         if (sessionId === undefined) throw new Error('CLAUDE2DSH_TEST_APPEND_EVENTS requires an imported session')
-        const stored = await ready.sessionPersistence.readFrom(sessionId as SessionId, 0)
-        const events = raw.map((event, index) => ({ ...event, seq: stored.events.length + index }))
-        await ready.sessionPersistence.append(sessionId as SessionId, events as never)
+        const stored = await readSessionEvents(ready, sessionId)
+        const events = raw.map((event, index) => ({ ...event, seq: stored.length + index }))
+        await appendStoredEvents(ready, sessionId, events as never)
         return sessionId
       }
       if (appendEventsPath !== undefined && appendEventsPath.length > 0 && process.env.CLAUDE2DSH_TEST_APPEND_AFTER_EXPORT !== '1') {
@@ -482,11 +553,11 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
           }, resolveDshHome())
         }
         if (mergeReport.status === 'merged' && mergeReport.mergedSessionId !== undefined && process.env.CLAUDE2DSH_TEST_MERGE_DIRECTION !== 'dsh-to-claude') {
-          const mergedView = await ready.sessionPersistence.inspect(mergeReport.mergedSessionId as SessionId)
+          const mergedView = await inspectStoredSession(ready, mergeReport.mergedSessionId)
           mergeReport = {
             ...mergeReport,
             mergedEventCount: mergedView.events.length,
-            mergedDerivedMessages: Session.create(mergeReport.mergedSessionId as SessionId, mergedView.events as never).deriveMessages().length,
+            mergedDerivedMessages: Session.create(mergedView.header.id, mergedView.events as never, mergedView.header).deriveMessages().length,
           } as typeof mergeReport
         }
         } catch (error) {
@@ -517,7 +588,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
           resumeReport = {
             sessionId: resumeId,
             prompt,
-            events: handle.agent.session.events.length,
+            events: handle.agent.session.seq,
             messages: handle.agent.session.deriveMessages().length,
             status: handle.agent.status,
           }
@@ -553,7 +624,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
         }
       }
       if (testReport !== undefined) {
-        await writeFile(testReport, JSON.stringify({ report, skillsReport, contextReport, memoryReport, exportReport, syncReport, mergeReport, resumeReport, preparedSessions, presenters, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
+        await writeFile(testReport, JSON.stringify({ report, skillsReport, contextReport, memoryReport, agentsReport, commandsReport, mcpReport, exportReport, syncReport, mergeReport, resumeReport, preparedSessions, presenters, persistedSessions: headers.map((header) => ({ id: String(header.id), cwd: header.cwd, createdAt: header.createdAt })), inspected, skillsSnapshot, skillsSnapshotError }, null, 2) + '\n')
       }
       const holdMs = Number(process.env.CLAUDE2DSH_TEST_HOLD_MS ?? '0')
       const failed = report.failed + (skillsReport?.filter((item) => item.status === 'failed').length ?? 0)

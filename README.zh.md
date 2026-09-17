@@ -1,10 +1,10 @@
 # Claude2DSH
 
-**把 Claude Code 的会话、技能、记忆与插件资产迁移为 DeepSeek Harness（DSH）原生可续聊会话；需要时，还能把 DSH 新轮次带回 Claude Code JSONL。**
+**把 Claude Code 的会话、技能、子 agent、斜杠命令、记忆与 MCP 服务器迁移为 DeepSeek Harness（DSH）原生可续聊会话；需要时，还能把 DSH 新轮次带回 Claude Code JSONL。**
 
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 [![npm version](https://img.shields.io/npm/v/%40claude2dsh%2Fplugin?label=npm&color=0ea5e9)](https://www.npmjs.com/package/@claude2dsh/plugin)
-[![status: release candidate](https://img.shields.io/badge/status-release%20candidate-f59e0b)](https://github.com/kirkchinese/claude2dsh/releases)
+[![DSH >=0.1.5-rc.1 <0.2.0](https://img.shields.io/badge/dsh-%3E%3D0.1.5--rc.1%20%3C0.2.0-4f46e5)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node.js >=22.19](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=nodedotjs&logoColor=white)](package.json)
 [![license: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
@@ -14,8 +14,12 @@
 
 Claude Code 是多工具迁移层的第一个会话源适配器。Claude2DSH 保留有用的会话结构，通过 DSH 原生持久化 API 写入，并默认把原始 Claude 目录视为只读源。
 
-> [!NOTE]
-> `0.2.0-rc.5` 是候选发布版。Awesome badge 只表示项目被精选列表 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 收录在 **Sessions & Messages（会话与消息）** 分类。自动雷达 [awesome-dsh-plugins](https://github.com/AdamPlatin123/awesome-dsh-plugins) 尚未标记“运行级验证”；badge 不代表已经获得该验证。
+> [!IMPORTANT]
+> **`0.3.0` 要求 DSH `>=0.1.5-rc.1 <0.2.0`，在 `0.1.0-rc.x` 上不再启动。** DSH 0.1.5 把服务级会话 API 换成按会话句柄（handle），并把 Session 日志格式升到 v3；0.2.x 系列早于这次变更。请升级宿主（`npm install -g @deepseek-ai/dsh@latest`），或继续使用 `claude2dsh@0.2.0-rc.5`。
+
+![左侧为 Claude Code 资产、右侧为 DeepSeek Harness 落点的迁移对照图，0.3.0 新增的三类导入标有标记](assets/asset-translation.svg)
+
+![兼容性表：DSH 0.1.5-rc.1 与 0.1.6-alpha.1 已验证，0.1.5 其余版本在范围内，0.1.0-rc.x 不支持](assets/dsh-compatibility.svg)
 
 ## 为什么选择 Claude2DSH
 
@@ -42,7 +46,7 @@ flowchart LR
 
 ```sh
 # 把已发布插件安装进 DSH 内置的有头 profile
-dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.5
+dsh plugin --profile web add @claude2dsh/plugin@0.3.0
 
 # 启动浏览器 UI；终端会打印本地 URL
 dsh web
@@ -73,7 +77,7 @@ flowchart LR
 
 ![真实 Claude2DSH 预览导入报告，显示一个不含隐私、等待导入的合成会话](assets/migration-preview.png)
 
-下面是真实成功结果。截图来自 `0.2.0-rc.5` 界面，输入为不含隐私的合成 Claude 转录。
+下面是真实成功结果。截图来自真实的 Claude2DSH 界面，输入为不含隐私的合成 Claude 转录。
 
 ![真实 Claude2DSH 导入结果，显示合成会话新导入一项且失败为零](assets/migration-result.png)
 
@@ -101,9 +105,14 @@ bash scripts/install-claude2dsh.sh
 | 冲突合并         | 同步水位后双端都增长，且任一版本都不能丢                  | `claude2dsh_merge`；计算或创建新的合并副本，不修改两侧原件                                                                                                        |
 | 工具输出 sidecar | 转录引用了较大的持久化工具输出                            | `claude2dsh_sidecars`；列出/解析复制文件，并记录缺失或超限项                                                                                                      |
 | 会话来源         | 区分 Claude 主会话、子会话与合并会话                      | **设置 → 会话来源**，或 `claude2dsh_session_sources`；显示来源类型与路径                                                                                          |
-| 插件盘点         | 不运行 Claude 插件代码，只检查其中的资产                  | `claude2dsh_plugin_inventory`；dry-run 报告技能、命令、agent、prompt、hook 与 marketplace                                                                         |
+| 子 agent 导入    | 希望 Claude 子 agent 定义的指令在 DSH 中继续可用          | `claude2dsh_import_agents`；每个 `~/.claude/agents/*.md` 变成技能 `cc-agent-<name>`，来源、模型与工具列表写入 frontmatter metadata                                |
+| 命令导入         | 希望 Claude 斜杠命令在 DSH 中保持“由人调用”               | `claude2dsh_import_commands`；`commands/<ns>/<name>.md` 变成 `cc-cmd-<ns>-<name>`，并带 `disable-model-invocation: true`，人工提示词不会进入模型目录              |
+| MCP 服务器导入   | 希望 Claude 的 MCP 服务器不必在 DSH 重新手抄配置          | `claude2dsh_import_mcp`；读取 `~/.claude.json` 与项目 `.mcp.json`，`apply:true` 写出 `dsh-mcp-client` patch 层并给出 `dsh --patch` 命令；SSE 服务器报告为不支持   |
+| 插件盘点         | 不运行 Claude 插件代码，只检查其中的资产                  | `claude2dsh_plugin_inventory`；dry-run 报告技能、命令、agent、prompt、hook 与 marketplace；`apply:true` 同时转换插件内的 `agents/` 与 `commands/`                 |
 | 图片策略         | 保留转录图片，同时尊重所选模型的输入模态                  | `imageMode: "auto"` 自动跟随当前 DSH 会话路由；探测路由 provider/model 留空即跟随会话，填写则覆盖。Settings 页面显示当前探测结论，每个导入条目记录降级/升格原因。 |
 | Hook bridge      | 复用当前已支持的 Claude command hook 子集                 | **设置 → Claude hook bridge** 只读扫描 Claude 设置与插件 hooks，预览可映射的 command hook，并可保存候选供下次启动启用；不支持类型会报告并跳过                     |
+
+转换不等于等价，报告会说明差异：Claude 子 agent 变成 DSH 技能而不是 preset，Claude 斜杠命令变成 user-invocable 技能。原始 frontmatter 字段保留在技能 metadata 中，差异可被检查。
 
 会话导入具备幂等性：再次运行会报告已存在，不会复制一份。默认递归搜索并感知 `CLAUDE_CONFIG_DIR`（回退到 `~/.claude/projects`），首启向导会显示实际来源目录与发现/导入数量。项目级 `CLAUDE.md` 不需要复制，因为 DSH 已原生读取它；只有用户全局上下文需要转换。
 
@@ -135,7 +144,7 @@ Claude2DSH 把首次迁移与安全关键默认值放在同一个设置页：
 
 ## 当前局限
 
-- **候选发布状态：** 当前公开包为 `0.2.0-rc.5`；项目尚未把接口与磁盘格式承诺为稳定兼容层。
+- **宿主版本范围：** `0.3.0` 支持 DSH `>=0.1.5-rc.1 <0.2.0`，超出范围会拒绝加载。接口与磁盘格式仍不承诺为稳定兼容层；下一次 Session 格式变更需要配套的插件版本。
 - **Hook bridge：** 上游只支持 **Claude Code 30 个 hook 事件中的 7 个**、仅 `type: "command"` handler，且已支持事件也只有部分语义。完整 hook 兼容是路线图目标，不是现状承诺。
 - **视觉模型验收：** 原生图片路径已实现，但尚未在真实支持视觉的 DSH 模型路由上验收；随附 DeepSeek adapter 声明仅文本输入。
 - **自动镜像：** 默认关闭、需显式开启；DSH 轮次只写安全 Claude 导出副本。双端同时增长时暂停并报告冲突，不代表会自动合并。
@@ -165,6 +174,14 @@ Claude2DSH 把首次迁移与安全关键默认值放在同一个设置页：
 两者都会在首次导入后继续执行工作，因此保持 opt-in，让用户先看清并接受其范围；Hook bridge 还只覆盖文档明示的 7/30 command-only 子集。
 
 </details>
+
+## 兄弟项目
+
+Claude2DSH 与同作者的另一款 DSH 插件面向同一群人——需要在多个 agent 工具之间工作的人：
+
+- **[CiteCiter](https://github.com/kirkchinese/CiteCiter)** —— DSH 会话的引用与证据管理。Claude2DSH 负责把整段会话在宿主之间搬运，CiteCiter 负责让答案背后的来源可追溯、可引用。两者遵循同一套原则：只用公开扩展点、未经显式授权不写入外部工具目录、每次发布前都跑真实 profile 验收。
+
+如果你刚把 Claude Code 的会话库迁进 DSH，接下来的自然选择就是给那些会引用文档的会话装上 CiteCiter。
 
 ## 许可与致谢
 

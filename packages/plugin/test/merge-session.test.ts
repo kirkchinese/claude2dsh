@@ -4,11 +4,14 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { contextWith, fakeHeader, liveContext } from './support/fake-persistence.ts'
 import { Session } from '@deepseek-ai/dsh-session'
 import { synthesizeDshSession } from '@claude2dsh/core'
 import { readClaudeSession } from '@claude2dsh/adapter-claude-code'
 import { importClaudeSessions } from '../src/session-import.ts'
 import { mergeClaudeSession, mergeDshToClaude } from '../src/merge-session.ts'
+import { exportClaudeSession } from '../src/export-claude.ts'
+import { appendStoredEvents } from '../src/persistence.ts'
 
 const sessionId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 
@@ -28,13 +31,13 @@ test('merge preserves both same-turn versions in a new DSH session and validates
     await writeFile(file, claudeRecords('base').map((record) => JSON.stringify(record)).join('\n') + '\n')
     await mkdir(join(home, 'claude2dsh'), { recursive: true })
     await writeFile(join(home, 'claude2dsh', 'registry.json'), JSON.stringify({ version: 1, imports: {}, exports: {} }))
-    const empty = { sessionPersistence: { async list() { return [] }, async create() {}, async append() {} } }
-    const first = await importClaudeSessions(empty as unknown as Context, { path: file }, home)
+    const live = liveContext()
+    const first = await importClaudeSessions(live as unknown as Context, { path: file }, home)
     const targetId = first.items[0]?.sessionId as string
     assert.equal(targetId, `claude-${sessionId}`)
 
     // DSH side grows turn 2; Claude side edits the same turn number with different content.
-    const baseEvents = synthesizeDshSession((await readClaudeSession({ ref: file, sourceId: sessionId })).session).events
+    const baseEvents = live.sessionPersistence.eventsOf(targetId)
     const dshTurn2 = [
       { type: 'turn/start', seq: baseEvents.length, time: 20, data: { turn: 2 } },
       { type: 'step/start', seq: baseEvents.length + 1, time: 20, data: { turn: 2, step: 1 } },
@@ -42,31 +45,24 @@ test('merge preserves both same-turn versions in a new DSH session and validates
       { type: 'step/end', seq: baseEvents.length + 3, time: 20, data: { turn: 2, step: 1 } },
       { type: 'turn/end', seq: baseEvents.length + 4, time: 20, data: { turn: 2, reason: { kind: 'completed' } } },
     ]
-    const stored = [...baseEvents, ...dshTurn2]
     await writeFile(file, [...claudeRecords('base'), { ...claudeRecords('claude-version')[1], uuid: 'x0', parentUuid: 'a1' }, { ...claudeRecords('claude-version')[2], uuid: 'x1', parentUuid: 'x0' }].map((record) => JSON.stringify(record)).join('\n') + '\n')
+    await appendStoredEvents(live as unknown as Context, targetId, dshTurn2 as never)
+    const createsBefore = live.sessionPersistence.createCalls
 
-    const created: Array<{ id: string; events: unknown[] }> = []
-    const ctx = {
-      sessionPersistence: {
-        async list() { return [{ id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }, ...created.map((item) => ({ id: item.id, version: 0, createdAt: 0, delegationDepth: 0 }))] },
-        async readFrom() { return { meta: { id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }, events: stored } },
-        async create() {},
-        async append(id: string, events: unknown[]) {
-          created.push({ id: String(id), events })
-        },
-      },
-    }
-    const result = await mergeClaudeSession(ctx as unknown as Context, { sessionId: targetId }, home)
+    const result = await mergeClaudeSession(live as unknown as Context, { sessionId: targetId }, home)
     assert.equal(result.status, 'merged')
     assert.equal(result.mergedSessionId, `${targetId}-merged`)
     assert.equal(result.conflicts, 1)
-    assert.equal(created.length, 1)
+    assert.equal(live.sessionPersistence.createCalls, createsBefore + 1)
 
-    const mergedEvents = created[0]?.events as Array<{ type: string; seq: number; time: number; data: Record<string, unknown>; surfaceOp?: string }>
+    const mergedId = result.mergedSessionId as string
+    const mergedEvents = live.sessionPersistence.eventsOf(mergedId) as unknown as Array<{ type: string; seq: number; time: number; data: Record<string, unknown>; surfaceOp?: string }>
     assert.ok(mergedEvents.every((event, index) => event.seq === index))
     assert.ok(mergedEvents.filter((event) => event.type === 'turn/start' && event.data.turn === 2).length === 2)
     assert.equal(mergedEvents.filter((event) => event.type === 'todo/write').length, 1)
-    const session = Session.create(result.mergedSessionId as never, mergedEvents as never)
+    const header = (await live.sessionPersistence.stat(mergedId as never))?.header
+    assert.ok(header !== undefined)
+    const session = Session.create(header.id, mergedEvents as never, header)
     assert.ok(session.deriveMessages().length > 0)
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -81,23 +77,17 @@ test('dry-run never creates a session', async () => {
     await writeFile(file, claudeRecords().map((record) => JSON.stringify(record)).join('\n') + '\n')
     await mkdir(join(home, 'claude2dsh'), { recursive: true })
     await writeFile(join(home, 'claude2dsh', 'registry.json'), JSON.stringify({ version: 1, imports: {}, exports: {} }))
-    await importClaudeSessions({ sessionPersistence: { async list() { return [] }, async create() {}, async append() {} } } as unknown as Context, { path: file }, home)
+    const live = liveContext()
+    await importClaudeSessions(live as unknown as Context, { path: file }, home)
     const targetId = `claude-${sessionId}`
-    const baseEvents = synthesizeDshSession((await readClaudeSession({ ref: file, sourceId: sessionId })).session).events
+    const baseEvents = live.sessionPersistence.eventsOf(targetId)
     const dshTurn = [{ type: 'turn/start', seq: baseEvents.length, time: 20, data: { turn: 2 } }, { type: 'turn/end', seq: baseEvents.length + 1, time: 20, data: { turn: 2, reason: { kind: 'completed' } } }]
+    await appendStoredEvents(live as unknown as Context, targetId, dshTurn as never)
     await writeFile(file, [...claudeRecords(), { ...claudeRecords('next')[1], uuid: 'y0', parentUuid: 'a1' }, { ...claudeRecords('next')[2], uuid: 'y1', parentUuid: 'y0' }].map((record) => JSON.stringify(record)).join('\n') + '\n')
-    let created = 0
-    const ctx = {
-      sessionPersistence: {
-        async list() { return [{ id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }] },
-        async readFrom() { return { meta: { id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }, events: [...baseEvents, ...dshTurn] } },
-        async create() { created += 1 },
-        async append() {},
-      },
-    }
-    const result = await mergeClaudeSession(ctx as unknown as Context, { sessionId: targetId, dryRun: true }, home)
+    const createsBefore = live.sessionPersistence.createCalls
+    const result = await mergeClaudeSession(live as unknown as Context, { sessionId: targetId, dryRun: true }, home)
     assert.equal(result.status, 'dry-run')
-    assert.equal(created, 0)
+    assert.equal(live.sessionPersistence.createCalls, createsBefore)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -111,20 +101,10 @@ test('dsh-to-claude merge writes a new copy and never mutates the export mapping
     await writeFile(file, claudeRecords().map((record) => JSON.stringify(record)).join('\n') + '\n')
     await mkdir(join(home, 'claude2dsh'), { recursive: true })
     await writeFile(join(home, 'claude2dsh', 'registry.json'), JSON.stringify({ version: 1, imports: {}, exports: {} }))
-    const live = { sessionPersistence: { async list() { return [] }, async create() {}, async append() {} } }
+    const live = liveContext()
     await importClaudeSessions(live as unknown as Context, { path: file }, home)
     const targetId = `claude-${sessionId}`
-    const baseEvents = synthesizeDshSession((await readClaudeSession({ ref: file, sourceId: sessionId })).session).events
-    let storedEvents = baseEvents
-    const ctx = {
-      sessionPersistence: {
-        async list() { return [{ id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }] },
-        async readFrom() { return { meta: { id: targetId, version: 0, createdAt: 0, delegationDepth: 0 }, events: storedEvents } },
-        async create() {},
-        async append() {},
-      },
-    }
-    const exported = await (await import('../src/export-claude.ts')).exportClaudeSession(ctx as unknown as Context, { sessionId: targetId }, home)
+    const exported = await exportClaudeSession(live as unknown as Context, { sessionId: targetId }, home)
     assert.equal(exported.status, 'exported')
     const exportFile = exported.filePath as string
     // Claude copy grows a second turn, chained from its real last record.
@@ -137,8 +117,12 @@ test('dsh-to-claude merge writes a new copy and never mutates the export mapping
     const extra = [{ ...claudeRecords('copy-next')[1], uuid: 'z0', parentUuid: lastUuid, sessionId: exportSessionId }, { ...claudeRecords('copy-next')[2], uuid: 'z1', parentUuid: 'z0', sessionId: exportSessionId }]
     await writeFile(exportFile, before.trimEnd() + '\n' + extra.map((record) => JSON.stringify(record)).join('\n') + '\n')
     // DSH grows a different turn.
-    storedEvents = [...baseEvents, { type: 'turn/start', seq: baseEvents.length, time: 30, data: { turn: 3 } }, { type: 'turn/end', seq: baseEvents.length + 1, time: 30, data: { turn: 3, reason: { kind: 'completed' } } }]
-    const result = await mergeDshToClaude(ctx as unknown as Context, { sessionId: targetId }, home)
+    const baseEvents = live.sessionPersistence.eventsOf(targetId)
+    await appendStoredEvents(live as unknown as Context, targetId, [
+      { type: 'turn/start', seq: baseEvents.length, time: 30, data: { turn: 3 } },
+      { type: 'turn/end', seq: baseEvents.length + 1, time: 30, data: { turn: 3, reason: { kind: 'completed' } } },
+    ] as never)
+    const result = await mergeDshToClaude(live as unknown as Context, { sessionId: targetId }, home)
     assert.equal(result.status, 'merged')
     assert.ok(result.filePath !== exportFile)
     assert.equal(await readFile(exportFile, 'utf8'), before.trimEnd() + '\n' + extra.map((record) => JSON.stringify(record)).join('\n') + '\n')

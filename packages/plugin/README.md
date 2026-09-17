@@ -1,11 +1,13 @@
 # @claude2dsh/plugin
 
-DeepSeek Harness plugin for Claude2DSH. It imports Claude Code conversations and skills into DSH as native resumable sessions, and exports/syncs DSH sessions back into Claude Code JSONL.
+DeepSeek Harness plugin for Claude2DSH. It imports Claude Code conversations, skills, subagent definitions, slash commands and MCP servers into DSH as native resumable sessions and assets, and exports/syncs DSH sessions back into Claude Code JSONL.
+
+Requires DSH `>=0.1.5-rc.1 <0.2.0`; the plugin refuses to load outside that range. Imported sessions are written in the current Session log format (v3).
 
 ## Install
 
 ```sh
-dsh plugin --profile web add @claude2dsh/plugin@0.2.0-rc.5
+dsh plugin --profile web add @claude2dsh/plugin@0.3.0
 dsh web
 ```
 
@@ -19,6 +21,9 @@ The bundle registers a `claude2dsh` settings namespace and a **Claude2DSH** page
 
 - `claude2dsh_import`: read `~/.claude/projects` read-only, write DSH-native session logs. Idempotent; grown Claude transcripts append only new turns. `preview:true` is zero-side-effect. `includeSubagents:true` imports subagent/workflow transcripts as `origin:"subagent"` child sessions.
 - `claude2dsh_import_skills`: copy validated Claude skills into `$DSH_HOME/skills`; conflicts are never overwritten.
+- `claude2dsh_import_agents`: translate `~/.claude/agents/*.md` subagent definitions into skills named `cc-agent-<name>`, keeping the instructions and recording the origin, model and tool list in frontmatter metadata.
+- `claude2dsh_import_commands`: translate `~/.claude/commands/**/*.md` into skills named `cc-cmd-<namespace>-<name>` with `disable-model-invocation: true`, so a human prompt never enters the model catalog.
+- `claude2dsh_import_mcp`: translate `~/.claude.json` and project `.mcp.json` MCP servers into a `dsh-mcp-client` patch layer under `$DSH_HOME/claude2dsh/mcp.patch.yml`. Dry-run by default; `apply:true` writes the layer and reports the `dsh --patch` command. SSE servers and namespace collisions are reported instead of emitted.
 - `claude2dsh_export`: serialize one DSH session into a Claude Code JSONL transcript under `$DSH_HOME/claude2dsh/exports`. Writing below the real `~/.claude` is refused unless `allowOriginalClaudeDir:true`.
 - `claude2dsh_sync`: append DSH turns newer than the export watermark to the exported Claude copy (default `target:"copy"`). `target:"source"` requires `allowOriginalClaudeDir:true`. External modification/shrink guards refuse the write unless `force:true`.
 - `claude2dsh_import_context`: copy the user-global `~/.claude/CLAUDE.md` into `$DSH_HOME/AGENTS.md` with preview and never-overwrite conflicts; project CLAUDE.md is left to DSH native discovery.

@@ -8,7 +8,8 @@ import { constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
 import { parse as parseYaml } from 'yaml'
-import { safeSkillName } from './name-utils.ts'
+import { safeSegment, safeSkillName } from './name-utils.ts'
+import { importClaudeAgents, importClaudeCommands } from './assets-import.ts'
 
 export interface PluginInventoryArgs {
   readonly path?: string
@@ -25,6 +26,10 @@ export interface PluginInventoryResult {
   readonly prompts: number
   readonly hookFiles: number
   readonly migratedSkills: number
+  /** Agent definitions translated into skills by an apply run. */
+  readonly migratedAgents: number
+  /** Slash commands translated into skills by an apply run. */
+  readonly migratedCommands: number
   readonly dryRun: boolean
   readonly details: readonly {
     readonly plugin: string
@@ -144,15 +149,22 @@ export async function inventoryClaudePlugins(args: PluginInventoryArgs, dshHome:
   }))
 
   let migratedSkills = 0
+  let migratedAgents = 0
+  let migratedCommands = 0
   if (args.apply === true) {
     const destination = join(dshHome, 'skills')
     for (const plugin of plugins) {
+      const namespace = plugin.plugin.split('@')[0] ?? 'plugin'
       const skillsRoot = join(plugin.path, 'skills')
       const skillFiles = (await findFiles(skillsRoot, '.md')).filter((file) => basename(file) === 'SKILL.md')
       for (const file of skillFiles) {
-        const namespace = plugin.plugin.split('@')[0] ?? 'plugin'
         if (await migrateSkill(file, namespace, destination)) migratedSkills += 1
       }
+      // Agent definitions and commands are declarative prompt text too, so they
+      // migrate through the same translators the top-level tools use instead of
+      // a second copy of the frontmatter rules.
+      migratedAgents += (await importClaudeAgents({ path: join(plugin.path, 'agents'), namespace: `cc-agent-${safeSegment(namespace)}` }, dshHome)).imported
+      migratedCommands += (await importClaudeCommands({ path: join(plugin.path, 'commands'), namespace: `cc-cmd-${safeSegment(namespace)}` }, dshHome)).imported
     }
   }
 
@@ -167,6 +179,8 @@ export async function inventoryClaudePlugins(args: PluginInventoryArgs, dshHome:
     prompts: details.reduce((sum, item) => sum + item.prompts, 0),
     hookFiles: details.reduce((sum, item) => sum + item.hookFiles, 0),
     migratedSkills,
+    migratedAgents,
+    migratedCommands,
     dryRun: args.apply !== true,
     details,
   }

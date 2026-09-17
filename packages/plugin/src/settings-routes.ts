@@ -11,6 +11,7 @@ import { currentSessionRoute, probeImageRoute } from './image-policy.ts'
 import { discoverClaudeHooks, saveDiscoveredHooks } from './hook-discovery.ts'
 import { exportClaudeSession } from './export-claude.ts'
 import { syncClaudeSession } from './sync-claude.ts'
+import { listSessionHeaders } from './persistence.ts'
 import { resolveDshHome } from './registry.ts'
 
 export const CLAUDE2DSH_SETTINGS_PATH = '/plugins/claude2dsh/settings'
@@ -96,7 +97,7 @@ export function registerClaude2dshSettingsRoutes(ctx: Context, runtime: Settings
         if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
         if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
         try {
-          const headers = await ctx.sessionPersistence.list()
+          const headers = await listSessionHeaders(ctx)
           json(res, 200, { sessions: headers.map((header) => ({ sessionId: String(header.id), cwd: header.cwd, origin: header.origin, delegationDepth: header.delegationDepth, createdAt: header.createdAt })) })
         } catch (error) {
           json(res, 500, { error: safeMessage(error) })
