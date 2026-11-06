@@ -93,10 +93,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
     if (next.autoSync.enabled) autoSyncDispose = activateAutoSync(ctx, next.autoSync)
   }
   syncAutoSync(settings.get())
-  ctx.inject(['settings'], () => {
-    syncAutoSync(settings.get())
-    settings.scope?.watch((next) => syncAutoSync(next))
-  })
+  ctx.effect(() => settings.watch((next) => syncAutoSync(next)))
   ctx.tools.register(defineTool({
     name: 'claude2dsh_import',
     description: SESSION_IMPORT_DESCRIPTION,
@@ -419,10 +416,6 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
 
   registerImageReprojection(ctx)
 
-  if (config.autoSync?.enabled === true) {
-    activateAutoSync(ctx, config.autoSync)
-  }
-
   // Optional multi-tool extension point. The root `claude2dsh` bundle owns the
   // in-memory registry; profiles that do not mount it simply never invoke this
   // callback, and the import tools remain fully functional.
@@ -583,7 +576,7 @@ export function apply(ctx: Context, config: PluginConfig = {}): void {
             content: [{ type: 'text' as const, text: prompt }],
             source: { kind: 'user' as const },
           }
-          handle.agent.followup(message as UserMessage)
+          handle.agent.followup(message as unknown as UserMessage)
           await handle.agent.whenIdle()
           resumeReport = {
             sessionId: resumeId,

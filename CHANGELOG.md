@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+Claude2DSH now supports the DSH 0.2.x line (verified on `0.2.2-rc.1`) in addition to 0.1.5+. DSH 0.2 moved the Session log to **format v4** and replaced the namespaced settings registry, so 0.3.0 refused to load on it (`claude2dsh requires @deepseek-ai/dsh-session >=0.1.5-rc.1 <0.2.0, found 0.2.2-rc.1`) and, with the gate bypassed, every import failed with `format v4 tool/result at seq N requires a tool-role message`.
+
+### Changed
+
+- The declared peer range and the load-time gate are now `>=0.1.5-rc.1 <0.3.0`; the gate accepts Session formats v3 and v4. A prerelease of the next minor line (for example `0.3.0-alpha.1`) is still refused.
+- Development dependencies track DSH `0.2.2-rc.1` (with `@deepseek-ai/cordis` 4.1, `cordis-plugin-include` 1.1 and `schemastery` 3.19, matching that release); CI runs the unit suites on Node 24 and the real-profile acceptance against `0.1.5-rc.1`, `0.1.6-alpha.2` and `0.2.2-rc.1` (Node 24 for DSH 0.2, which requires Node >= 24.9). `0.1.6-alpha.1` left the matrix because it no longer installs: its caret dependency on `dsh-app-boot` now resolves to `0.1.6-alpha.2`.
+- `scripts/e2e-acceptance.sh` installs the packed packages into the acceptance profile instead of a `link:` to the workspace, so the plugin's host peers resolve to the DSH under test rather than to its own devDependencies; the assertions expect the Session format of that release (v3 on 0.1.x, v4 on 0.2.x) and check that tool results round-trip through export.
+
+### Fixed
+
+- **Imports on DSH 0.2.** `tool/result` events are written in the representation of the installed format: on v4 a tool-role message carrying `toolCallId`, direct content and an optional `isError`; on v3 the user-role `tool-result` wrapper as before. This covers real, failed and synthesized (lost-result) tool results and the import, append and merge paths (`SynthesizeOptions.sessionFormatVersion`).
+- **Export and sync on DSH 0.2.** The Claude JSONL serializer reads both tool-result representations (`storedToolResults`), so tool results no longer disappear from exported and synced transcripts. A v3 message carrying several wrapped results now produces one `tool_result` record per call instead of repeating all of them for each call.
+- **Three-way merge on DSH 0.2.** Format v4 requires consecutive turn numbers, so merged growth turns are renumbered after the common base (a conflicting pair occupies two adjacent turns). Source-event references are resolved against the side that produced the citing event, instead of colliding when both sides numbered their growth from the same watermark.
+- **Resuming imported sessions.** Imported sessions now open turn 1, step 1 with an empty system-prompt head (the protected first surface node). Without it, the first resumed step appended its system prompt behind the imported history and the next load failed with `system/message requires a protected first surface head`. A prompt-only first turn gets a step for the head.
+- `scripts/repair-imported-sessions.mjs` repairs sessions imported by earlier releases: it inserts the head, renumbers events and audited sequence references, rebinds a resumed system prompt as the head's replacement, validates the result with the installed DSH format catalog, keeps the original under `$DSH_HOME/claude2dsh/repair-backups/`, drops the stale projection-cache record, and skips sessions a running DSH holds open.
+- Image re-projection replaces surface nodes with `{ op: 'replace', startSeq, endSeq }`, the shape every supported DSH release validates; the previous `start`/`end` keys were rejected.
+- Auto mirror is activated once from the effective settings instead of a second time from the raw bundle config, so disabling it in Settings is honoured.
+
+### Settings on DSH 0.2
+
+DSH 0.2 replaced `settings.register(namespace, schema)` with Config-derived profile forms. On hosts without the registry the Claude2DSH settings document (layered over the bundle config and schema defaults) is persisted in `$DSH_HOME/claude2dsh/settings.json`; DSH 0.1.x keeps using its settings registry. The Settings page, tools and auto mirror read the same live settings on both lines.
+
 ## 0.3.0 — 2026-09-17
 
 Claude2DSH now targets the DSH releases that replaced the service-level session API with per-session handles and moved the Session log to format v3. **This release is required for DSH 0.1.5 and later, including 0.1.6-alpha.1, and no longer starts on 0.1.0-rc.x.**

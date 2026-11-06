@@ -126,3 +126,83 @@ test('omitting the descriptor version emits no subagent descriptor', () => {
   const synth = synthesizeDshSession(session)
   assert.equal(synth.events.find((event) => event.type === 'subagent/descriptor'), undefined)
 })
+
+function toolSession(): NormalizedSession {
+  return {
+    id: 'fmt',
+    source: { tool: 'claude-code', path: '/tmp/fmt.jsonl', sessionId: 'fmt' },
+    createdAt: 1000,
+    turns: [{
+      number: 1,
+      prompt: 'run',
+      timestamp: 1000,
+      steps: [{
+        number: 1,
+        timestamp: 1100,
+        content: [
+          { type: 'tool-call', id: 'call_ok', name: 'Bash', arguments: {} },
+          { type: 'tool-call', id: 'call_lost', name: 'Read', arguments: {} },
+        ],
+        toolCalls: [{ id: 'call_ok', name: 'Bash', arguments: {} }, { id: 'call_lost', name: 'Read', arguments: {} }],
+        toolResults: [{ toolCallId: 'call_ok', content: [{ type: 'text', text: 'boom' }], isError: true, timestamp: 1200 }],
+      }],
+    }],
+  }
+}
+
+test('format 3 (default) wraps tool results in a user-role tool-result block', () => {
+  const results = synthesizeDshSession(toolSession()).events.filter((event) => event.type === 'tool/result')
+  assert.equal(results.length, 2)
+  assert.deepEqual(results[0]?.data.message, {
+    id: 'claude2dsh:fmt:r1:1:call_ok',
+    role: 'user',
+    content: [{ type: 'tool-result', toolCallId: 'call_ok', content: [{ type: 'text', text: 'boom' }], isError: true }],
+    source: { kind: 'tool', callId: 'call_ok' },
+  })
+})
+
+test('format 4 writes tool-role results with direct content for real and synthesized results', () => {
+  const results = synthesizeDshSession(toolSession(), { sessionFormatVersion: 4 }).events.filter((event) => event.type === 'tool/result')
+  assert.equal(results.length, 2)
+  assert.deepEqual(results[0]?.data.message, {
+    id: 'claude2dsh:fmt:r1:1:call_ok',
+    role: 'tool',
+    toolCallId: 'call_ok',
+    content: [{ type: 'text', text: 'boom' }],
+    isError: true,
+    source: { kind: 'tool', callId: 'call_ok' },
+  })
+  assert.deepEqual(results[1]?.data.message, {
+    id: 'claude2dsh:fmt:t1:1:call_lost',
+    role: 'tool',
+    toolCallId: 'call_lost',
+    content: [],
+    source: { kind: 'tool', callId: 'call_lost' },
+  })
+  for (const result of results) {
+    assert.equal(result.surfaceOp, 'append')
+    assert.equal(result.sourceEventSeqs?.length, 1)
+  }
+})
+
+test('the first step opens with an empty system head in the target format', () => {
+  for (const [formatVersion, source] of [[3, { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt' }], [4, { kind: 'system-prompt' }]] as const) {
+    const events = synthesizeDshSession(toolSession(), { sessionFormatVersion: formatVersion }).events
+    assert.deepEqual(events.slice(0, 4).map((event) => event.type), ['turn/start', 'step/start', 'system/message', 'user/message'])
+    const head = events[2]
+    assert.equal(head?.surfaceOp, 'append')
+    assert.deepEqual(head?.data, { turn: 1, step: 1, message: { id: 'claude2dsh:fmt:s1:1', role: 'system', content: [], source } })
+    assert.equal(events.filter((event) => event.type === 'system/message').length, 1, 'only the first turn carries the head')
+  }
+})
+
+test('a prompt-only first turn gets a step so the system head has an open step', () => {
+  const session: NormalizedSession = {
+    id: 'p',
+    source: { tool: 'claude-code', path: '/tmp/p.jsonl', sessionId: 'p' },
+    createdAt: 1,
+    turns: [{ number: 1, prompt: 'hi', timestamp: 1, steps: [] }],
+  }
+  const events = synthesizeDshSession(session, { sessionFormatVersion: 4 }).events
+  assert.deepEqual(events.map((event) => event.type), ['turn/start', 'step/start', 'system/message', 'user/message', 'step/end', 'turn/end'])
+})

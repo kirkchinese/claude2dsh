@@ -4,7 +4,7 @@
 
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 [![npm version](https://img.shields.io/npm/v/%40claude2dsh%2Fplugin?label=npm&color=0ea5e9)](https://www.npmjs.com/package/@claude2dsh/plugin)
-[![DSH >=0.1.5-rc.1 <0.2.0](https://img.shields.io/badge/dsh-%3E%3D0.1.5--rc.1%20%3C0.2.0-4f46e5)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH >=0.1.5-rc.1 <0.3.0](https://img.shields.io/badge/dsh-%3E%3D0.1.5--rc.1%20%3C0.3.0-4f46e5)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node.js >=22.19](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=nodedotjs&logoColor=white)](package.json)
 [![license: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
@@ -15,7 +15,7 @@
 Claude Code is the first source adapter in a multi-tool migration layer. Claude2DSH preserves the useful conversation structure, writes through DSH's native persistence APIs, and keeps the original Claude directory read-only by default.
 
 > [!IMPORTANT]
-> **`0.3.0` requires DSH `>=0.1.5-rc.1 <0.2.0`** and no longer starts on `0.1.0-rc.x`. DSH 0.1.5 replaced the service-level session API with per-session handles and moved the Session log to format v3; 0.2.x releases predate that change. Upgrade the harness (`npm install -g @deepseek-ai/dsh@latest`) or stay on `claude2dsh@0.2.0-rc.5`.
+> **Claude2DSH supports DSH `>=0.1.5-rc.1 <0.3.0`** — the 0.1.5+ line (Session log format v3) and the 0.2.x line (format v4, verified on `0.2.2-rc.1`) — and does not start on `0.1.0-rc.x`. Imported sessions are written in whichever format the installed harness uses. On older harnesses, upgrade (`npm install -g @deepseek-ai/dsh@latest`) or stay on `claude2dsh@0.2.0-rc.5`.
 
 ![Claude Code assets on the left mapping to DeepSeek Harness surfaces on the right, with the three import types added in 0.3.0 marked](assets/asset-translation.svg)
 
@@ -144,7 +144,7 @@ The following real screenshots use the default Chinese UI and synthetic data; la
 
 ## Current limitations
 
-- **Harness range:** `0.3.0` supports DSH `>=0.1.5-rc.1 <0.2.0` and refuses to load outside it. Interfaces and on-disk formats are still not presented as a stable compatibility promise; a future Session format change will need a matching plugin release.
+- **Harness range:** Claude2DSH supports DSH `>=0.1.5-rc.1 <0.3.0` (Session formats v3 and v4) and refuses to load outside it. Interfaces and on-disk formats are still not presented as a stable compatibility promise; a future Session format change will need a matching plugin release.
 - **Hook bridge:** the upstream bridge supports **7 of Claude Code's 30 hook events**, only `type: "command"` handlers, and partial semantics per supported event. Full hook compatibility is a roadmap goal, not a current claim.
 - **Vision acceptance:** the native image path is implemented, but it has not been accepted against a real vision-capable DSH model route. The shipped DeepSeek adapter declares text-only input.
 - **Auto mirror:** it is opt-in and off by default. It writes DSH turns only to the safe Claude export copy; when both sides grow, it pauses and reports a conflict. Automatic merge is not implied.
@@ -172,6 +172,13 @@ Not during migration. Export and sync also target a safe copy under `$DSH_HOME` 
 <summary><strong>Why are Auto mirror and the hook bridge off by default?</strong></summary>
 
 Both can execute work after the first import. They stay opt-in so the user sees and accepts their scope first; the hook bridge is also limited to the documented 7/30 command-only subset.
+
+</details>
+
+<details>
+<summary><strong>A resumed imported session fails with "system/message requires a protected first surface head".</strong></summary>
+
+Sessions imported by 0.3.0 or earlier have no system-prompt head, so the first resumed step wrote its system prompt behind the history and DSH refuses the log on the next load. Current releases import with the head. To repair sessions that are already imported, close them in DSH and run `node scripts/repair-imported-sessions.mjs` from a checkout (dry run), then again with `--apply`. Each repaired log is checked with the installed DSH format catalog before it is written, and the original is kept under `$DSH_HOME/claude2dsh/repair-backups/`.
 
 </details>
 

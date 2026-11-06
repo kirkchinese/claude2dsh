@@ -6,6 +6,10 @@
 // an export the Claude Code serializer accepted, and a merged copy.
 //
 // Usage: node scripts/assert-acceptance.mjs <dsh-home> <report1> <report2> <report3> <report4> <session-id> <export-dir>
+//
+// The expected Session log format follows the DSH release under test, named by
+// DSH_VERSION (0.1.x writes v3, 0.2.x writes v4); CLAUDE2DSH_EXPECTED_FORMAT
+// overrides the mapping.
 
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
@@ -17,6 +21,18 @@ if (homeDir === undefined || exportDir === undefined) {
   process.exit(2)
 }
 const read = (path) => JSON.parse(readFileSync(path, 'utf8'))
+
+/** Session log format written by each supported DSH minor line. */
+const FORMAT_BY_DSH_MINOR = { 1: 3, 2: 4 }
+function expectedFormat() {
+  const override = process.env.CLAUDE2DSH_EXPECTED_FORMAT
+  if (override !== undefined && override.length > 0) return Number(override)
+  const match = /^0\.(\d+)\./.exec((process.env.DSH_VERSION ?? '').trim())
+  const format = match === null ? undefined : FORMAT_BY_DSH_MINOR[Number(match[1])]
+  if (format === undefined) throw new Error(`cannot map DSH_VERSION=${process.env.DSH_VERSION ?? '<unset>'} to a Session format; set CLAUDE2DSH_EXPECTED_FORMAT`)
+  return format
+}
+const format = expectedFormat()
 
 const first = read(report1Path)
 const second = read(report2Path)
@@ -30,7 +46,7 @@ assert.equal(first.report.items[0].status, 'imported')
 const inspected = first.inspected[sessionId]
 assert.ok(inspected !== undefined, 'the imported session must be readable back')
 assert.ok(inspected.eventCount > 0, 'the stored log must contain events')
-assert.equal(inspected.header.version, 3, 'the stored header must carry the current log format version')
+assert.equal(inspected.header.version, format, 'the stored header must carry the current log format version')
 assert.equal(inspected.header.isSeeded, false, 'an imported transcript is not a fork')
 assert.equal(inspected.header.cwd, '/tmp/demo', 'the source working directory must survive')
 assert.ok(first.preparedSessions[sessionId] > 0, 'the stored log must derive model history')
@@ -47,8 +63,8 @@ const artifacts = sessionDirs.flatMap((entry) =>
     .flatMap((child) => readdirSync(join(sessionRoot, entry.name, child.name))),
 )
 assert.ok(
-  artifacts.some((name) => /^session\.v3\.jsonl(\.zstd)?$/.test(name)),
-  `expected a v3 session artifact, found: ${artifacts.join(', ') || '<none>'}`,
+  artifacts.some((name) => new RegExp(`^session\\.v${format}\\.jsonl(\\.zstd)?$`).test(name)),
+  `expected a v${format} session artifact, found: ${artifacts.join(', ') || '<none>'}`,
 )
 
 // --- round 2: idempotency, export, sync ------------------------------------
@@ -56,6 +72,8 @@ assert.equal(second.report.items[0].status, 'already-imported', 'an unchanged so
 assert.equal(second.exportReport.status, 'exported')
 assert.ok(second.exportReport.recordCount > 0, 'the export must contain records')
 assert.equal(second.exportReport.toolCalls, 1)
+assert.equal(second.exportReport.toolResults, 1, 'the stored tool result must round-trip to a Claude tool_result')
+assert.equal(second.exportReport.droppedToolResults, 0)
 assert.equal(second.syncReport.status, 'synced', 'later DSH turns must append to the exported copy')
 assert.ok(second.syncReport.appendedEvents > 0)
 const exportFiles = readdirSync(join(exportDir), { recursive: true }).filter((name) => String(name).endsWith('.jsonl'))
@@ -66,7 +84,7 @@ assert.ok(exported.length >= second.exportReport.recordCount, 'the synced copy m
 
 // --- round 3: conflict then merge ------------------------------------------
 assert.equal(third.report.items[0].status, 'conflict', 'two-sided growth must pause as a conflict')
-assert.equal(third.mergeReport.status, 'merged')
+assert.equal(third.mergeReport.status, 'merged', `three-way merge must succeed: ${third.mergeReport.error ?? third.mergeReport.reason ?? ''}`)
 assert.equal(third.mergeReport.mergedSessionId, `${sessionId}-merged`)
 assert.ok(third.mergeReport.mergedEventCount > third.mergeReport.baseEvents, 'the merged copy must hold both sides')
 assert.ok(third.mergeReport.mergedDerivedMessages > 0, 'the merged copy must derive model history')
@@ -87,4 +105,4 @@ assert.match(mcpLayer, /dsh-mcp-client/)
 assert.match(mcpLayer, /serverName: demo/)
 assert.doesNotMatch(mcpLayer, /legacy-sse/)
 
-console.log(`ACCEPTANCE_ASSERT_OK events=${inspected.eventCount} artifact=${artifacts.find((name) => name.startsWith('session.v3'))} exported=${exported.length} skills=${fourth.agentsReport.imported + fourth.commandsReport.imported} mcp=${fourth.mcpReport.supported}`)
+console.log(`ACCEPTANCE_ASSERT_OK events=${inspected.eventCount} artifact=${artifacts.find((name) => name.startsWith(`session.v${format}`))} exported=${exported.length} skills=${fourth.agentsReport.imported + fourth.commandsReport.imported} mcp=${fourth.mcpReport.supported}`)

@@ -25,7 +25,13 @@ test('orders non-conflicting growth turns by event time', () => {
   const plan = planTurnMerge(dsh, 5, claudeTail)
   assert.equal(plan.conflicts.length, 0)
   const starts = plan.events.filter((event) => event.type === 'turn/start').map((event) => event.data.turn)
-  assert.deepEqual(starts, [1, 3, 2])
+  // Claude's turn is earlier, so it opens turn 2 and the DSH turn becomes 3.
+  assert.deepEqual(starts, [1, 2, 3])
+  const texts = plan.events.filter((event) => event.type === 'user/message').map((event) => (event.data as { message?: { content?: { text?: string }[] } }).message?.content?.[0]?.text)
+  assert.deepEqual(texts, ['x', 'claude', 'dsh'])
+  for (const event of plan.events) {
+    if (typeof event.data.turn === 'number' && event.seq >= 5) assert.ok(event.data.turn === 2 || event.data.turn === 3)
+  }
   assert.deepEqual(plan.events.map((event) => event.seq), Array.from({ length: plan.events.length }, (_, index) => index))
 })
 
@@ -36,7 +42,7 @@ test('same-turn dual edits preserve both complete turns and a conflict marker', 
   assert.equal(plan.conflicts.length, 1)
   assert.equal(plan.conflicts[0]?.turn, 2)
   const turnStarts = plan.events.filter((event) => event.type === 'turn/start').map((event) => ({ turn: event.data.turn, seq: event.seq }))
-  assert.equal(turnStarts.filter((item) => item.turn === 2).length, 2)
+  assert.deepEqual(turnStarts.map((item) => item.turn), [1, 2, 3], 'both versions occupy consecutive turns')
   const marker = plan.events.filter((event) => event.type === 'todo/write')
   assert.equal(marker.length, 1)
   assert.match(String((marker[0]?.data as { todos?: { content?: string }[] }).todos?.[0]?.content), /\[conflict\] turn 2/)
@@ -61,9 +67,11 @@ test('interleaved tool call and result stay inside one turn block', () => {
   const plan = planTurnMerge(dsh, 5, claudeTail)
   assert.equal(plan.conflicts.length, 0)
   const indexes = new Map(plan.events.map((event, index) => [event.seq, index]))
-  const turnStart = plan.events.findIndex((event) => event.type === 'turn/start' && event.data.turn === 3)
-  const dshStart = plan.events.findIndex((event) => event.type === 'turn/start' && event.data.turn === 2)
-  assert.ok(turnStart < dshStart)
+  const claudeStart = plan.events.findIndex((event) => event.type === 'turn/start' && event.data.turn === 2)
+  const dshStart = plan.events.findIndex((event) => event.type === 'turn/start' && event.data.turn === 3)
+  assert.ok(claudeStart >= 0 && claudeStart < dshStart)
+  const dshTurnEvents = plan.events.slice(dshStart, plan.events.findIndex((event, index) => index > dshStart && event.type === 'turn/end') + 1)
+  assert.ok(dshTurnEvents.every((event) => event.data.turn === undefined || event.data.turn === 3))
   const toolResult = plan.events.find((event) => event.type === 'tool/result')
   assert.ok(toolResult !== undefined)
   assert.ok((toolResult?.sourceEventSeqs ?? []).every((seq) => indexes.has(seq)))
@@ -76,4 +84,25 @@ test('an incomplete final DSH turn never enters the merged plan', () => {
   assert.equal(plan.droppedIncompleteDshTurns, 1)
   assert.equal(plan.conflicts.length, 0)
   assert.equal(plan.events.filter((event) => event.type === 'turn/start').length, 2)
+})
+
+test('source references resolve against the side that produced the citing event', () => {
+  const callResult = (seqStart: number, turnNo: number, time: number, callId: string): SynthesizedSessionEvent[] => [
+    ev('turn/start', seqStart, time, { turn: turnNo }),
+    ev('step/start', seqStart + 1, time, { turn: turnNo, step: 1 }),
+    ev('tool/call', seqStart + 2, time, { turn: turnNo, step: 1, callId, name: 'Bash', arguments: '{}' }),
+    { ...ev('tool/result', seqStart + 3, time, { turn: turnNo, step: 1, message: { id: `r-${callId}`, role: 'tool', toolCallId: callId, content: [] } }), sourceEventSeqs: [seqStart + 2] },
+    ev('step/end', seqStart + 4, time, { turn: turnNo, step: 1 }),
+    ev('turn/end', seqStart + 5, time, { turn: turnNo, reason: { kind: 'completed' } }),
+  ]
+  const dsh = [...base, ...callResult(5, 2, 20, 'dsh-call')]
+  const claudeTail = callResult(5, 2, 30, 'claude-call')
+  const plan = planTurnMerge(dsh, 5, claudeTail)
+  for (const result of plan.events.filter((event) => event.type === 'tool/result')) {
+    const callId = (result.data.message as { toolCallId: string }).toolCallId
+    const cited = plan.events[result.sourceEventSeqs?.[0] ?? -1]
+    assert.equal(cited?.type, 'tool/call')
+    assert.equal(cited?.data.callId, callId)
+    assert.equal(cited?.data.turn, result.data.turn)
+  }
 })

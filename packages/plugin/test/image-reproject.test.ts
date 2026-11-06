@@ -35,7 +35,7 @@ test('re-projects placeholder image nodes to native image blocks for an image-ca
   await captured?.({ agent }, async () => 'next')
   assert.equal(appends.length, 1)
   assert.equal(appends[0].type, 'user/message')
-  assert.deepEqual(appends[0].opts, { surfaceOp: { op: 'replace', start: 4, end: 4 }, sourceEventSeqs: [4] })
+  assert.deepEqual(appends[0].opts, { surfaceOp: { op: 'replace', startSeq: 4, endSeq: 4 }, sourceEventSeqs: [4] })
   assert.equal((appends[0].data.content as Array<{ type: string }>)[0]?.type, 'image')
   await rm(dir, { recursive: true, force: true })
   if (oldHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = oldHome

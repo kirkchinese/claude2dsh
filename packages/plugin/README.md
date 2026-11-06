@@ -2,7 +2,7 @@
 
 DeepSeek Harness plugin for Claude2DSH. It imports Claude Code conversations, skills, subagent definitions, slash commands and MCP servers into DSH as native resumable sessions and assets, and exports/syncs DSH sessions back into Claude Code JSONL.
 
-Requires DSH `>=0.1.5-rc.1 <0.2.0`; the plugin refuses to load outside that range. Imported sessions are written in the current Session log format (v3).
+Requires DSH `>=0.1.5-rc.1 <0.3.0`; the plugin refuses to load outside that range. Imported sessions are written in the Session log format of the installed harness: v3 on DSH 0.1.5+, v4 (tool-role `tool/result` messages) on DSH 0.2.x.
 
 ## Install
 

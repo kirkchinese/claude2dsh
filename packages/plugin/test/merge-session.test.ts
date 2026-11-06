@@ -58,7 +58,8 @@ test('merge preserves both same-turn versions in a new DSH session and validates
     const mergedId = result.mergedSessionId as string
     const mergedEvents = live.sessionPersistence.eventsOf(mergedId) as unknown as Array<{ type: string; seq: number; time: number; data: Record<string, unknown>; surfaceOp?: string }>
     assert.ok(mergedEvents.every((event, index) => event.seq === index))
-    assert.ok(mergedEvents.filter((event) => event.type === 'turn/start' && event.data.turn === 2).length === 2)
+    // Both versions of turn 2 survive as consecutive turns, as Session format 4 requires.
+    assert.deepEqual(mergedEvents.filter((event) => event.type === 'turn/start').map((event) => event.data.turn), [1, 2, 3])
     assert.equal(mergedEvents.filter((event) => event.type === 'todo/write').length, 1)
     const header = (await live.sessionPersistence.stat(mergedId as never))?.header
     assert.ok(header !== undefined)

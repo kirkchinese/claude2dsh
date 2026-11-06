@@ -157,26 +157,49 @@ function assistantRecord(uuid: string, parentUuid: string | null, timestamp: num
   return { record, toolCallIds }
 }
 
-function toolResultRecord(uuid: string, parentUuid: string | null, assistantUuid: string, timestamp: number, data: Record<string, unknown>, meta: { sessionId: string; cwd: string }): { record: ClaudeRecord; dropped: boolean } {
-  const message = (data.message ?? {}) as { content?: unknown }
-  const toolResults: unknown[] = []
-  let dropped = false
-  if (Array.isArray(message.content)) {
-    for (const block of message.content) {
+/** One tool result read from a stored `tool/result` message, independent of the Session format. */
+interface StoredToolResult {
+  readonly toolCallId: string
+  readonly content: unknown
+  readonly isError: boolean
+}
+
+/**
+ * Read the tool results carried by one stored `tool/result` message.
+ *
+ * Session format 4 stores a tool-role message with `toolCallId`, direct content
+ * and an optional `isError`; format 3 wrapped each result in a user-role
+ * `tool-result` block. Both are accepted so exports work across DSH releases.
+ * @param message - the event's `data.message` payload.
+ * @returns every result the message carries, in order.
+ */
+export function storedToolResults(message: unknown): StoredToolResult[] {
+  if (typeof message !== 'object' || message === null) return []
+  const raw = message as { role?: unknown; toolCallId?: unknown; content?: unknown; isError?: unknown }
+  if (raw.role === 'tool') {
+    return typeof raw.toolCallId === 'string' ? [{ toolCallId: raw.toolCallId, content: raw.content, isError: raw.isError === true }] : []
+  }
+  const results: StoredToolResult[] = []
+  if (Array.isArray(raw.content)) {
+    for (const block of raw.content) {
       if (typeof block !== 'object' || block === null) continue
-      const raw = block as { type?: unknown; toolCallId?: unknown; content?: unknown; isError?: unknown }
-      if (raw.type !== 'tool-result' || typeof raw.toolCallId !== 'string') continue
-      const { blocks } = userTextBlocks(raw.content)
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: raw.toolCallId,
-        content: blocks.length === 0 ? [] : blocks,
-        ...(raw.isError === true ? { is_error: true } : {}),
-      })
+      const wrapper = block as { type?: unknown; toolCallId?: unknown; content?: unknown; isError?: unknown }
+      if (wrapper.type !== 'tool-result' || typeof wrapper.toolCallId !== 'string') continue
+      results.push({ toolCallId: wrapper.toolCallId, content: wrapper.content, isError: wrapper.isError === true })
     }
   }
-  if (toolResults.length === 0) dropped = true
-  const record: ClaudeRecord = {
+  return results
+}
+
+function toolResultRecord(uuid: string, parentUuid: string | null, assistantUuid: string, timestamp: number, result: StoredToolResult, meta: { sessionId: string; cwd: string }): ClaudeRecord {
+  const { blocks } = userTextBlocks(result.content)
+  const toolResults: unknown[] = [{
+    type: 'tool_result',
+    tool_use_id: result.toolCallId,
+    content: blocks.length === 0 ? [] : blocks,
+    ...(result.isError ? { is_error: true } : {}),
+  }]
+  return {
     type: 'user',
     message: { role: 'user', content: toolResults },
     parentUuid,
@@ -190,7 +213,6 @@ function toolResultRecord(uuid: string, parentUuid: string | null, assistantUuid
     version: '0.0.0',
     gitBranch: '',
   }
-  return { record, dropped }
 }
 
 /**
@@ -315,29 +337,14 @@ function serializeRecords(input: RecordSerializeInput): {
         break
       }
       case 'tool/result': {
-        const message = (data.message ?? {}) as { content?: unknown }
-        const callIds: string[] = []
-        if (Array.isArray(message.content)) {
-          for (const block of message.content) {
-            if (typeof block === 'object' && block !== null && (block as { type?: unknown }).type === 'tool-result') {
-              const callId = (block as { toolCallId?: unknown }).toolCallId
-              if (typeof callId === 'string') callIds.push(callId)
-            }
-          }
-        }
-        for (const callId of callIds) {
-          const assistantUuid = callToAssistant.get(callId)
+        for (const stored of storedToolResults(data.message)) {
+          const assistantUuid = callToAssistant.get(stored.toolCallId)
           if (assistantUuid === undefined) {
             stats.droppedToolResults += 1
             continue
           }
           const recordUuid = uuid()
-          const result = toolResultRecord(recordUuid, assistantUuid, assistantUuid, event.time, data, meta)
-          if (result.dropped) {
-            stats.droppedToolResults += 1
-            continue
-          }
-          records.push(result.record)
+          records.push(toolResultRecord(recordUuid, assistantUuid, assistantUuid, event.time, stored, meta))
           prevUuid = recordUuid
           stats.toolResults += 1
         }
