@@ -1,188 +1,118 @@
-# Claude2DSH
+# DSH2Claude
 
-**把 Claude Code 的会话、技能、子 agent、斜杠命令、记忆与 MCP 服务器迁移为 DeepSeek Harness（DSH）原生可续聊会话；需要时，还能把 DSH 新轮次带回 Claude Code JSONL。**
+**把 DeepSeek Harness（DSH）的会话、技能、全局指令与 MCP 服务器迁移到 Claude Code，生成可直接续聊的原生会话与资产。**
 
-[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
-[![npm version](https://img.shields.io/npm/v/%40claude2dsh%2Fplugin?label=npm&color=0ea5e9)](https://www.npmjs.com/package/@claude2dsh/plugin)
-[![DSH >=0.1.5-rc.1 <0.2.0](https://img.shields.io/badge/dsh-%3E%3D0.1.5--rc.1%20%3C0.2.0-4f46e5)](https://github.com/deepseek-ai/deepseek-harness)
-[![Node.js >=22.19](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=nodedotjs&logoColor=white)](package.json)
-[![license: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
+这是 Claude2DSH 的反向版本：源是 DeepSeek Harness（`$DSH_HOME`），目标是 Claude Code（`~/.claude` 或 `CLAUDE_CONFIG_DIR`）。迁移分两步：先暂存到 `$DSH_HOME/dsh2claude`，再由用户显式确认安装到 Claude Code。
 
-[English](README.md)
+## 迁移内容
 
-![一座抽象桥把琥珀色来源环境中的会话节点与软件资产安全送入青色目标环境](assets/hero.webp)
+| 源                                                                                          | 目标                                          |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `$DSH_HOME/sessions/...`（`session.v3` / `session.v4` JSONL，明文或拼接 zstd）              | `~/.claude/projects/<slug>/<会话 UUID>.jsonl` |
+| `$DSH_HOME/skills/<name>/SKILL.md` 与扁平 `*.md` 技能                                       | `~/.claude/skills/<name>/`                    |
+| `$DSH_HOME/AGENTS.md`                                                                       | `~/.claude/CLAUDE.md`                         |
+| profile patch 与 `$DSH_HOME/storages/mcp_connector.json` 中的 `@deepseek-ai/dsh-mcp-client` | `~/.claude.json` 的 `mcpServers`              |
 
-Claude Code 是多工具迁移层的第一个会话源适配器。Claude2DSH 保留有用的会话结构，通过 DSH 原生持久化 API 写入，并默认把原始 Claude 目录视为只读源。
+会话会变成 Claude Code 原生 JSONL：`parentUuid` 链连续、工具结果挂在其调用所属的 assistant 记录下、保留原始 `cwd`。Claude 侧会话 UUID 由 DSH 会话 id 确定性派生，重复迁移不会产生重复副本。
 
-> [!IMPORTANT]
-> **`0.3.0` 要求 DSH `>=0.1.5-rc.1 <0.2.0`，在 `0.1.0-rc.x` 上不再启动。** DSH 0.1.5 把服务级会话 API 换成按会话句柄（handle），并把 Session 日志格式升到 v3；0.2.x 系列早于这次变更。请升级宿主（`npm install -g @deepseek-ai/dsh@latest`），或继续使用 `claude2dsh@0.2.0-rc.5`。
+## 环境要求
 
-![左侧为 Claude Code 资产、右侧为 DeepSeek Harness 落点的迁移对照图，0.3.0 新增的三类导入标有标记](assets/asset-translation.svg)
+- Node.js `>=22.19.0`（使用 `node:zlib` 的 Zstandard）。
+- pnpm，以及已经产生 `$DSH_HOME` 数据（默认 `~/.dsh`）的 DSH 安装。
+- 用于读取结果的 Claude Code。
 
-![兼容性表：DSH 0.1.5-rc.1 与 0.1.6-alpha.1 已验证，0.1.5 其余版本在范围内，0.1.0-rc.x 不支持](assets/dsh-compatibility.svg)
+## 安装
 
-## 为什么选择 Claude2DSH
-
-| DSH 原生续聊                                                     | 不只迁移聊天正文                                                                   | 返回 Claude 也不冒险                                                            |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Claude 轮次转换为 DSH 原生会话事件，DSH 可直接检查、重放与续聊。 | 技能、用户全局指令、项目记忆、工具输出 sidecar、子会话与插件资产都有明确迁移路径。 | 导出与同步默认只写 `$DSH_HOME` 下的安全副本；双端并发修改时暂停，不覆盖任一侧。 |
-
-项目坚持**零配置开箱即用**：默认路径不要求用户先理解 profile 或 bundle，也能看到明确结果；危险写回仍必须显式授权。
-
-```mermaid
-flowchart LR
-    A["Claude Code JSONL<br/>~/.claude/projects<br/>只读"] --> B["Claude adapter<br/>发现 · 解析 · 归一化"]
-    B --> C["归一化会话 IR<br/>轮次 · 步骤 · 工具 · 图片"]
-    C --> D["DSH 事件合成<br/>原生会话事件"]
-    D --> E[("DSH 会话<br/>$DSH_HOME/sessions")]
-    E --> F["导出 / 同步<br/>安全副本"]
-    F --> G["Claude Code JSONL<br/>可续聊转录"]
-    E --> H["Settings UI + 工具<br/>导入 · 导出 · 同步 · 合并"]
-```
-
-## 快速开始
-
-要求：Node.js `>=22.19.0`、pnpm 与 `dsh` CLI。
+从当前仓库：
 
 ```sh
-# 把已发布插件安装进 DSH 内置的有头 profile
-dsh plugin --profile web add @claude2dsh/plugin@0.3.0
-
-# 启动浏览器 UI；终端会打印本地 URL
+pnpm install
+pnpm -r build
+dsh plugin --profile web add ./packages/plugin
 dsh web
 ```
 
-然后：
+然后打开 **设置 → DSH2Claude**。
 
-1. 打开 `dsh web` 在终端打印的 URL。
-2. 全新 DSH 首次打开时如出现模型 API Key 提示，可选**稍后配置**；迁移本身不会调用模型。
-3. 进入**设置 → Claude2DSH**。
-4. 选择语言，确认 Claude 会话目录，并按需勾选 subagent/workflow 子会话。
-5. 先点**预览导入**检查统计与逐项报告，再点**执行导入**。
-
-```mermaid
-flowchart LR
-    S1["安装插件<br/>dsh plugin --profile web add ..."] --> S2["启动 UI<br/>dsh web"]
-    S2 --> S3["打开 设置 → Claude2DSH"]
-    S3 --> S4["预览导入"]
-    S4 --> S5["执行导入"]
-    S5 --> R["DSH 原生会话<br/>会话来源中可见"]
-```
-
-**设置 → Claude2DSH** 的第一个分区就是迁移向导；界面默认中文，也可切换 English。若 3080 已被占用，运行 `dsh web --port 0` 并打开 DSH 打印的 URL。
-
-![真实 Claude2DSH 首次迁移向导中文界面，包含语言、来源目录、子会话选项、预览导入、执行导入与自动镜像默认值](assets/migration-wizard.png)
-
-预览只读，并在任何 DSH 写入前给出逐项计划。
-
-![真实 Claude2DSH 预览导入报告，显示一个不含隐私、等待导入的合成会话](assets/migration-preview.png)
-
-下面是真实成功结果。截图来自真实的 Claude2DSH 界面，输入为不含隐私的合成 Claude 转录。
-
-![真实 Claude2DSH 导入结果，显示合成会话新导入一项且失败为零](assets/migration-result.png)
-
-### 仓库辅助脚本
-
-如果已经克隆本仓库，辅助脚本会执行同样的主 `web` profile 安装，并在 DSH 默认本地端口（`3080`）启动 UI：
+发布后的等价命令：
 
 ```sh
-bash scripts/install-claude2dsh.sh
+dsh plugin --profile web add @dsh2claude/plugin@0.4.0
 ```
 
-只有确实需要自定义 profile 时才设置 `CLAUDE2DSH_PROFILE`。Headless profile 暴露同一组工具，但不包含浏览器 UI。
+## 两阶段迁移
 
-## 能力：什么场景、怎么用
+1. **暂存**（`dsh2claude_migrate` 或设置页按钮）。只读 `$DSH_HOME`，只写 `$DSH_HOME/dsh2claude/staging`：
+   - `projects/<slug>/<uuid>.jsonl`：转换后的 Claude 会话
+   - `skills/<name>/`：复制的 DSH 技能
+   - `CLAUDE.md`：来自 `$DSH_HOME/AGENTS.md`
+   - `mcp-servers.json`：规范化后的 MCP 声明
+   - `manifest.json`：源路径、暂存路径、目标路径、哈希、安装状态
 
-| 能力             | 使用场景                                                  | 入口与可见结果                                                                                                                                                    |
-| ---------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 会话导入         | 首次迁移，或 Claude 转录新增轮次后                        | **设置 → Claude2DSH → 首次迁移**，或 `claude2dsh_import`；报告 `previewed/imported/already/appended/skipped/failed`                                               |
-| 技能导入         | 让 Claude skills 成为 DSH 原生可发现资产                  | `claude2dsh_import_skills`；技能复制到 `$DSH_HOME/skills` 并进入 DSH 技能发现                                                                                     |
-| 全局上下文       | 把用户全局 `~/.claude/CLAUDE.md` 迁入 DSH 全局指令        | `claude2dsh_import_context`；先预览，绝不覆盖内容不同的 `$DSH_HOME/AGENTS.md`                                                                                     |
-| 项目记忆         | 让一个项目的 `MEMORY.md` 与 `memory/*.md` 在 DSH 中可发现 | `claude2dsh_import_memory`；每个项目生成一个 DSH 技能包                                                                                                           |
-| 导出回 Claude    | 想在 Claude Code 继续某个 DSH 会话                        | `claude2dsh_export`；在 `$DSH_HOME/claude2dsh/exports` 写入经校验的 JSONL 副本                                                                                    |
-| 同步回写         | 把 DSH 新轮次追加到已有 Claude 导出副本                   | `claude2dsh_sync`；报告追加的轮次、事件与 JSONL 记录数                                                                                                            |
-| 自动镜像         | 持续监控 Claude 新轮次，并把 DSH 轮次镜像到安全副本       | **设置 → 自动镜像**；`claude2dsh_autosync` 查看状态或恢复暂停队列                                                                                                 |
-| 冲突合并         | 同步水位后双端都增长，且任一版本都不能丢                  | `claude2dsh_merge`；计算或创建新的合并副本，不修改两侧原件                                                                                                        |
-| 工具输出 sidecar | 转录引用了较大的持久化工具输出                            | `claude2dsh_sidecars`；列出/解析复制文件，并记录缺失或超限项                                                                                                      |
-| 会话来源         | 区分 Claude 主会话、子会话与合并会话                      | **设置 → 会话来源**，或 `claude2dsh_session_sources`；显示来源类型与路径                                                                                          |
-| 子 agent 导入    | 希望 Claude 子 agent 定义的指令在 DSH 中继续可用          | `claude2dsh_import_agents`；每个 `~/.claude/agents/*.md` 变成技能 `cc-agent-<name>`，来源、模型与工具列表写入 frontmatter metadata                                |
-| 命令导入         | 希望 Claude 斜杠命令在 DSH 中保持“由人调用”               | `claude2dsh_import_commands`；`commands/<ns>/<name>.md` 变成 `cc-cmd-<ns>-<name>`，并带 `disable-model-invocation: true`，人工提示词不会进入模型目录              |
-| MCP 服务器导入   | 希望 Claude 的 MCP 服务器不必在 DSH 重新手抄配置          | `claude2dsh_import_mcp`；读取 `~/.claude.json` 与项目 `.mcp.json`，`apply:true` 写出 `dsh-mcp-client` patch 层并给出 `dsh --patch` 命令；SSE 服务器报告为不支持   |
-| 插件盘点         | 不运行 Claude 插件代码，只检查其中的资产                  | `claude2dsh_plugin_inventory`；dry-run 报告技能、命令、agent、prompt、hook 与 marketplace；`apply:true` 同时转换插件内的 `agents/` 与 `commands/`                 |
-| 图片策略         | 保留转录图片，同时尊重所选模型的输入模态                  | `imageMode: "auto"` 自动跟随当前 DSH 会话路由；探测路由 provider/model 留空即跟随会话，填写则覆盖。Settings 页面显示当前探测结论，每个导入条目记录降级/升格原因。 |
-| Hook bridge      | 复用当前已支持的 Claude command hook 子集                 | **设置 → Claude hook bridge** 只读扫描 Claude 设置与插件 hooks，预览可映射的 command hook，并可保存候选供下次启动启用；不支持类型会报告并跳过                     |
+2. **安装**（`dsh2claude_install` 或“确认安装”）。把暂存内容复制进 Claude Code：
+   - 默认只预览；必须传 `confirm: true` 才写入。
+   - 目标已存在且内容不同时报告冲突。
+   - `force: true` 会先把旧副本改名为 `<target>.dsh2claude-backup-<时间戳>`。
+   - MCP 合并进 `~/.claude.json`，不改动无关条目。
 
-转换不等于等价，报告会说明差异：Claude 子 agent 变成 DSH 技能而不是 preset，Claude 斜杠命令变成 user-invocable 技能。原始 frontmatter 字段保留在技能 metadata 中，差异可被检查。
+## 工具
 
-会话导入具备幂等性：再次运行会报告已存在，不会复制一份。默认递归搜索并感知 `CLAUDE_CONFIG_DIR`（回退到 `~/.claude/projects`），首启向导会显示实际来源目录与发现/导入数量。项目级 `CLAUDE.md` 不需要复制，因为 DSH 已原生读取它；只有用户全局上下文需要转换。
+| 工具                  | 用途                                                                |
+| --------------------- | ------------------------------------------------------------------- |
+| `dsh2claude_migrate`  | 暂存会话与所选资产；`preview:true` 只报告、不写文件。               |
+| `dsh2claude_install`  | 把暂存内容安装到 Claude Code；默认 dry-run，`confirm:true` 才写入。 |
+| `dsh2claude_status`   | 查看 manifest、安装状态与解析后的 DSH/Claude 路径。                 |
+| `dsh2claude_sessions` | 列出 DSH 会话及其标题、cwd、格式版本、暂存/安装状态。               |
 
-## Settings 界面导览
+## 会话转换规则
 
-Claude2DSH 把首次迁移与安全关键默认值放在同一个设置页：
+- **格式。** DSH 日志首行是 `type:"session"`、`version:3` 或 `4` 的头记录，之后是带 `seq` 的事件。文件可能是明文 `.jsonl`，也可能是每批一个 Zstandard frame 拼接而成的 `.jsonl.zstd`。读取器会扫描 frame 边界并逐个解压；末尾不完整的 frame 会被忽略并计入 `tornBytes`。
+- **轮次。** 消费 `turn/start`、`step/start`、`user/message`、`assistant/message`、`tool/call`、`tool/result`、`step/end`、`turn/end`、`session/title`；其余 DSH 事件（`team/*`、`job/*`、`approval/*`、`compaction/*`、请求头、搜索轨迹等）忽略。
+- **注入上下文。** `source.kind` 不是 `"user"` 的 user 消息（运行时上下文、时间上下文、技能目录、提醒）只计数、不迁移。只有真实用户提示会变成 Claude user 记录。
+- **工具结果。** v4 把 `message.toolCallId` 和内容块直接放在 message 上；适配器会改写成 Claude 的 `{type:"tool_result", tool_use_id, content}` 形状。缺失的结果会补一个空结果，保持 assistant/tool 配对合法。
+- **子代理。** DSH 子代理是独立日志，会迁移成独立的 Claude 会话；需要时打开 `includeSubagents`。
+- **图片与推理。** 图片块会被计数并丢弃；DSH 的 reasoning 块也会丢弃，因为 Claude Code 的 thinking 块必须携带可验证签名，而 DSH 推理没有对应的签名载荷。可见文本与工具输出完整保留。
+- **表面替换。** DSH 的 `surfaceOp: replace/remove` 会在渲染前折叠，被替换的消息只以替换后的形式出现一次。
 
-- **首次迁移**：语言、来源目录、可选子会话、预览、执行与逐项结果。
-- **自动镜像**：需显式开启的 watcher、防抖与 DSH → 安全副本方向。
-- **导入默认值**：图片模式/provider/model、子会话默认值与 sidecar 大小上限。
-- **导出 / 写回**：默认目标是安全副本；写真实 `~/.claude` 是独立危险开关。
-- **Claude hook bridge**：只在启动时生效的路径与激活说明。
-- **会话来源**：已导入会话 ID、来源类型与来源路径。
+## 安全模型
 
-以下真实截图使用默认中文界面与合成数据；切换语言后标签会同步变化。
+- 暂存阶段绝不写 `~/.claude`。
+- 安装是唯一写入路径，且总是先预览。
+- 目标路径会被解析并限制在 Claude home 内；manifest 中越界的路径会被拒绝。
+- 已存在文件与技能目录按哈希比较：相同则跳过，不同则冲突；强制替换会保留带时间戳的备份。
+- 原始 DSH 数据永远不会被修改。
 
-![Claude2DSH 设置中的自动镜像、导入默认值与导出或写回分区，画面显示安全默认值](assets/settings-import-export.png)
+## 当前限制
 
-![Claude2DSH 设置中的启动时 Hook bridge 与会话来源分区，显示一个不含隐私的合成 Claude 主会话](assets/settings-hooks-sources.png)
+- **图片与推理**会被丢弃。图片包括 base64 与 DSH attachment 引用；推理缺少 Claude 兼容的签名载荷。
+- **Agent preset、自定义命令、hooks、插件运行时行为**不迁移。DSH preset 是 Cordis 插件行组合，没有无损的 Claude agent 对应物。
+- **DSH 特有事件**（team、jobs、compaction、goal、approval）无法在 Claude Code 中表示，会被省略。
+- **MCP `cwd`** 在 Claude Code 的 stdio 配置中没有对应字段；命令会从 Claude Code 自己的工作目录启动。
+- **暂不支持增量追加轮次。** 重新暂存会更新暂存文件；哈希变化后，安装会报告冲突，需要 `force` 才会替换已安装副本（并保留时间戳备份）。专门的 turn-append 路径留待后续。
+- **MCP 配置路径。** 默认布局下合并到 `~/.claude.json`；自定义 Claude home 会写入 `<home>/.claude.json`。如果 Claude Code 使用其他全局配置文件，请手动合并 `mcp-servers.json`。
 
-## 安全边界
+## 仓库结构
 
-- 导入把 Claude 源视为只读；预览不会写 DSH。
-- DSH 写入只经过宿主持久化与 `$DSH_HOME/sessions`、`$DSH_HOME/skills`、`$DSH_HOME/claude2dsh` 下的 DSH 原生目录。
-- 导出与同步默认写 `$DSH_HOME/claude2dsh/exports`，不会写原始 `~/.claude`。
-- 写原始 Claude 目录必须显式授权 `allowOriginalClaudeDir: true`，默认始终拒绝。
-- 插件盘点只读资产，不执行插件代码。
-- 自动镜像检测到双端并发增长就暂停；显式合并工具创建新的安全副本，不猜哪一侧获胜。
+```
+packages/core/                    共享的 foreign-session 类型
+packages/adapters/dsh/            DSH 发现、zstd 解码、事件规范化
+packages/adapters/claude-code/    Claude JSONL 序列化与目标路径/UUID 辅助
+packages/plugin/                  DSH 插件：工具、设置、暂存、安装、UI
+scripts/e2e-migration.mjs         合成数据的端到端迁移检查
+```
 
-## 当前局限
+## 开发
 
-- **宿主版本范围：** `0.3.0` 支持 DSH `>=0.1.5-rc.1 <0.2.0`，超出范围会拒绝加载。接口与磁盘格式仍不承诺为稳定兼容层；下一次 Session 格式变更需要配套的插件版本。
-- **Hook bridge：** 上游只支持 **Claude Code 30 个 hook 事件中的 7 个**、仅 `type: "command"` handler，且已支持事件也只有部分语义。完整 hook 兼容是路线图目标，不是现状承诺。
-- **视觉模型验收：** 原生图片路径已实现，但尚未在真实支持视觉的 DSH 模型路由上验收；随附 DeepSeek adapter 声明仅文本输入。
-- **自动镜像：** 默认关闭、需显式开启；DSH 轮次只写安全 Claude 导出副本。双端同时增长时暂停并报告冲突，不代表会自动合并。
-- **插件兼容：** 可以盘点并迁移选定资产，但任意 Claude 插件运行时行为不能自动移植到 DSH。
-- **来源适配器：** 当前只有 Claude Code；Codex 与其他工具仍属于路线图工作。
-- **会话列表装饰：** DSH 没有逐会话侧栏行扩展点，因此来源身份显示在 Settings 与 `claude2dsh_session_sources` 中。
+```sh
+pnpm install
+pnpm -r build
+pnpm -r typecheck
+pnpm -r test
+node scripts/e2e-migration.mjs
+```
 
-## 常见问题
+适配器与插件测试会创建合成的 v3/v4 日志、拼接 zstd frame、技能、指令与 MCP profile 行；不会触碰真实的 `~/.claude`。
 
-<details>
-<summary><strong>插件装好了，但为什么看不到 UI？</strong></summary>
+## License
 
-很可能装进了 headless profile。把插件安装进内置 `web` profile 并启动 `dsh web`；页面位于**设置 → Claude2DSH**。
-
-</details>
-
-<details>
-<summary><strong>会写我的真实 ~/.claude 吗？</strong></summary>
-
-迁移不会。导出与同步默认也只写 `$DSH_HOME` 下的安全副本。写原始目录需要另一项显式授权。
-
-</details>
-
-<details>
-<summary><strong>为什么自动镜像与 Hook bridge 默认关闭？</strong></summary>
-
-两者都会在首次导入后继续执行工作，因此保持 opt-in，让用户先看清并接受其范围；Hook bridge 还只覆盖文档明示的 7/30 command-only 子集。
-
-</details>
-
-## 兄弟项目
-
-Claude2DSH 与同作者的另一款 DSH 插件面向同一群人——需要在多个 agent 工具之间工作的人：
-
-- **[CiteCiter](https://github.com/kirkchinese/CiteCiter)** —— DSH 会话的引用与证据管理。Claude2DSH 负责把整段会话在宿主之间搬运，CiteCiter 负责让答案背后的来源可追溯、可引用。两者遵循同一套原则：只用公开扩展点、未经显式授权不写入外部工具目录、每次发布前都跑真实 profile 验收。
-
-如果你刚把 Claude Code 的会话库迁进 DSH，接下来的自然选择就是给那些会引用文档的会话装上 CiteCiter。
-
-## 许可与致谢
-
-[MIT](LICENSE)。项目独立设计，并受益于 [`dsh-chat-import`](https://github.com/Nwflower/dsh-chat-import)（MIT）与 [`dsh-claude-move`](https://github.com/PerryLink/dsh-claude-move)（Apache-2.0）的公开成果；感谢两个项目提供有价值的参照。Hook 兼容委托给 DeepSeek Harness 官方 Claude Code hook bridge 包。
+[MIT](LICENSE)。

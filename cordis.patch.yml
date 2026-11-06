@@ -1,7 +1,7 @@
-# This bundle only adds an in-memory adapter registry. It has no source adapter,
-# does not inspect ~/.claude, and exposes no import or write operation.
+# This bundle only adds an in-memory session-source registry. It has no source
+# adapter, does not inspect ~/.claude, and exposes no import or write operation.
 - insert:
-    - id: claude2dsh
-      name: claude2dsh
+    - id: dsh2claude
+      name: dsh2claude
       config:
         mode: read-only

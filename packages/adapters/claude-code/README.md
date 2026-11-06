@@ -1,3 +1,3 @@
-# @claude2dsh/adapter-claude-code
+# @dsh2claude/adapter-claude-code
 
-Claude Code session-source adapter: discovery, parent-chain transcript parsing, skill discovery, and Claude Code JSONL serialization. Depends only on `@claude2dsh/core`.
+Claude Code target adapter for DSH2Claude. It serializes a `ForeignSessionView` into a Claude Code JSONL transcript with a contiguous `parentUuid` chain, native `tool_result` parenting, a `session/title` → `ai-title` mapping, and a headless tail serializer for appends. `target.ts` provides deterministic Claude session UUIDs, project-directory slugs, transcript validation, and staging writes.

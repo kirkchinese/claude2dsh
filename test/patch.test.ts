@@ -28,8 +28,8 @@ describe('DSH bundle patch', () => {
     expect(warnings).toEqual([])
     expect(entries).toEqual([
       {
-        id: 'claude2dsh',
-        name: 'claude2dsh',
+        id: 'dsh2claude',
+        name: 'dsh2claude',
         config: { mode: 'read-only' },
       },
     ])

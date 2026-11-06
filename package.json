@@ -1,10 +1,10 @@
 {
-  "name": "claude2dsh",
-  "version": "0.3.0",
+  "name": "dsh2claude",
+  "version": "0.4.0",
   "publishConfig": {
     "access": "public"
   },
-  "description": "Import Claude Code sessions, skills and plugin assets into DSH as native resumable sessions, and export or sync DSH sessions back to Claude Code JSONL",
+  "description": "Migrate DeepSeek Harness sessions, skills and MCP servers into Claude Code",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -44,7 +44,9 @@
   },
   "keywords": [
     "dsh",
-    "cordis",
+    "deepseek-harness",
+    "claude-code",
+    "migration",
     "session"
   ],
   "license": "MIT",

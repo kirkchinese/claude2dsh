@@ -4,7 +4,7 @@
  * This stage defines registration and lifecycle behavior only. It does not
  * discover, parse, import, or write session data.
  *
- * @module claude2dsh
+ * @module dsh2claude
  */
 import { Service, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -119,7 +119,7 @@ export const Config: z<Config> = z.object({
 })
 
 /** Cordis object-plugin name. */
-export const name = 'claude2dsh'
+export const name = 'dsh2claude'
 
 /** Service advertised by this object plugin. */
 export const provide = ['sessionSources']

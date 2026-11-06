@@ -1,6 +1,6 @@
 {
-  "name": "@claude2dsh/plugin",
-  "version": "0.3.0",
+  "name": "@dsh2claude/plugin",
+  "version": "0.4.0",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -11,10 +11,6 @@
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json",
-    "./hook-bridge": {
-      "types": "./lib/hook-bridge.d.ts",
-      "default": "./lib/hook-bridge.js"
-    },
     "./client": "./lib/client.js"
   },
   "dsh": {
@@ -37,32 +33,24 @@
     "clean": "rm -rf lib"
   },
   "dependencies": {
-    "@claude2dsh/adapter-claude-code": "workspace:^0.3.0",
-    "@claude2dsh/core": "workspace:^0.3.0",
+    "@dsh2claude/adapter-claude-code": "workspace:^0.4.0",
+    "@dsh2claude/adapter-dsh": "workspace:^0.4.0",
+    "@dsh2claude/core": "workspace:^0.4.0",
     "@deepseek-ai/schemastery": "^3.18.1",
-    "chokidar": "^5.0.0",
     "yaml": "^2.4.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-hooks-claude-code": ">=0.1.5-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-session": ">=0.1.5-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-session-persistence": ">=0.1.5-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-settings": ">=0.1.5-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-subagent": ">=0.1.5-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1 <0.2.0"
+    "@deepseek-ai/dsh-settings": ">=0.1.5-rc.1 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1 <0.3.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-client-ui-renderer": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-client-ui-settings": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-hooks-claude-code": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-host-webserver": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-session": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-session-persistence": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-settings": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-subagent": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-tools": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-util-values": "0.1.6-alpha.1",
     "@types/node": "^22.13.0",
@@ -72,7 +60,7 @@
     "tsdown": "^0.22.14",
     "typescript": "^5.8.3"
   },
-  "description": "Import Claude Code sessions and skills into DeepSeek Harness, and sync DSH sessions back to Claude Code",
+  "description": "Migrate DeepSeek Harness sessions, skills and MCP servers into Claude Code",
   "publishConfig": {
     "access": "public"
   },

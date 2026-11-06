@@ -4,7 +4,7 @@
  * A source adapter reduces its native transcript to this model. The DSH
  * synthesis layer and every native-format serializer consume the same model,
  * so adding a source never changes session-log generation.
- * @module @claude2dsh/core
+ * @module @dsh2claude/core
  */
 
 /** Identity of the source tool and the artifact a session was read from. */

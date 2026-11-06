@@ -1,123 +1,106 @@
-/** Durable Claude2DSH settings namespace + web transport facade. */
+/** Durable DSH2Claude settings namespace plus the web transport facade. */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { PluginConfig } from './index.ts'
 
-/** Settings namespace owned by this plugin; the host validates its format. */
-export const CLAUDE2DSH_SETTINGS_NS = 'claude2dsh' as const
+export const DSH2CLAUDE_SETTINGS_NS = 'dsh2claude' as const
 
-export interface Claude2DshSettings {
-  readonly autoSync: {
-    readonly enabled: boolean
-    readonly claudeProjectsRoot: string
-    readonly debounceMs: number
-    readonly dshToClaude: boolean
-  }
-  readonly importDefaults: {
-    readonly imageMode: 'auto' | 'placeholder' | 'native'
-    readonly imageProvider: string
-    readonly imageModel: string
-    readonly includeSubagents: boolean
-    readonly sidecarMaxBytes: number
+export interface Dsh2ClaudeSettings {
+  readonly sessions: {
+    /** Empty means `$DSH_HOME`. */
+    readonly dshHome: string
+    /** Empty means `<dshHome>/sessions`. */
+    readonly root: string
     readonly recursive: boolean
+    readonly includeSubagents: boolean
   }
-  readonly writeback: {
-    readonly target: 'copy' | 'source'
-    readonly allowOriginalClaudeDir: boolean
-    readonly exportDir: string
+  readonly assets: {
+    readonly skills: boolean
+    readonly instructions: boolean
+    readonly mcp: boolean
   }
-  readonly hooks: {
-    readonly configPath: string
-    readonly pluginRoot: string
-    readonly projectDir: string
+  readonly install: {
+    /** Empty means `CLAUDE_CONFIG_DIR` or `~/.claude`. */
+    readonly claudeHome: string
+    readonly overwrite: boolean
   }
   readonly ui: {
     readonly language: 'zh' | 'en'
   }
 }
 
-export function defaultClaude2dshSettings(): Claude2DshSettings {
+export function defaultDsh2ClaudeSettings(): Dsh2ClaudeSettings {
   return {
-    autoSync: { enabled: false, claudeProjectsRoot: '', debounceMs: 500, dshToClaude: true },
-    importDefaults: { imageMode: 'auto', imageProvider: '', imageModel: '', includeSubagents: false, sidecarMaxBytes: 64 * 1024 * 1024, recursive: true },
-    writeback: { target: 'copy', allowOriginalClaudeDir: false, exportDir: '' },
-    hooks: { configPath: '', pluginRoot: '', projectDir: '' },
+    sessions: { dshHome: '', root: '', recursive: true, includeSubagents: false },
+    assets: { skills: true, instructions: true, mcp: true },
+    install: { claudeHome: '', overwrite: false },
     ui: { language: 'zh' },
   }
 }
 
-export const claude2dshSettingsSchema: z<Claude2DshSettings> = z.object({
-  autoSync: z.object({
-    enabled: z.boolean().default(false),
-    claudeProjectsRoot: z.string().default(''),
-    debounceMs: z.number().step(1).min(50).default(500),
-    dshToClaude: z.boolean().default(true),
-  }),
-  importDefaults: z.object({
-    imageMode: z.union(['auto', 'placeholder', 'native'] as const).default('auto'),
-    imageProvider: z.string().default(''),
-    imageModel: z.string().default(''),
-    includeSubagents: z.boolean().default(false),
-    sidecarMaxBytes: z.number().step(1).min(1).default(64 * 1024 * 1024),
+export const dsh2ClaudeSettingsSchema: z<Dsh2ClaudeSettings> = z.object({
+  sessions: z.object({
+    dshHome: z.string().default(''),
+    root: z.string().default(''),
     recursive: z.boolean().default(true),
+    includeSubagents: z.boolean().default(false),
   }),
-  writeback: z.object({
-    target: z.union(['copy', 'source'] as const).default('copy'),
-    allowOriginalClaudeDir: z.boolean().default(false),
-    exportDir: z.string().default(''),
+  assets: z.object({
+    skills: z.boolean().default(true),
+    instructions: z.boolean().default(true),
+    mcp: z.boolean().default(true),
   }),
-  hooks: z.object({
-    configPath: z.string().default(''),
-    pluginRoot: z.string().default(''),
-    projectDir: z.string().default(''),
+  install: z.object({
+    claudeHome: z.string().default(''),
+    overwrite: z.boolean().default(false),
   }),
   ui: z.object({
     language: z.union(['zh', 'en'] as const).default('zh'),
   }),
 })
 
-function fromConfig(config: PluginConfig): Claude2DshSettings {
-  const base = defaultClaude2dshSettings()
-  const auto = config.autoSync
+function fromConfig(config: PluginConfig): Dsh2ClaudeSettings {
+  const base = defaultDsh2ClaudeSettings()
   return {
     ...base,
-    autoSync: {
-      ...base.autoSync,
-      enabled: auto?.enabled ?? false,
-      ...(auto?.claudeProjectsRoot !== undefined ? { claudeProjectsRoot: auto.claudeProjectsRoot } : {}),
-      ...(auto?.debounceMs !== undefined ? { debounceMs: auto.debounceMs } : {}),
-      ...(auto?.dshToClaude !== undefined ? { dshToClaude: auto.dshToClaude } : {}),
+    sessions: {
+      ...base.sessions,
+      ...(config.dshHome !== undefined ? { dshHome: config.dshHome } : {}),
+      ...(config.includeSubagents !== undefined ? { includeSubagents: config.includeSubagents } : {}),
+    },
+    install: {
+      ...base.install,
+      ...(config.claudeHome !== undefined ? { claudeHome: config.claudeHome } : {}),
     },
   }
 }
 
 export interface SettingsRuntime {
-  readonly initial: Claude2DshSettings
-  scope: SettingsScope<Claude2DshSettings> | undefined
-  get(): Claude2DshSettings
+  readonly initial: Dsh2ClaudeSettings
+  scope: SettingsScope<Dsh2ClaudeSettings> | undefined
+  get(): Dsh2ClaudeSettings
   update(patch: object): Promise<void>
 }
 
 /**
  * Register the settings namespace when the host settings provider exists.
- * The scope layers schema defaults, the bundle entry config base, and the
- * user settings document. Without a provider the runtime stays on the
- * boot-time bundle config, so headless/test compositions keep working.
+ * Without one the runtime stays on the bundle config, so headless profiles
+ * keep working with defaults.
  */
-export function createSettingsRuntime(ctx: Context, config: PluginConfig): SettingsRuntime {
+export function createSettingsRuntime(ctx: Context, config: PluginConfig = {}): SettingsRuntime {
   const initial = fromConfig(config)
   const runtime: SettingsRuntime = {
     initial,
     scope: undefined,
     get: () => runtime.scope?.get() ?? runtime.initial,
     update: async (patch) => {
-      if (runtime.scope === undefined) throw new Error('Claude2DSH settings provider is not mounted in this profile')
+      if (runtime.scope === undefined) throw new Error('Dsh2Claude settings provider is not mounted in this profile')
       await runtime.scope.update(patch)
     },
   }
   ctx.inject(['settings'], (ready) => {
-    runtime.scope = ready.settings.register(CLAUDE2DSH_SETTINGS_NS, claude2dshSettingsSchema, { base: runtime.initial, applies: 'live' })
+    runtime.scope = ready.settings.register(DSH2CLAUDE_SETTINGS_NS, dsh2ClaudeSettingsSchema, { base: runtime.initial, applies: 'live' })
   })
   return runtime
 }

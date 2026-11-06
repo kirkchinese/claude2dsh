@@ -1,0 +1,52 @@
+{
+  "name": "@dsh2claude/adapter-dsh",
+  "version": "0.4.0",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.ts",
+    "clean": "rm -rf lib"
+  },
+  "dependencies": {
+    "@dsh2claude/core": "workspace:^0.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.8.3"
+  },
+  "description": "DeepSeek Harness session-source adapter for DSH2Claude",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kirkchinese/claude2dsh.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    "lib/**/*.js.map",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "claude-code",
+    "migration",
+    "session"
+  ]
+}

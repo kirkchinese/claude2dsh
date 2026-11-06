@@ -1,6 +1,6 @@
 {
-  "name": "@claude2dsh/adapter-claude-code",
-  "version": "0.3.0",
+  "name": "@dsh2claude/adapter-claude-code",
+  "version": "0.4.0",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -17,14 +17,14 @@
     "clean": "rm -rf lib"
   },
   "dependencies": {
-    "@claude2dsh/core": "workspace:^0.3.0",
+    "@dsh2claude/core": "workspace:^0.4.0",
     "yaml": "^2.4.2"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
     "typescript": "^5.8.3"
   },
-  "description": "Claude Code session-source adapter for Claude2DSH",
+  "description": "Claude Code JSONL target adapter for DSH2Claude",
   "publishConfig": {
     "access": "public"
   },

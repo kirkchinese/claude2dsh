@@ -1,3 +1,3 @@
-# @claude2dsh/core
+# @dsh2claude/core
 
-Tool-independent normalized conversation model, DSH session-event synthesis, and tail/sequence remapping for the Claude2DSH migration framework. Zero DSH runtime dependencies.
+Shared foreign-session types used by DSH2Claude. `ForeignSessionView` is the direction-agnostic event log the Claude Code serializer consumes; `SessionSourceAdapter` documents the source-adapter contract. The package has no runtime dependencies.

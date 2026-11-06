@@ -1,45 +1,42 @@
-# @claude2dsh/plugin
+# @dsh2claude/plugin
 
-DeepSeek Harness plugin for Claude2DSH. It imports Claude Code conversations, skills, subagent definitions, slash commands and MCP servers into DSH as native resumable sessions and assets, and exports/syncs DSH sessions back into Claude Code JSONL.
-
-Requires DSH `>=0.1.5-rc.1 <0.2.0`; the plugin refuses to load outside that range. Imported sessions are written in the current Session log format (v3).
+DeepSeek Harness plugin for DSH2Claude. It reads DSH sessions, skills, global instructions, and MCP declarations, stages Claude Code-ready artifacts below `$DSH_HOME/dsh2claude/staging`, and installs them into Claude Code on explicit confirmation.
 
 ## Install
 
+From this checkout:
+
 ```sh
-dsh plugin --profile web add @claude2dsh/plugin@0.3.0
+pnpm install
+pnpm -r build
+dsh plugin --profile web add ./packages/plugin
 dsh web
 ```
 
-Then open **Settings → Claude2DSH**.
-
-## Settings
-
-The bundle registers a `claude2dsh` settings namespace and a **Claude2DSH** page in the DSH Settings UI. It edits auto-mirror, import defaults, export/write-back and hook-bridge fields. The host schema validates every save; invalid values return a 400 with the schema error. Tool arguments and `CLAUDE2DSH_*` environment variables remain call-time overrides.
+Then open **Settings → DSH2Claude**.
 
 ## Tools
 
-- `claude2dsh_import`: read `~/.claude/projects` read-only, write DSH-native session logs. Idempotent; grown Claude transcripts append only new turns. `preview:true` is zero-side-effect. `includeSubagents:true` imports subagent/workflow transcripts as `origin:"subagent"` child sessions.
-- `claude2dsh_import_skills`: copy validated Claude skills into `$DSH_HOME/skills`; conflicts are never overwritten.
-- `claude2dsh_import_agents`: translate `~/.claude/agents/*.md` subagent definitions into skills named `cc-agent-<name>`, keeping the instructions and recording the origin, model and tool list in frontmatter metadata.
-- `claude2dsh_import_commands`: translate `~/.claude/commands/**/*.md` into skills named `cc-cmd-<namespace>-<name>` with `disable-model-invocation: true`, so a human prompt never enters the model catalog.
-- `claude2dsh_import_mcp`: translate `~/.claude.json` and project `.mcp.json` MCP servers into a `dsh-mcp-client` patch layer under `$DSH_HOME/claude2dsh/mcp.patch.yml`. Dry-run by default; `apply:true` writes the layer and reports the `dsh --patch` command. SSE servers and namespace collisions are reported instead of emitted.
-- `claude2dsh_export`: serialize one DSH session into a Claude Code JSONL transcript under `$DSH_HOME/claude2dsh/exports`. Writing below the real `~/.claude` is refused unless `allowOriginalClaudeDir:true`.
-- `claude2dsh_sync`: append DSH turns newer than the export watermark to the exported Claude copy (default `target:"copy"`). `target:"source"` requires `allowOriginalClaudeDir:true`. External modification/shrink guards refuse the write unless `force:true`.
-- `claude2dsh_import_context`: copy the user-global `~/.claude/CLAUDE.md` into `$DSH_HOME/AGENTS.md` with preview and never-overwrite conflicts; project CLAUDE.md is left to DSH native discovery.
-- `claude2dsh_import_memory`: package one project `MEMORY.md`/`memory/*.md` as a DSH-native skill bundle with preview and never-overwrite conflicts.
-- `claude2dsh_merge`: explicit bidirectional three-way merge after double-side growth; same-turn dual edits keep both versions and a log-only conflict marker, always writing a new safe copy.
-- `claude2dsh_sidecars`: list/resolve copied tool-result `.txt` sidecars.
-- `claude2dsh_session_sources`: list/resolve source markers (`claude-main`/`claude-subagent`/`claude-merged`).
-- `claude2dsh_plugin_inventory`: read-only inventory of installed Claude Code plugins; `apply:true` copies only declarative SKILL.md assets. Hooks and app-server runtime code are never executed.
-- `claude2dsh_autosync`: `status` shows the mirror's pause state, reason, recent conflicts and pending queue; `resume` clears a conflict pause after the two sides were reconciled with explicit tools.
-- `claude2dsh_import` image policy: `imageMode:"auto"` follows the current DSH session route. Leave Settings provider/model empty to follow the live session, or fill them to probe an explicit route; text-only routes degrade images to safe placeholders while attachments are retained and re-projected on model switch. Each import item records the route and reason.
+- `dsh2claude_migrate`: stage sessions and selected assets. `preview:true` reports without writing.
+- `dsh2claude_install`: copy staged artifacts into `~/.claude` (or `CLAUDE_CONFIG_DIR`). Dry-run unless `confirm:true`; conflicts require `force:true`, which keeps a timestamped backup.
+- `dsh2claude_status`: show the manifest and resolved paths.
+- `dsh2claude_sessions`: list DSH sessions and their staged/installed state.
 
 ## Safety
 
-`~/.claude` is read-only for migration. DSH writes go only through host persistence and `$DSH_HOME`.
+Stage never writes below `~/.claude`. Install is the only write path, previews first, confines target paths to the Claude home, and compares content hashes before replacing anything. The original DSH data is read-only.
 
-## Optional features
+## Layout
 
-- **Auto mirror (default off)**: set `autoSync.enabled: true` in the plugin row config to watch the Claude projects directory and mirror completed DSH turns to the safe export copy. The real `~/.claude` directory is never written by auto-sync. Live sessions are skipped, the pending queue survives restart, and double-side growth pauses the mirror with a conflict report (`claude2dsh_autosync` inspects/resumes).
-- **Claude hook bridge (default off)**: set `CLAUDE2DSH_HOOKS_CONFIG=/path/to/hooks.json` before boot to activate the upstream `@deepseek-ai/dsh-hooks-claude-code` bridge. Invalid or unreadable config fails boot with the exact path and reason. The Settings page can read-only scan Claude settings/plugin hooks, preview mappable command handlers, and save a candidate for the next boot. Only command handlers for the seven mapped hook events are supported; hook outcomes are persisted as `hook/invoked` + `hook/result` session-log events. See that package's README for the exact subset.
+```
+$DSH_HOME/dsh2claude/staging/
+  manifest.json
+  projects/<slug>/<session-uuid>.jsonl
+  skills/<name>/
+  CLAUDE.md
+  mcp-servers.json
+```
+
+## Limitations
+
+Images are counted and dropped. DSH agent presets, custom commands, hooks, and plugin runtime behavior are not migrated. MCP `cwd` has no Claude Code stdio equivalent. There is no incremental turn-append yet.

@@ -1,6 +1,6 @@
 /** DSH session events -> Claude Code JSONL transcript (pure functions). */
 import { randomUUID } from 'node:crypto'
-import type { ForeignSessionEvent, ForeignSessionView } from '@claude2dsh/core'
+import type { ForeignSessionEvent, ForeignSessionView } from '@dsh2claude/core'
 
 /** Claude Code project directory slug: every non-alphanumeric byte becomes `-`. */
 export function slugifyClaudeCwd(cwd: string): string {
@@ -35,11 +35,16 @@ function iso(ms: number): string {
   return new Date(ms).toISOString()
 }
 
-function userTextBlocks(content: unknown): { blocks: unknown[]; skipped: number } {
+function userTextBlocks(content: unknown): { blocks: string[]; skipped: number } {
+  if (typeof content === 'string') return { blocks: [content], skipped: 0 }
   if (!Array.isArray(content)) return { blocks: [], skipped: 0 }
-  const blocks: unknown[] = []
+  const blocks: string[] = []
   let skipped = 0
   for (const block of content) {
+    if (typeof block === 'string') {
+      blocks.push(block)
+      continue
+    }
     if (typeof block !== 'object' || block === null) {
       skipped += 1
       continue
@@ -65,16 +70,11 @@ function assistantContentBlocks(content: unknown): { blocks: unknown[]; skipped:
       const text = (block as { text?: unknown }).text
       if (typeof text === 'string') blocks.push({ type: 'text', text })
       else skipped += 1
-    } else if (raw.type === 'reasoning') {
-      const text = (block as { text?: unknown }).text
-      if (typeof text === 'string') {
-        const redacted = (block as { redacted?: unknown }).redacted
-        blocks.push(redacted === true
-          ? { type: 'redacted_thinking', data: text }
-          : { type: 'thinking', thinking: text, signature: '' })
-      } else {
-        skipped += 1
-      }
+    } else if (raw.type === 'reasoning' || raw.type === 'thinking' || raw.type === 'redacted_thinking') {
+      // Claude Code transcripts carry signed thinking blocks. DSH reasoning is
+      // plain text with no Claude-compatible signature, so importing it would
+      // produce a transcript the API rejects on resume.
+      skipped += 1
     } else if (raw.type === 'tool-call') {
       const call = block as { id?: unknown; name?: unknown; arguments?: unknown }
       if (typeof call.id === 'string') {
@@ -105,9 +105,13 @@ function eventData(event: ForeignSessionEvent): Record<string, unknown> {
 function userRecord(uuid: string, parentUuid: string | null, timestamp: number, content: unknown, meta: { sessionId: string; cwd: string }, extra: Record<string, unknown> = {}): ClaudeRecord {
   const { blocks, skipped } = userTextBlocks(content)
   void skipped
-  const messageContent: unknown = Array.isArray(content)
-    ? blocks
-    : (blocks[0] ?? '')
+  // Claude Code writes a single text prompt as a string and multi-part content
+  // as text blocks; match that shape rather than emitting raw string arrays.
+  const messageContent: unknown = blocks.length === 0
+    ? ''
+    : blocks.length === 1
+      ? blocks[0]
+      : blocks.map((text) => ({ type: 'text', text }))
   return {
     type: 'user',
     message: { role: 'user', content: messageContent },
@@ -118,7 +122,7 @@ function userRecord(uuid: string, parentUuid: string | null, timestamp: number, 
     origin: { kind: 'human' },
     promptSource: 'typed',
     userType: 'external',
-    entrypoint: 'claude2dsh-export',
+    entrypoint: 'dsh2claude-migrate',
     cwd: meta.cwd,
     sessionId: meta.sessionId,
     version: '0.0.0',
@@ -170,7 +174,7 @@ function toolResultRecord(uuid: string, parentUuid: string | null, assistantUuid
       toolResults.push({
         type: 'tool_result',
         tool_use_id: raw.toolCallId,
-        content: blocks.length === 0 ? [] : blocks,
+        content: blocks.map((text) => ({ type: 'text', text })),
         ...(raw.isError === true ? { is_error: true } : {}),
       })
     }
@@ -184,7 +188,7 @@ function toolResultRecord(uuid: string, parentUuid: string | null, assistantUuid
     timestamp: iso(timestamp),
     sourceToolAssistantUUID: assistantUuid,
     userType: 'external',
-    entrypoint: 'claude2dsh-export',
+    entrypoint: 'dsh2claude-migrate',
     cwd: meta.cwd,
     sessionId: meta.sessionId,
     version: '0.0.0',

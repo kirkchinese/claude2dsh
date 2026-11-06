@@ -5,7 +5,7 @@
  * `serializeAppend` covers the reverse direction for adapters that support
  * native write-back. An adapter that cannot write back simply omits it; the
  * migration layer then reports that reverse direction as unavailable.
- * @module @claude2dsh/core
+ * @module @dsh2claude/core
  */
 import type { NormalizedSession, NormalizeStats } from './types.ts'
 

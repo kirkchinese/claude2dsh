@@ -6,7 +6,6 @@ const CLIENT_EXTERNALS = [
   'react-dom',
   'react-dom/client',
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-client-runtime/client',
 ] as const
 
 export default {
@@ -21,7 +20,7 @@ export default {
   define: { 'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production') },
   outputOptions: {
     entryFileNames: 'client.js',
-    banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify('@claude2dsh/plugin')}, factory: (require) => {`,
+    banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify('@dsh2claude/plugin')}, factory: (require) => {`,
     footer: 'return module.exports; } });',
     intro: 'var module = { exports: {} }; var exports = module.exports;',
   },

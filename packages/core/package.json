@@ -1,6 +1,6 @@
 {
-  "name": "@claude2dsh/core",
-  "version": "0.3.0",
+  "name": "@dsh2claude/core",
+  "version": "0.4.0",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -20,7 +20,7 @@
     "typescript": "^5.8.3",
     "@types/node": "^22.13.0"
   },
-  "description": "Normalized session-source model and DSH event synthesis for Claude2DSH",
+  "description": "Shared foreign-session types and adapter contract for DSH2Claude",
   "publishConfig": {
     "access": "public"
   },

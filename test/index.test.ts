@@ -1,6 +1,6 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
-import * as claude2dsh from '../src/index.js'
+import * as dsh2claude from '../src/index.js'
 import {
   DuplicateSessionSourceError,
   type SessionSourceAdapter,
@@ -15,7 +15,7 @@ async function activate(): Promise<{
   root: Context
 }> {
   const root = new Context()
-  const fiber = root.plugin(claude2dsh, { mode: 'read-only' })
+  const fiber = root.plugin(dsh2claude, { mode: 'read-only' })
   activeFibers.push(fiber)
   await fiber
   const registry = fiber.ctx.get('sessionSources')
@@ -97,8 +97,8 @@ describe('SessionSourceRegistry', () => {
 
 describe('Cordis plugin', () => {
   it('requires the explicit read-only Config value', async () => {
-    const missing = new Context().registry.plugin(claude2dsh, {})
-    const writeCapable = new Context().registry.plugin(claude2dsh, {
+    const missing = new Context().registry.plugin(dsh2claude, {})
+    const writeCapable = new Context().registry.plugin(dsh2claude, {
       mode: 'read-write',
     })
     activeFibers.push(missing, writeCapable)
@@ -110,7 +110,7 @@ describe('Cordis plugin', () => {
   it('activates and disposes the real object plugin service', async () => {
     const { fiber, registry } = await activate()
 
-    expect(claude2dsh.name).toBe('claude2dsh')
+    expect(dsh2claude.name).toBe('dsh2claude')
     expect(String(registry.mode)).toBe('read-only')
     expect(fiber.ctx.get('sessionSources')?.list() ?? null).not.toBeNull()
 

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.0 — 2026-11-06
+
+DSH2Claude inverts the migration direction: DeepSeek Harness is now the source and Claude Code is the target.
+
+### Breaking
+
+- Workspace scope is `@dsh2claude/*`, tools are `dsh2claude_*`, the settings namespace and routes are `dsh2claude`, and the bundle id is `dsh2claude`.
+- The Claude -> DSH importer, auto-mirror, hook bridge, image import policy, bidirectional merge, plugin inventory, and tool-result sidecars are removed.
+
+### Added
+
+- DSH session discovery under `$DSH_HOME/sessions`, supporting v3/v4 header records, plain `.jsonl`, and concatenated-frame `.jsonl.zstd` with torn-final-frame reporting.
+- DSH event normalization: injected user messages are counted and skipped, v4 `tool/result` messages are rewritten to Claude's `tool_use_id`/`content` shape, and tool results are parented on their assistant record.
+- Deterministic DSH session id -> Claude session UUID mapping and `~/.claude/projects/<slug>/` placement.
+- Two-phase migration: stage below `$DSH_HOME/dsh2claude/staging`, then install into Claude Code with dry-run by default, hash-based conflict detection, and timestamped backups under `force`.
+- Skill bundle migration, `$DSH_HOME/AGENTS.md` -> `~/.claude/CLAUDE.md`, and MCP server discovery from profile patches and `storages/mcp_connector.json`.
+- `dsh2claude_migrate`, `dsh2claude_install`, `dsh2claude_status`, `dsh2claude_sessions`, and a bilingual settings panel.
+- `scripts/e2e-migration.mjs` and adapter/plugin tests covering v4 logs, concatenated zstd, rendering, staging, install, conflicts, and preview.
+
+### Changed
+
+- Peer range widened to `@deepseek-ai/dsh-settings` / `@deepseek-ai/dsh-tools` `>=0.1.5-rc.1 <0.3.0`; the plugin no longer depends on DSH's session persistence API and reads storage directly.
+- Package versions are `0.4.0`; root and package documentation describe DSH -> Claude only.
+
+### Known limitations
+
+- Image blocks and plain-text reasoning blocks are dropped. Reasoning has no Claude-compatible signed thinking payload.
+- DSH agent presets, custom commands, hooks, and plugin runtime behavior are not migrated.
+- MCP `cwd` has no Claude Code stdio equivalent.
+- Re-staging and re-installing are idempotent, but there is no incremental turn-append yet.
+
 ## 0.3.0 — 2026-09-17
 
 Claude2DSH now targets the DSH releases that replaced the service-level session API with per-session handles and moved the Session log to format v3. **This release is required for DSH 0.1.5 and later, including 0.1.6-alpha.1, and no longer starts on 0.1.0-rc.x.**
@@ -33,8 +64,7 @@ Claude2DSH now targets the DSH releases that replaced the service-level session 
 
 - The compatibility gate is capability-based: it requires a Session format this build writes and names the exact `npm install -g @deepseek-ai/dsh@latest` remedy.
 - The CI compatibility job now asserts that the newest published DSH release still satisfies the declared peer range, and fails when it does not.
-- Dependencies, peers and the integrator script target the current releases; the installer default is `@claude2dsh/plugin@0.3.0`.
-
+- Dependencies, peers and the integrator script target the current releases; the installer default is `@dsh2claude/plugin@0.3.0`.
 
 ## 0.2.0-rc.5 — 2026-08-17
 
@@ -104,8 +134,8 @@ Claude2DSH now targets the DSH releases that replaced the service-level session 
 
 ### Released
 
-- Published to npm: `@claude2dsh/core@0.1.0`,
-  `@claude2dsh/adapter-claude-code@0.1.0`, `@claude2dsh/plugin@0.1.0`;
+- Published to npm: `@dsh2claude/core@0.1.0`,
+  `@dsh2claude/adapter-claude-code@0.1.0`, `@dsh2claude/plugin@0.1.0`;
   verified with a clean `dsh plugin add` + one-session import.
 
 ### Added
@@ -125,7 +155,7 @@ Claude2DSH now targets the DSH releases that replaced the service-level session 
 
 ### Fixed
 
-- Published npm manifests no longer contain `workspace:` dependency protocols. The rc.1 packages were deprecated because `dsh plugin add @claude2dsh/plugin` failed on a clean machine.
+- Published npm manifests no longer contain `workspace:` dependency protocols. The rc.1 packages were deprecated because `dsh plugin add @dsh2claude/plugin` failed on a clean machine.
 
 ### Added
 
