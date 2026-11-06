@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Assemble .local/ as a self-contained package that `dsh plugin add <path>` can
+// Assemble local-package/ as a self-contained package that `dsh plugin add <path>` can
 // install without resolving the monorepo's `workspace:` dependency protocol.
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
-const local = join(packageRoot, '.local')
+const local = join(packageRoot, 'local-package')
 const source = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
 
 await mkdir(join(local, 'lib'), { recursive: true })

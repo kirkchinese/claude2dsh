@@ -18,7 +18,7 @@ DSH2Claude inverts the migration direction: DeepSeek Harness is now the source a
 - Skill bundle migration, `$DSH_HOME/AGENTS.md` -> `~/.claude/CLAUDE.md`, and MCP server discovery from profile patches and `storages/mcp_connector.json`.
 - `dsh2claude_migrate`, `dsh2claude_install`, `dsh2claude_status`, `dsh2claude_sessions`, and a bilingual settings panel.
 - `scripts/e2e-migration.mjs` and adapter/plugin tests covering v4 logs, concatenated zstd, rendering, staging, install, conflicts, and preview.
-- `packages/plugin/.local` build output: a self-contained install package that inlines the workspace adapters and core, so `dsh plugin add ./packages/plugin/.local` works without resolving `workspace:` protocols or requiring the packages to be published.
+- `packages/plugin/local-package` build output: a self-contained install package that inlines the workspace adapters and core, so `dsh plugin add ./packages/plugin/local-package` works without resolving `workspace:` protocols or requiring the packages to be published.
 
 ### Fixed
 

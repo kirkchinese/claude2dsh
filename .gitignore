@@ -22,4 +22,4 @@ AGENTS_.md
 /.npm-cache/
 
 # local install package
-.local/
+local-package/

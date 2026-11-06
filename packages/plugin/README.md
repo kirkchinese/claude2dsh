@@ -9,11 +9,11 @@ From this checkout:
 ```sh
 pnpm install
 pnpm -r build
-dsh plugin --profile web add ./packages/plugin/.local
+dsh plugin --profile web add ./packages/plugin/local-package
 dsh web
 ```
 
-`pnpm -r build` also writes `.local/`, a self-contained bundle of the plugin and
+`pnpm -r build` also writes `local-package/`, a self-contained bundle of the plugin and
 its workspace packages. Install that directory so `dsh plugin add` never has to
 resolve `workspace:` dependency protocols. Then open **Settings → DSH2Claude**.
 

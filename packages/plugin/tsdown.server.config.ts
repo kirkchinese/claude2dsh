@@ -9,7 +9,7 @@ import type { UserConfig } from 'tsdown'
  */
 export default {
   entry: { index: 'src/index.ts' },
-  outDir: '.local/lib',
+  outDir: 'local-package/lib',
   format: ['esm'],
   platform: 'node',
   dts: false,
