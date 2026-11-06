@@ -13,7 +13,7 @@ This is the inverted sibling of Claude2DSH. The source is DeepSeek Harness (`$DS
 | `$DSH_HOME/AGENTS.md`                                                                             | `~/.claude/CLAUDE.md`                            |
 | `@deepseek-ai/dsh-mcp-client` rows in profile patches and `$DSH_HOME/storages/mcp_connector.json` | `~/.claude.json` → `mcpServers`                  |
 
-Sessions become native Claude Code transcripts with a contiguous `parentUuid` chain, tool results parented on the assistant record that declared the call, and the source `cwd` preserved so Claude Code lists them under the right project. Re-running the migration is idempotent: the Claude session UUID is derived deterministically from the DSH session id.
+Sessions become native Claude Code transcripts with a contiguous `parentUuid` chain, tool results parented on the assistant record that declared the call, and the source `cwd` preserved so Claude Code lists them under the right project. Re-running the migration is idempotent: the Claude session UUID and every record UUID are derived deterministically from the DSH session id, so an unchanged source renders byte-identically. Sessions with no user or assistant messages are skipped instead of installing as empty chats.
 
 ## Requirements
 

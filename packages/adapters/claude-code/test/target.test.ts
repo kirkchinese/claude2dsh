@@ -47,6 +47,8 @@ test('reuses a DSH UUID and hashes anything else deterministically', () => {
 
 test('renders a validated Claude chain with string prompts and text-block tool results', () => {
   const rendered = renderClaudeTranscript(view(), 'session-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+  const second = renderClaudeTranscript(view(), 'session-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+  assert.equal(rendered.jsonl, second.jsonl)
   assert.equal(rendered.sessionUuid, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
   assert.equal(rendered.relativePath.split('\\').join('/'), 'projects/C--Users-me-Project/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl')
   assert.equal(verifyClaudeJsonl(rendered.jsonl), true)

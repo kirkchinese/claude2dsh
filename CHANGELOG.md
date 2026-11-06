@@ -19,6 +19,11 @@ DSH2Claude inverts the migration direction: DeepSeek Harness is now the source a
 - `dsh2claude_migrate`, `dsh2claude_install`, `dsh2claude_status`, `dsh2claude_sessions`, and a bilingual settings panel.
 - `scripts/e2e-migration.mjs` and adapter/plugin tests covering v4 logs, concatenated zstd, rendering, staging, install, conflicts, and preview.
 
+### Fixed
+
+- Record UUIDs are deterministic (session id + serialization order), so re-staging unchanged DSH data produces byte-identical transcripts and re-installation is a no-op instead of a conflict.
+- Sessions that contain only lifecycle events and no user or assistant messages are skipped rather than installed as empty Claude chats.
+
 ### Changed
 
 - Peer range widened to `@deepseek-ai/dsh-settings` / `@deepseek-ai/dsh-tools` `>=0.1.5-rc.1 <0.3.0`; the plugin no longer depends on DSH's session persistence API and reads storage directly.

@@ -71,6 +71,17 @@ function countTurns(session: Awaited<ReturnType<typeof readDshSession>>): number
   return session.view.events.filter((event) => event.type === 'turn/start').length
 }
 
+/** A session with only lifecycle events would install as an empty Claude chat. */
+function hasImportableMessages(session: Awaited<ReturnType<typeof readDshSession>>): boolean {
+  return session.view.events.some((event) => {
+    if (event.type === 'assistant/message') return true
+    if (event.type !== 'user/message') return false
+    const source = event.data.source
+    if (typeof source !== 'object' || source === null) return true
+    return (source as { kind?: unknown }).kind === undefined || (source as { kind?: unknown }).kind === 'user'
+  })
+}
+
 function matchesOnly(discovered: DiscoveredDshSession, only: readonly string[] | undefined): boolean {
   if (only === undefined || only.length === 0) return true
   const uuid = discovered.dshId.replace(/^session-/, '')
@@ -92,7 +103,7 @@ export async function stageDshSessions(options: MigrateOptions): Promise<StageSe
     if (!matchesOnly(discovered, options.only)) continue
     try {
       const session = await readDshSession(discovered)
-      if (session.view.events.length === 0) {
+      if (session.view.events.length === 0 || !hasImportableMessages(session)) {
         addItem(report, {
           ref: discovered.ref,
           dshId: discovered.dshId,
@@ -100,9 +111,9 @@ export async function stageDshSessions(options: MigrateOptions): Promise<StageSe
           ...(discovered.cwd !== undefined ? { cwd: discovered.cwd } : {}),
           createdAt: discovered.createdAt,
           turns: 0,
-          events: 0,
+          events: session.view.events.length,
           status: 'skipped',
-          reason: 'session has no events yet',
+          reason: session.view.events.length === 0 ? 'session has no events yet' : 'session has no user or assistant messages',
         })
         continue
       }
