@@ -4,7 +4,7 @@
 
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 [![npm version](https://img.shields.io/npm/v/%40claude2dsh%2Fplugin?label=npm&color=0ea5e9)](https://www.npmjs.com/package/@claude2dsh/plugin)
-[![DSH >=0.1.5-rc.1 <0.2.0](https://img.shields.io/badge/dsh-%3E%3D0.1.5--rc.1%20%3C0.2.0-4f46e5)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH >=0.1.5-rc.1 <0.3.0](https://img.shields.io/badge/dsh-%3E%3D0.1.5--rc.1%20%3C0.3.0-4f46e5)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node.js >=22.19](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=nodedotjs&logoColor=white)](package.json)
 [![license: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
@@ -15,7 +15,7 @@
 Claude Code 是多工具迁移层的第一个会话源适配器。Claude2DSH 保留有用的会话结构，通过 DSH 原生持久化 API 写入，并默认把原始 Claude 目录视为只读源。
 
 > [!IMPORTANT]
-> **`0.3.0` 要求 DSH `>=0.1.5-rc.1 <0.2.0`，在 `0.1.0-rc.x` 上不再启动。** DSH 0.1.5 把服务级会话 API 换成按会话句柄（handle），并把 Session 日志格式升到 v3；0.2.x 系列早于这次变更。请升级宿主（`npm install -g @deepseek-ai/dsh@latest`），或继续使用 `claude2dsh@0.2.0-rc.5`。
+> **Claude2DSH 支持 DSH `>=0.1.5-rc.1 <0.3.0`**：0.1.5+ 系列（Session 日志格式 v3）与 0.2.x 系列（格式 v4，已在 `0.2.2-rc.1` 上验证），在 `0.1.0-rc.x` 上不启动。导入的会话按已安装宿主使用的格式写入。更旧的宿主请升级（`npm install -g @deepseek-ai/dsh@latest`），或继续使用 `claude2dsh@0.2.0-rc.5`。
 
 ![左侧为 Claude Code 资产、右侧为 DeepSeek Harness 落点的迁移对照图，0.3.0 新增的三类导入标有标记](assets/asset-translation.svg)
 
@@ -144,7 +144,7 @@ Claude2DSH 把首次迁移与安全关键默认值放在同一个设置页：
 
 ## 当前局限
 
-- **宿主版本范围：** `0.3.0` 支持 DSH `>=0.1.5-rc.1 <0.2.0`，超出范围会拒绝加载。接口与磁盘格式仍不承诺为稳定兼容层；下一次 Session 格式变更需要配套的插件版本。
+- **宿主版本范围：** Claude2DSH 支持 DSH `>=0.1.5-rc.1 <0.3.0`（Session 格式 v3 与 v4），超出范围会拒绝加载。接口与磁盘格式仍不承诺为稳定兼容层；下一次 Session 格式变更需要配套的插件版本。
 - **Hook bridge：** 上游只支持 **Claude Code 30 个 hook 事件中的 7 个**、仅 `type: "command"` handler，且已支持事件也只有部分语义。完整 hook 兼容是路线图目标，不是现状承诺。
 - **视觉模型验收：** 原生图片路径已实现，但尚未在真实支持视觉的 DSH 模型路由上验收；随附 DeepSeek adapter 声明仅文本输入。
 - **自动镜像：** 默认关闭、需显式开启；DSH 轮次只写安全 Claude 导出副本。双端同时增长时暂停并报告冲突，不代表会自动合并。

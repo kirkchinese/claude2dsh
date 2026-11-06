@@ -14,14 +14,21 @@ import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 
 const require = createRequire(import.meta.url)
 
-/** Session log formats whose event vocabulary and envelopes this build writes. */
-export const SUPPORTED_SESSION_FORMAT_VERSIONS: readonly number[] = [3]
+/**
+ * Session log formats whose event vocabulary and envelopes this build writes.
+ * Format 3 ships with DSH 0.1.5–0.1.x; format 4 (tool-role `tool/result`
+ * messages) ships with DSH 0.2.x.
+ */
+export const SUPPORTED_SESSION_FORMAT_VERSIONS: readonly number[] = [3, 4]
 
 /** Lowest DSH release whose Session persistence API this plugin targets. */
 export const MINIMUM_DSH_VERSION = '0.1.5-rc.1'
 
+/** First DSH minor line this build has not been verified against (exclusive upper bound). */
+export const EXCLUSIVE_MAXIMUM_DSH_VERSION = '0.3.0'
+
 /** DSH package range this plugin declares for its host peers. */
-export const REQUIRED_DSH_PEER = `>=${MINIMUM_DSH_VERSION} <0.2.0`
+export const REQUIRED_DSH_PEER = `>=${MINIMUM_DSH_VERSION} <${EXCLUSIVE_MAXIMUM_DSH_VERSION}`
 
 interface ParsedVersion {
   readonly major: number
@@ -82,14 +89,19 @@ export function compareVersions(left: ParsedVersion, right: ParsedVersion): numb
 
 /**
  * Whether a DSH release satisfies this plugin's declared peer range.
+ * Prereleases of the excluded minor line (for example `0.3.0-alpha.1`) are
+ * rejected as well: a new minor line is a breaking DSH release.
  * @param version - installed `@deepseek-ai/dsh-session` version.
- * @returns true when the release is within `>=MINIMUM_DSH_VERSION <0.2.0`.
+ * @returns true when the release is within `>=MINIMUM_DSH_VERSION <EXCLUSIVE_MAXIMUM_DSH_VERSION`.
  */
 export function isSupportedDshVersion(version: string): boolean {
   const parsed = parseVersion(version)
   const minimum = parseVersion(MINIMUM_DSH_VERSION)
   if (parsed === undefined || minimum === undefined) return false
-  return compareVersions(parsed, minimum) >= 0 && parsed.major === 0 && parsed.minor === 1
+  const maximum = parseVersion(EXCLUSIVE_MAXIMUM_DSH_VERSION)
+  if (maximum === undefined) return false
+  return compareVersions(parsed, minimum) >= 0
+    && (parsed.major < maximum.major || (parsed.major === maximum.major && parsed.minor < maximum.minor))
 }
 
 /** Read the installed host version from the package that owns the Session API. */

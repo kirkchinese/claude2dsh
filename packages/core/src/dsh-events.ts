@@ -53,7 +53,17 @@ export interface SynthesizeOptions {
    * and for a host that has no subagent descriptor vocabulary at all.
    */
   readonly subagentDescriptorVersion?: number
+  /**
+   * Session log format version the target host writes (`SESSION_FORMAT_VERSION`
+   * from `@deepseek-ai/dsh-session`). It selects the tool-result representation:
+   * format 3 wraps each result in a user-role `tool-result` block, format 4 and
+   * later store a tool-role message. Omitted, the format-3 shape is emitted.
+   */
+  readonly sessionFormatVersion?: number
 }
+
+/** First Session log format whose `tool/result` events carry a tool-role message. */
+export const TOOL_ROLE_RESULT_FORMAT_VERSION = 4
 
 /** Upper bound mirroring the shipped title service default (`maxTitleBytes: 80`). */
 export const MAX_TITLE_BYTES = 80
@@ -103,6 +113,34 @@ function renderBlock(block: NormalizedTurn['steps'][number]['content'][number]):
   }
 }
 
+/**
+ * Build one `tool/result` message in the representation of the target format.
+ * @param id - stable message id.
+ * @param callId - provider call id the result answers.
+ * @param content - rendered result blocks.
+ * @param isError - whether the call failed.
+ * @param formatVersion - target Session log format version.
+ * @returns the message payload of a `tool/result` event.
+ */
+function toolResultMessage(id: string, callId: string, content: Record<string, unknown>[], isError: boolean, formatVersion: number): Record<string, unknown> {
+  if (formatVersion >= TOOL_ROLE_RESULT_FORMAT_VERSION) {
+    return {
+      id,
+      role: 'tool',
+      toolCallId: callId,
+      content,
+      ...(isError ? { isError: true } : {}),
+      source: { kind: 'tool', callId },
+    }
+  }
+  return {
+    id,
+    role: 'user',
+    content: [{ type: 'tool-result', toolCallId: callId, content, ...(isError ? { isError: true } : {}) }],
+    source: { kind: 'tool', callId },
+  }
+}
+
 /** Append events for one step, keeping every tool call followed by exactly one result. */
 function synthesizeStep(
   out: SynthesizedSessionEvent[],
@@ -111,6 +149,7 @@ function synthesizeStep(
   step: NormalizedStep,
   turn: number,
   stats: SynthesizeStats,
+  formatVersion: number,
 ): void {
   const stepTime = step.timestamp ?? createdAt
   const model = step.model ?? undefined
@@ -157,7 +196,7 @@ function synthesizeStep(
   for (const call of step.toolCalls) {
     const result = resultsById.get(call.id)
     if (result !== undefined) {
-      pushToolResult(out, sessionId, result, turn, step.number, callSeqByCallId.get(call.id))
+      pushToolResult(out, sessionId, result, turn, step.number, callSeqByCallId.get(call.id), formatVersion)
       resultsPushed += 1
     } else {
       // Wire invariant: an assistant with tool_calls must be followed by one
@@ -171,12 +210,7 @@ function synthesizeStep(
         data: {
           turn,
           step: step.number,
-          message: {
-            id: mid(sessionId, 't', turn, step.number, call.id),
-            role: 'user',
-            content: [{ type: 'tool-result', toolCallId: call.id, content: [] }],
-            source: { kind: 'tool', callId: call.id },
-          },
+          message: toolResultMessage(mid(sessionId, 't', turn, step.number, call.id), call.id, [], false, formatVersion),
         },
         surfaceOp: 'append',
         sourceEventSeqs: [callSeqByCallId.get(call.id) ?? assistantSeq],
@@ -199,6 +233,7 @@ function pushToolResult(
   turn: number,
   step: number,
   callSeq: number | undefined,
+  formatVersion: number,
 ): void {
   const content = result.content.map((block) => renderBlock(block))
   const seq = out.length
@@ -209,12 +244,7 @@ function pushToolResult(
     data: {
       turn,
       step,
-      message: {
-        id: mid(sessionId, 'r', turn, step, result.toolCallId),
-        role: 'user',
-        content: [{ type: 'tool-result', toolCallId: result.toolCallId, content, ...(result.isError === true ? { isError: true } : {}) }],
-        source: { kind: 'tool', callId: result.toolCallId },
-      },
+      message: toolResultMessage(mid(sessionId, 'r', turn, step, result.toolCallId), result.toolCallId, content, result.isError === true, formatVersion),
     },
     surfaceOp: 'append',
   }
@@ -282,7 +312,7 @@ export function synthesizeDshSession(input: NormalizedSession, options: Synthesi
           })
           stats.messages += 1
         }
-        synthesizeStep(events, input.id, input.createdAt, step, turn.number, stats)
+        synthesizeStep(events, input.id, input.createdAt, step, turn.number, stats, options.sessionFormatVersion ?? 3)
         events.push(event('step/end', events.length, step.timestamp ?? turnTime, { turn: turn.number, step: step.number }))
       }
     }

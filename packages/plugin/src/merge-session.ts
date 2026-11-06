@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionHeader } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
 import { SUBAGENT_DESCRIPTOR_VERSION } from '@deepseek-ai/dsh-subagent'
 import { synthesizeDshSession, tailSessionEvents, planTurnMerge } from '@claude2dsh/core'
 import type { ForeignSessionView } from '@claude2dsh/core'
@@ -93,7 +93,7 @@ export async function mergeClaudeSession(ctx: Context, args: MergeSessionArgs, d
     readClaudeSession({ ref: sourcePath, sourceId: basename(sourcePath).replace(/\.jsonl$/i, '') }),
     sessionEvents(ctx, args.sessionId),
   ])
-  const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION })
+  const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION, sessionFormatVersion: SESSION_FORMAT_VERSION })
   const claudeTail = tailSessionEvents(synthesized.events, { fromTurn: record.turns + 1, fromSeq: record.events })
   if (claudeTail.events.length === 0) {
     return { status: 'no-claude-growth', reason: claudeTail.droppedIncompleteTurn ? 'new final turn is incomplete' : 'no complete Claude turns after the watermark', sessionId: args.sessionId }
@@ -163,7 +163,7 @@ export async function mergeDshToClaude(ctx: Context, args: MergeDshToClaudeArgs,
     readClaudeSession({ ref: mapping.filePath, sourceId: mapping.sessionUuid }),
     sessionEvents(ctx, args.sessionId),
   ])
-  const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION })
+  const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION, sessionFormatVersion: SESSION_FORMAT_VERSION })
   const claudeTail = tailSessionEvents(synthesized.events, { fromTurn: mapping.lastWrittenTurn + 1, fromSeq: mapping.lastWrittenSeq })
   if (claudeTail.events.length === 0) {
     return { status: 'no-claude-growth', reason: claudeTail.droppedIncompleteTurn ? 'new final turn is incomplete' : 'no complete Claude turns after the export watermark', sessionId: args.sessionId }

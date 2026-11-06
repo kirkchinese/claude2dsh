@@ -30,8 +30,20 @@ trap cleanup EXIT
 echo "== dsh under test =="
 "$DSH_BIN" --version
 
-echo "== build =="
+echo "== build + pack =="
+# The profile installs the packed packages, exactly like `dsh plugin add`: a
+# `link:` to the workspace would resolve the plugin's host peers from its own
+# devDependencies (one DSH release) instead of the DSH under test.
+PACKS="$LAB/packs"
+mkdir -p "$PACKS"
 (cd "$ROOT" && CI=true pnpm -r build >/dev/null)
+for pkg in packages/core packages/adapters/claude-code packages/plugin; do
+  (cd "$ROOT/$pkg" && CI=true pnpm pack --pack-destination "$PACKS" >/dev/null)
+done
+pack_of() { ls "$PACKS"/"$1"-*.tgz | head -n 1; }
+CORE_TGZ="$(pack_of claude2dsh-core)"
+ADAPTER_TGZ="$(pack_of claude2dsh-adapter-claude-code)"
+PLUGIN_TGZ="$(pack_of claude2dsh-plugin)"
 
 echo "== acceptance profile =="
 mkdir -p "$PROFILE_DIR" "$SOURCE"
@@ -41,7 +53,7 @@ cat > "$PROFILE_DIR/package.json" <<JSON
   "private": true,
   "type": "module",
   "dependencies": {
-    "@claude2dsh/plugin": "link:$ROOT/packages/plugin"
+    "@claude2dsh/plugin": "file:$PLUGIN_TGZ"
   },
   "dsh": {
     "profile": {
@@ -52,7 +64,16 @@ cat > "$PROFILE_DIR/package.json" <<JSON
 JSON
 printf '[]\n' > "$PROFILE_DIR/cordis.patch.yml"
 printf '[]\n' > "$PROFILE_DIR/cordis.yml"
-printf 'packages:\n  - .\n' > "$PROFILE_DIR/pnpm-workspace.yaml"
+# Host peers come from the DSH under test, as in a DSH-managed profile.
+cat > "$PROFILE_DIR/pnpm-workspace.yaml" <<YAML
+packages:
+  - .
+nodeLinker: hoisted
+autoInstallPeers: false
+overrides:
+  '@claude2dsh/core': 'file:$CORE_TGZ'
+  '@claude2dsh/adapter-claude-code': 'file:$ADAPTER_TGZ'
+YAML
 (cd "$PROFILE_DIR" && CI=true pnpm install ${PNPM_STORE_DIR:+--store-dir "$PNPM_STORE_DIR"} >/dev/null)
 
 echo "== synthetic Claude source (no ~/.claude access) =="
@@ -146,5 +167,5 @@ grep -q 'serverName: demo' "$LAB/dump-config.txt"
 grep -q 'serverName: docs' "$LAB/dump-config.txt"
 
 echo "== assert =="
-node "$ROOT/scripts/assert-acceptance.mjs" "$HOME_DIR" "$LAB/report1.json" "$LAB/report2.json" "$LAB/report3.json" "$LAB/report4.json" "$SESSION_ID" "$LAB/exports"
+DSH_VERSION="$("$DSH_BIN" --version)" node "$ROOT/scripts/assert-acceptance.mjs" "$HOME_DIR" "$LAB/report1.json" "$LAB/report2.json" "$LAB/report3.json" "$LAB/report4.json" "$SESSION_ID" "$LAB/exports"
 echo "ACCEPTANCE_OK $("$DSH_BIN" --version)"

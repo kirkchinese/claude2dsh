@@ -4,7 +4,9 @@
  * The unit is the complete turn. Events before the watermark are the common
  * base and never move. Growth blocks from each side are ordered by their first
  * event time; when the same turn number exists on both sides both complete
- * turns are preserved and a log-only conflict marker follows the pair.
+ * turns are preserved and a log-only conflict marker follows the pair. Growth
+ * turns are renumbered consecutively after the base, as the Session log
+ * requires, so a conflicting pair occupies two adjacent turn numbers.
  * @module @claude2dsh/core
  */
 import type { SynthesizedSessionEvent } from './dsh-events.ts'
@@ -99,6 +101,15 @@ function splitClaudeTail(events: readonly SynthesizedSessionEvent[]): MergeTurnG
   return turns
 }
 
+/** Highest turn number opened in `events`, or 0 when none is. */
+function lastTurnNumber(events: readonly SynthesizedSessionEvent[]): number {
+  let last = 0
+  for (const event of events) {
+    if (event.type === 'turn/start' && typeof event.data.turn === 'number' && event.data.turn > last) last = event.data.turn
+  }
+  return last
+}
+
 /** @param time - marker time; conflicts are placed at the earliest side time. */
 function conflictMarker(turn: number, time: number): SynthesizedSessionEvent {
   return {
@@ -157,24 +168,40 @@ export function planTurnMerge(dshEvents: readonly SynthesizedSessionEvent[], bou
   }
   blocks.sort((a, b) => a.time - b.time || (a.kind === 'dsh-oob' ? 1 : 0) - (b.kind === 'dsh-oob' ? 1 : 0))
 
-  const oldToNew = new Map<number, number>()
-  for (const event of dshGrowth) oldToNew.set(event.seq, boundary + oldToNew.size)
-  // Claude tail events already carry boundary-relative seq values.
-  const seenClaude = new Set<number>()
-  for (const event of claudeTail) {
-    if (event.seq >= boundary && !oldToNew.has(event.seq) && !seenClaude.has(event.seq)) {
-      oldToNew.set(event.seq, boundary + oldToNew.size)
-      seenClaude.add(event.seq)
+  // Both growth sides number their events from the boundary, so a source
+  // reference is resolved against the side that produced the citing event.
+  const claudeEvents = new Set<SynthesizedSessionEvent>(claudeTail)
+  const claudeToNew = new Map<number, number>()
+  const dshToNew = new Map<number, number>()
+  let seq = base.length
+  for (const block of blocks) {
+    for (const raw of block.events) {
+      if (raw.seq >= 0) {
+        const sideMap = claudeEvents.has(raw) ? claudeToNew : dshToNew
+        sideMap.set(raw.seq, seq)
+      }
+      seq += 1
     }
   }
 
+  // Session format 4 requires turn numbers to open consecutively, so growth
+  // turns are renumbered after the base in merged order; a conflict keeps
+  // both versions as two consecutive turns.
+  let nextTurn = lastTurnNumber(base) + 1
+  let currentTurn: number | undefined
   const merged: SynthesizedSessionEvent[] = [...base]
-  let seq = merged.length
+  seq = merged.length
   for (const block of blocks) {
     for (const raw of block.events) {
       const event: SynthesizedSessionEvent = { ...raw, seq }
+      if (raw.type === 'turn/start') currentTurn = nextTurn++
+      if (currentTurn !== undefined && typeof raw.data.turn === 'number') {
+        event.data = { ...raw.data, turn: currentTurn }
+      }
+      if (raw.type === 'turn/end') currentTurn = undefined
       if (event.sourceEventSeqs !== undefined) {
-        event.sourceEventSeqs = event.sourceEventSeqs.map((source) => oldToNew.get(source) ?? source)
+        const sideMap = claudeEvents.has(raw) ? claudeToNew : dshToNew
+        event.sourceEventSeqs = event.sourceEventSeqs.map((source) => source < boundary ? source : sideMap.get(source) ?? source)
       }
       merged.push(event)
       seq += 1

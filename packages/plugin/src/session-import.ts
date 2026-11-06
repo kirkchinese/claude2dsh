@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
 import { SUBAGENT_DESCRIPTOR_VERSION } from '@deepseek-ai/dsh-subagent'
 import { synthesizeDshSession, tailSessionEvents } from '@claude2dsh/core'
 import { discoverClaudeCodeSessions, readClaudeSession } from '@claude2dsh/adapter-claude-code'
@@ -144,7 +144,7 @@ export async function importClaudeSessions(ctx: Context, args: SessionImportArgs
         continue
       }
 
-      const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION })
+      const synthesized = synthesizeDshSession(parsed.session, { subagentDescriptorVersion: SUBAGENT_DESCRIPTOR_VERSION, sessionFormatVersion: SESSION_FORMAT_VERSION })
       const imageEntries = buildImageMapEntries(parsed.session, synthesized.events)
       const sidecarReferenced = findSidecarReferences(parsed.session, sourcePath).length
       const sidecarFields = sidecarReferenced > 0 ? { sidecarReferenced } : {}

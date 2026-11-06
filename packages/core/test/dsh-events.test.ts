@@ -126,3 +126,61 @@ test('omitting the descriptor version emits no subagent descriptor', () => {
   const synth = synthesizeDshSession(session)
   assert.equal(synth.events.find((event) => event.type === 'subagent/descriptor'), undefined)
 })
+
+function toolSession(): NormalizedSession {
+  return {
+    id: 'fmt',
+    source: { tool: 'claude-code', path: '/tmp/fmt.jsonl', sessionId: 'fmt' },
+    createdAt: 1000,
+    turns: [{
+      number: 1,
+      prompt: 'run',
+      timestamp: 1000,
+      steps: [{
+        number: 1,
+        timestamp: 1100,
+        content: [
+          { type: 'tool-call', id: 'call_ok', name: 'Bash', arguments: {} },
+          { type: 'tool-call', id: 'call_lost', name: 'Read', arguments: {} },
+        ],
+        toolCalls: [{ id: 'call_ok', name: 'Bash', arguments: {} }, { id: 'call_lost', name: 'Read', arguments: {} }],
+        toolResults: [{ toolCallId: 'call_ok', content: [{ type: 'text', text: 'boom' }], isError: true, timestamp: 1200 }],
+      }],
+    }],
+  }
+}
+
+test('format 3 (default) wraps tool results in a user-role tool-result block', () => {
+  const results = synthesizeDshSession(toolSession()).events.filter((event) => event.type === 'tool/result')
+  assert.equal(results.length, 2)
+  assert.deepEqual(results[0]?.data.message, {
+    id: 'claude2dsh:fmt:r1:1:call_ok',
+    role: 'user',
+    content: [{ type: 'tool-result', toolCallId: 'call_ok', content: [{ type: 'text', text: 'boom' }], isError: true }],
+    source: { kind: 'tool', callId: 'call_ok' },
+  })
+})
+
+test('format 4 writes tool-role results with direct content for real and synthesized results', () => {
+  const results = synthesizeDshSession(toolSession(), { sessionFormatVersion: 4 }).events.filter((event) => event.type === 'tool/result')
+  assert.equal(results.length, 2)
+  assert.deepEqual(results[0]?.data.message, {
+    id: 'claude2dsh:fmt:r1:1:call_ok',
+    role: 'tool',
+    toolCallId: 'call_ok',
+    content: [{ type: 'text', text: 'boom' }],
+    isError: true,
+    source: { kind: 'tool', callId: 'call_ok' },
+  })
+  assert.deepEqual(results[1]?.data.message, {
+    id: 'claude2dsh:fmt:t1:1:call_lost',
+    role: 'tool',
+    toolCallId: 'call_lost',
+    content: [],
+    source: { kind: 'tool', callId: 'call_lost' },
+  })
+  for (const result of results) {
+    assert.equal(result.surfaceOp, 'append')
+    assert.equal(result.sourceEventSeqs?.length, 1)
+  }
+})

@@ -15,7 +15,7 @@ interface AgentLike {
   readonly id: string
   readonly options: { readonly provider?: string; readonly model?: string }
   readonly session: {
-    append(type: string, data: Record<string, unknown>, opts?: { surfaceOp?: { op: 'replace'; start: number; end: number }; sourceEventSeqs?: number[] }): void
+    append(type: string, data: Record<string, unknown>, opts?: { surfaceOp?: { op: 'replace'; startSeq: number; endSeq: number }; sourceEventSeqs?: number[] }): void
   }
 }
 
@@ -76,7 +76,7 @@ export function registerImageReprojection(ctx: Context): void {
           content,
           source: { kind: 'user' },
         }, {
-          surfaceOp: { op: 'replace', start: entry.seq, end: entry.seq },
+          surfaceOp: { op: 'replace', startSeq: entry.seq, endSeq: entry.seq },
           sourceEventSeqs: [entry.seq],
         })
         updated.push({ ...entry, mode: desired })
