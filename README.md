@@ -28,11 +28,13 @@ From this checkout:
 ```sh
 pnpm install
 pnpm -r build
-dsh plugin --profile web add ./packages/plugin
+dsh plugin --profile web add ./packages/plugin/.local
 dsh web
 ```
 
-Then open **Settings → DSH2Claude**.
+`pnpm -r build` also writes `packages/plugin/.local`, a self-contained package
+that bundles the workspace packages so the installer does not see `workspace:`
+dependency protocols. Then open **Settings → DSH2Claude**.
 
 Once published, the equivalent is:
 

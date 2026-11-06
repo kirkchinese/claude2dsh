@@ -28,11 +28,11 @@
 ```sh
 pnpm install
 pnpm -r build
-dsh plugin --profile web add ./packages/plugin
+dsh plugin --profile web add ./packages/plugin/.local
 dsh web
 ```
 
-然后打开 **设置 → DSH2Claude**。
+`pnpm -r build` 还会生成 `packages/plugin/.local`：这是一个自包含包，会把 workspace 内的依赖打进 bundle，安装器不会再遇到 `workspace:` 协议。然后打开 **设置 → DSH2Claude**。
 
 发布后的等价命令：
 

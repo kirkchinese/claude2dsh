@@ -27,7 +27,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsdown",
+    "build": "tsc -p tsconfig.json && tsdown && tsdown -c tsdown.server.config.ts && node scripts/build-local.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
     "test": "node --test test/*.test.ts",
     "clean": "rm -rf lib"

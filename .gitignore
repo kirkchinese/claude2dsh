@@ -20,3 +20,6 @@ AGENTS_.md
 # local acceptance lab and npm cache scratch (never published)
 /.lab/
 /.npm-cache/
+
+# local install package
+.local/
