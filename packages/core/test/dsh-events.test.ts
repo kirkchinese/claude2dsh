@@ -184,3 +184,25 @@ test('format 4 writes tool-role results with direct content for real and synthes
     assert.equal(result.sourceEventSeqs?.length, 1)
   }
 })
+
+test('the first step opens with an empty system head in the target format', () => {
+  for (const [formatVersion, source] of [[3, { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt' }], [4, { kind: 'system-prompt' }]] as const) {
+    const events = synthesizeDshSession(toolSession(), { sessionFormatVersion: formatVersion }).events
+    assert.deepEqual(events.slice(0, 4).map((event) => event.type), ['turn/start', 'step/start', 'system/message', 'user/message'])
+    const head = events[2]
+    assert.equal(head?.surfaceOp, 'append')
+    assert.deepEqual(head?.data, { turn: 1, step: 1, message: { id: 'claude2dsh:fmt:s1:1', role: 'system', content: [], source } })
+    assert.equal(events.filter((event) => event.type === 'system/message').length, 1, 'only the first turn carries the head')
+  }
+})
+
+test('a prompt-only first turn gets a step so the system head has an open step', () => {
+  const session: NormalizedSession = {
+    id: 'p',
+    source: { tool: 'claude-code', path: '/tmp/p.jsonl', sessionId: 'p' },
+    createdAt: 1,
+    turns: [{ number: 1, prompt: 'hi', timestamp: 1, steps: [] }],
+  }
+  const events = synthesizeDshSession(session, { sessionFormatVersion: 4 }).events
+  assert.deepEqual(events.map((event) => event.type), ['turn/start', 'step/start', 'system/message', 'user/message', 'step/end', 'turn/end'])
+})

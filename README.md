@@ -175,6 +175,13 @@ Both can execute work after the first import. They stay opt-in so the user sees 
 
 </details>
 
+<details>
+<summary><strong>A resumed imported session fails with "system/message requires a protected first surface head".</strong></summary>
+
+Sessions imported by 0.3.0 or earlier have no system-prompt head, so the first resumed step wrote its system prompt behind the history and DSH refuses the log on the next load. Current releases import with the head. To repair sessions that are already imported, close them in DSH and run `node scripts/repair-imported-sessions.mjs` from a checkout (dry run), then again with `--apply`. Each repaired log is checked with the installed DSH format catalog before it is written, and the original is kept under `$DSH_HOME/claude2dsh/repair-backups/`.
+
+</details>
+
 ## Sibling project
 
 Claude2DSH is part of a small family of DSH plugins by the same author for people who work across several agent tools:

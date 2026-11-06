@@ -175,6 +175,13 @@ Claude2DSH 把首次迁移与安全关键默认值放在同一个设置页：
 
 </details>
 
+<details>
+<summary><strong>恢复导入的会话后报错 "system/message requires a protected first surface head"？</strong></summary>
+
+0.3.0 及更早版本导入的会话没有系统提示头节点，首次恢复时系统提示被追加到历史之后，DSH 下次加载即拒绝该日志。当前版本导入时会写入头节点。修复已导入的会话：先在 DSH 中关闭它们，在仓库中运行 `node scripts/repair-imported-sessions.mjs`（预演），确认后加 `--apply`。每个修复后的日志在写入前都会用已安装 DSH 的格式目录校验，原文件备份在 `$DSH_HOME/claude2dsh/repair-backups/`。
+
+</details>
+
 ## 兄弟项目
 
 Claude2DSH 与同作者的另一款 DSH 插件面向同一群人——需要在多个 agent 工具之间工作的人：

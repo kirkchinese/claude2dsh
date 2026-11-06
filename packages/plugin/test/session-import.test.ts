@@ -85,7 +85,8 @@ test('same-turn edits with interleaved tool results are treated as conflict when
   const targetId = `claude-${sessionId}`
   live.sessionPersistence.seed(
     fakeHeader(targetId, { createdAt: 0 }),
-    Array.from({ length: 10 }, (_, seq) => ({ type: 'turn/end', seq, time: 1, data: { turn: 1, reason: { kind: 'completed' } } })) as never[],
+    // Longer than the imported log, so the DSH side has grown past the import watermark.
+    Array.from({ length: 20 }, (_, seq) => ({ type: 'turn/end', seq, time: 1, data: { turn: 1, reason: { kind: 'completed' } } })) as never[],
   )
   const report = await importClaudeSessions(live as unknown as Context, { path: file }, home)
   assert.equal(report.items[0]?.status, 'conflict')

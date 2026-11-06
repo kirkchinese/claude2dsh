@@ -65,6 +65,39 @@ export interface SynthesizeOptions {
 /** First Session log format whose `tool/result` events carry a tool-role message. */
 export const TOOL_ROLE_RESULT_FORMAT_VERSION = 4
 
+/**
+ * Empty system-prompt head placed as the first surface node of turn 1, step 1.
+ *
+ * DSH treats the first surface `system/message` as the protected system head:
+ * the agent loop replaces that node with the live prompt on resume and only
+ * appends a system message to an empty surface. A Claude transcript has no
+ * system prompt, so without this placeholder the first resumed step appends a
+ * `system/message` behind the imported history and the stored log no longer
+ * restores ("system/message requires a protected first surface head").
+ * Empty content renders no model message, so the request prefix is unchanged.
+ * Format 4 attributes it to `system-prompt`; format 3 to the system-prompt plugin.
+ */
+function systemHeadEvent(sessionId: string, seq: number, time: number, turn: number, step: number, formatVersion: number): SynthesizedSessionEvent {
+  return {
+    type: 'system/message',
+    seq,
+    time,
+    data: {
+      turn,
+      step,
+      message: {
+        id: mid(sessionId, 's', turn, step),
+        role: 'system',
+        content: [],
+        source: formatVersion >= TOOL_ROLE_RESULT_FORMAT_VERSION
+          ? { kind: 'system-prompt' }
+          : { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt' },
+      },
+    },
+    surfaceOp: 'append',
+  }
+}
+
 /** Upper bound mirroring the shipped title service default (`maxTitleBytes: 80`). */
 export const MAX_TITLE_BYTES = 80
 
@@ -261,6 +294,7 @@ function pushToolResult(
 export function synthesizeDshSession(input: NormalizedSession, options: SynthesizeOptions = {}): SynthesizedSession {
   const events: SynthesizedSessionEvent[] = []
   const stats: SynthesizeStats = { turns: 0, steps: 0, messages: 0, toolCalls: 0, toolResults: 0, synthesizedToolResults: 0 }
+  const formatVersion = options.sessionFormatVersion ?? 3
 
   if (input.origin === 'subagent' && options.subagentDescriptorVersion !== undefined) {
     const firstPrompt = input.turns[0]?.prompt ?? 'Claude subagent'
@@ -278,7 +312,26 @@ export function synthesizeDshSession(input: NormalizedSession, options: Synthesi
     const turnTime = turn.timestamp ?? input.createdAt
     events.push(event('turn/start', events.length, turnTime, { turn: turn.number }))
 
-    if (turn.steps.length === 0) {
+    const needsHead = stats.turns === 1
+    if (turn.steps.length === 0 && needsHead) {
+      // The system head needs an open step; a prompt-only first turn gets one.
+      events.push(event('step/start', events.length, turnTime, { turn: turn.number, step: 1 }))
+      events.push(systemHeadEvent(input.id, events.length, turnTime, turn.number, 1, formatVersion))
+      events.push({
+        type: 'user/message',
+        seq: events.length,
+        time: turnTime,
+        data: {
+          id: mid(input.id, 'u', turn.number, 0),
+          role: 'user',
+          content: turn.promptBlocks !== undefined ? turn.promptBlocks.map((block) => renderBlock(block)) : [{ type: 'text', text: turn.prompt }],
+          source: { kind: 'user' },
+        },
+        surfaceOp: 'append',
+      })
+      events.push(event('step/end', events.length, turnTime, { turn: turn.number, step: 1 }))
+      stats.messages += 1
+    } else if (turn.steps.length === 0) {
       const seq = events.length
       events.push({
         type: 'user/message',
@@ -296,6 +349,7 @@ export function synthesizeDshSession(input: NormalizedSession, options: Synthesi
     } else {
       for (const step of turn.steps) {
         events.push(event('step/start', events.length, step.timestamp ?? turnTime, { turn: turn.number, step: step.number }))
+        if (needsHead && step === turn.steps[0]) events.push(systemHeadEvent(input.id, events.length, turnTime, turn.number, step.number, formatVersion))
         if (step.number === 1) {
           const seq = events.length
           events.push({
@@ -312,7 +366,7 @@ export function synthesizeDshSession(input: NormalizedSession, options: Synthesi
           })
           stats.messages += 1
         }
-        synthesizeStep(events, input.id, input.createdAt, step, turn.number, stats, options.sessionFormatVersion ?? 3)
+        synthesizeStep(events, input.id, input.createdAt, step, turn.number, stats, formatVersion)
         events.push(event('step/end', events.length, step.timestamp ?? turnTime, { turn: turn.number, step: step.number }))
       }
     }
