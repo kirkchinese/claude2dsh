@@ -16,6 +16,7 @@ Plugins straight from the internet, and Fill with AI fixes after a test with a r
 
 ### Fixed
 
+- **Discover lists only the harnesses' folders.** It no longer also searches the folder DSH was started from, which listed unrelated folders (and was slow when DSH started in the home folder). A workspace's own `.claude/` is still read for its sessions.
 - **The first questions come right away.** The creation-mode agent now asks its questions from the brief alone, before reading any files. In the test the wait fell from almost five minutes to a few seconds.
 - **Fewer approvals.** The creation session starts in `~/dsh-adapters`, so writing the adapter's source no longer asks for approval in Workspace Write mode. Plugin Manager actions still ask, as DSH requires, unless the session runs with Full access.
 - **The agent reports when it is done.** Once `harness_verify_port` confirms the adapter, the agent sends its final report at once instead of waiting for optional reviews.

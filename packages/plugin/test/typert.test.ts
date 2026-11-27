@@ -161,10 +161,11 @@ describe('harnessCompat Remote namespace', () => {
     expect(isWorkbenchOff(await call('overview').catch((error: unknown) => error))).toBe(false)
     expect(isWorkbenchOff(new Error('network down'))).toBe(false)
     expect(isWorkbenchOff(new Error('client api: harnessCompat/overview failed: transport failure for /api/harnessCompat/overview: HTTP 502'))).toBe(false)
-    // The notice is worded in both languages.
+    // The notice names the row as Plugins shows it, in both languages.
     for (const language of ['en', 'zh']) {
       const strings = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'src', 'client', 'locale', `${language}.json`), 'utf8')) as Record<string, string>
-      expect(strings['workbenchOff']).toMatch(/workbench/u)
+      const row = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'locale', 'workbench', `${language}.json`), 'utf8')) as { meta: { title: string } }
+      expect(strings['workbenchOff']).toContain(row.meta.title)
     }
   })
 

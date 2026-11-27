@@ -16,11 +16,15 @@ export interface HarnessSettings {
   readonly contextBudgetTokens?: number
 }
 
-/** Default roots: common harness caches plus the current workspace. */
+/**
+ * Default roots: the folders where the harnesses keep their plugins and
+ * settings. Not the folder DSH was started from: that is arbitrary (often the
+ * home folder), and a workspace's own `.claude/` is read per session instead.
+ */
 export function defaultSettings(): HarnessSettings {
   return {
     schemaVersion: 1,
-    discoveryRoots: [...defaultDiscoveryRoots(), resolve(process.cwd())],
+    discoveryRoots: defaultDiscoveryRoots(),
     autoDiscover: true,
   }
 }
