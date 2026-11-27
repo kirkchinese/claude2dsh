@@ -146,7 +146,10 @@ describe('harnessCompat Remote namespace', () => {
 
   it('tells a call the workbench row cannot answer (it is off) from an ordinary failure', async () => {
     const failing = (error: unknown) => ({ overview: () => Promise.resolve({ ok: false, error }), settings: () => Promise.reject(error as Error) })
-    // What the browser's Remote namespace answers while no Host service serves harnessCompat.
+    // What the browser's Remote namespace answers while no Host service serves harnessCompat (as DSH 0.2.2-rc.3 does).
+    setMountedRemote(failing({ code: 'gateway/internal', message: 'client api: harnessCompat/overview failed: transport failure for /api/harnessCompat/overview: HTTP 404' }))
+    expect(isWorkbenchOff(await call('overview').catch((error: unknown) => error))).toBe(true)
+    // Other gateway answers for an endpoint nothing serves.
     setMountedRemote(failing({ code: 'gateway/invocation-unavailable', message: 'typert gateway: harnessCompat/overview: no active Remote method exports this endpoint' }))
     const off = await call('overview').catch((error: unknown) => error)
     expect(isWorkbenchOff(off)).toBe(true)
@@ -157,6 +160,7 @@ describe('harnessCompat Remote namespace', () => {
     setMountedRemote(failing({ code: 'harness-forge/failed', message: 'the Harness Forge mcp row is off; turn it on in Plugin Manager' }))
     expect(isWorkbenchOff(await call('overview').catch((error: unknown) => error))).toBe(false)
     expect(isWorkbenchOff(new Error('network down'))).toBe(false)
+    expect(isWorkbenchOff(new Error('client api: harnessCompat/overview failed: transport failure for /api/harnessCompat/overview: HTTP 502'))).toBe(false)
     // The notice is worded in both languages.
     for (const language of ['en', 'zh']) {
       const strings = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'src', 'client', 'locale', `${language}.json`), 'utf8')) as Record<string, string>

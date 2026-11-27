@@ -125,7 +125,9 @@ export function isWorkbenchOff(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   const code = (error as { code?: unknown }).code
   if (typeof code === 'string' && NOT_SERVED.has(code)) return true
+  // DSH 0.2.2 answers an endpoint no Host service exports with HTTP 404, which the client reports as a transport failure.
   return /harness-forge-workbench/u.test(error.message)
+    || /\/api\/harnessCompat\/\w+: HTTP 404\b/u.test(error.message)
     || /harnessCompat\/\w+.*(?:no active Remote method|active Service .* is unavailable|has no callable method|definition was withdrawn)/u.test(error.message)
 }
 
