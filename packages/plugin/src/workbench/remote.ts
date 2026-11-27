@@ -414,8 +414,8 @@ export class HarnessRemoteService extends TypertRemoteService {
 
   /**
    * Port one part of a plugin: start a session in DSH's creation mode working
-   * on its task, in the given Workspace (`workspaceId`) or directory (`cwd`),
-   * and record it as the part's port session.
+   * on its task in the adapters directory by default (or the given `workspaceId`
+   * or `cwd`), and record it as the part's port session.
    */
   portGap(request: Record<string, unknown>): Promise<unknown> {
     return this.guard('portGap', async () => {

@@ -7,10 +7,11 @@
  * @module @kirkchinese/harness-forge/porting
  */
 import { randomUUID } from 'node:crypto'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { absolutePath, detectLicense, portBrief, type ForeignComponent, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
+import { ADAPTERS_DIR, absolutePath, detectLicense, portBrief, type ForeignComponent, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
 import { dshService } from '../dsh/host.js'
 import { portPrompt } from './prompt.js'
 
@@ -21,7 +22,7 @@ export const CREATOR_PRESET = 'cordis'
 const FILE_LIMIT = 200
 const SKIPPED_DIRS = new Set(['node_modules', '.git'])
 
-/** Where a creation session runs: a DSH Workspace, or a directory; DSH's default directory when neither. */
+/** Where a creation session runs: a DSH Workspace or an explicit directory, otherwise the adapters directory. */
 export interface PortLocation {
   readonly workspaceId?: string
   readonly cwd?: string
@@ -111,7 +112,9 @@ export async function startCreatorSession(ctx: Context, task: string, location: 
   if (presets?.list !== undefined && (creator === undefined || creator.broken !== undefined)) {
     throw new Error(`creation mode (agent preset "${CREATOR_PRESET}") is ${creator === undefined ? 'not in this DSH profile' : 'unavailable in this DSH profile'}; copy the brief into a session instead`)
   }
-  const where = location.workspaceId !== undefined ? { workspaceId: location.workspaceId } : location.cwd !== undefined ? { cwd: location.cwd } : {}
+  const cwd = location.cwd ?? join(homedir(), ADAPTERS_DIR)
+  if (location.workspaceId === undefined && location.cwd === undefined) mkdirSync(cwd, { recursive: true })
+  const where = location.workspaceId !== undefined ? { workspaceId: location.workspaceId } : { cwd }
   const { sessionId } = await controller.create({ ...where, agentPreset: CREATOR_PRESET })
   // Named before the task is sent, so the sidebar shows the brief's heading rather than the protocol's first line. A title the host refuses only leaves DSH's own.
   if (title.length > 0) await controller.rename?.({ sessionId, title }).catch(() => undefined)

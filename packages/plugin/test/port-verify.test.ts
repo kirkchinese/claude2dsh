@@ -37,7 +37,7 @@ describe('the port prompt', () => {
     expect(prompt).toContain('Use only the brief: do not call tools, inspect files or the runtime, or plan the implementation before the answer')
     expect(prompt).toContain('Now read the original files and load the `dsh-doc` skill')
     expect(prompt).toContain('find and read the installed dsh-doc references directly')
-    expect(prompt).toContain('`~/dsh-adapters/dsh-adapter-claude-hud-statusline`, because it is outside every workspace')
+    expect(prompt).toContain('`~/dsh-adapters/dsh-adapter-claude-hud-statusline`, under the creation session\'s default working directory')
     expect(prompt).toContain('"Questions for the user" in the brief')
     expect(prompt).toMatch(/Never ask what you can look up/u)
     expect(prompt).toContain('Write no file before the answer')
@@ -47,7 +47,8 @@ describe('the port prompt', () => {
     expect(prompt).toContain('`plugin_manager` `install_bundle`')
     expect(prompt).toContain('reusing the original\'s code')
     expect(prompt).toContain(`\`${VERIFY_TOOL}\` with \`{"pluginId":"claude-code:claude-hud","componentId":"claude-code:claude-hud:ui:statusline"}\` answers \`"covered": true\``)
-    expect(prompt).toMatch(/Only after 3 passed/u)
+    expect(prompt).toContain('Report immediately when step 3 passes.')
+    expect(prompt).toContain('Do not start or wait for optional reviews before sending the final report; give the result first, then mention any review still running.')
     expect(prompt).toMatch(/say exactly what blocks it/u)
   })
 

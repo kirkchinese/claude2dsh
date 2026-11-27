@@ -9,10 +9,12 @@ Harness Forge does not write adapters itself. It **describes the gap** and hands
 ## How it goes
 
 1. In **Gaps**, press **Fill with AI** next to a part. Harness Forge writes the task, starts a new creation-mode session with it as the first message, and opens that conversation. **View task** shows the same task first, if you want to read it.
-2. **The agent asks once.** Before it writes anything, it asks a few short questions in one message, each with a default: where to keep the adapter's source (by default `~/dsh-adapters/dsh-adapter-<plugin>-<part>`, outside every workspace and the original plugin, so neither a cleanup nor an update touches it), and anything this part leaves open, for example where a status line should show. Reply "ok" to take the defaults. It talks in the language of your DSH interface.
+2. **The agent asks once.** Before it writes anything, it asks a few short questions in one message, each with a default: where to keep the adapter's source (by default `~/dsh-adapters/dsh-adapter-<plugin>-<part>`, under the creation session's working directory, separate from the original plugin), and anything this part leaves open, for example where a status line should show. Reply "ok" to take the defaults. It talks in the language of your DSH interface.
 3. **It builds on its own.** It reads the original plugin's files, writes the adapter, reusing the original's code where it can, installs it as a **local plugin** in your current profile and enables it.
 4. **It checks before it says done.** It confirms the adapter loaded without errors, tries the behaviour the task names, and calls Harness Forge's `harness_verify_port` tool. Only when that tool reports the part as covered does it report done, with what it saw. Otherwise it fixes and checks again, or says exactly what blocks it.
 5. Publishing is up to you. Nothing is published unless you ask, and then only under your own npm scope.
+
+In **Workspace Write**, the agent can write under `~/dsh-adapters` without approval, but Plugin Manager actions still ask each time; choosing **Full access** for that session avoids those prompts.
 
 ![The Gaps screen: a status line part being ported, with In progress and Open conversation](../assets/gaps.en.jpg)
 

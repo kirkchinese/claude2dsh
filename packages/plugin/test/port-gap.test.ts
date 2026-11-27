@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { assess, scanPlugin } from '@kirkchinese/harness-forge-core'
 import { CREATOR_PRESET, briefFor, briefTitle, partFiles, startCreatorSession } from '../src/porting/port-gap.js'
 import { startPorter } from '../src/porting/row.js'
@@ -61,9 +61,22 @@ describe('porting a gap', () => {
     expect(calls.prompt).toEqual([{ requestId: expect.any(String), sessionId: 'session-1', mode: 'queue', content: [{ type: 'text', text: 'the brief' }] }])
   })
 
+  it('creates only the default adapters parent before starting the creation session', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hf-creator-home-'))
+    roots.push(home)
+    vi.stubEnv(process.platform === 'win32' ? 'USERPROFILE' : 'HOME', home)
+    try {
+      const { ctx, calls } = host()
+      await startCreatorSession(ctx, 'the brief')
+      const cwd = join(home, 'dsh-adapters')
+      expect(calls.create).toEqual([{ cwd, agentPreset: 'cordis' }])
+      expect(readdirSync(cwd)).toEqual([])
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it('names the session after the brief heading, without its Markdown marker', async () => {
     const { ctx, calls } = host()
-    await startCreatorSession(ctx, '# Port "statusline" of claude-hud to DSH\n\nBody.')
+    await startCreatorSession(ctx, '# Port "statusline" of claude-hud to DSH\n\nBody.', { cwd: root })
     expect(calls.rename).toEqual([{ sessionId: 'session-1', title: 'Port "statusline" of claude-hud to DSH' }])
     expect(briefTitle('no heading\nmore')).toBe('no heading')
   })

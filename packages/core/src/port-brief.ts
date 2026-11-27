@@ -31,13 +31,12 @@ export function adapterPackageName(plugin: Pick<ForeignPlugin, 'name'>, componen
   return `dsh-adapter-${part === pluginName || part.length === 0 ? pluginName : `${pluginName}-${part}`}`
 }
 
-/**
- * Where the creator suggests authoring the adapter, as the user would type it:
- * outside every workspace and the original plugin, so it survives both and the
- * local install keeps pointing at it.
- */
+/** Directory under the user's home where creation sessions author local adapters by default. */
+export const ADAPTERS_DIR = 'dsh-adapters'
+
+/** Where the creator suggests authoring the adapter, as the user would type it. */
 export function defaultAdapterDir(packageName: string): string {
-  return `~/dsh-adapters/${packageName}`
+  return `~/${ADAPTERS_DIR}/${packageName}`
 }
 
 /** The gaps a brief is about: the component's own, without license and version notes. */
