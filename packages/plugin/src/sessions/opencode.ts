@@ -17,16 +17,8 @@ import type {
   NormalizedTurn,
 } from '@kirkchinese/harness-forge-core'
 import { synthesizeDshSession } from '@kirkchinese/harness-forge-core'
-import { dshService } from '../dsh/host.js'
+import { persistImported, type PersistedSession } from './persist.js'
 
-interface PersistenceHandle {
-  append(events: readonly unknown[]): Promise<void>
-  flush(): Promise<void>
-  close(): Promise<void>
-}
-interface SessionPersistence {
-  create(header: Record<string, unknown>): Promise<PersistenceHandle>
-}
 interface Database {
   prepare(sql: string): { all(...params: unknown[]): unknown[]; get(...params: unknown[]): unknown }
   close(): void
@@ -54,8 +46,7 @@ export interface OpenCodeSessionCandidate {
   readonly cwd?: string
   readonly createdAt?: number
 }
-export interface OpenCodeImportReport {
-  readonly id: string
+export interface OpenCodeImportReport extends PersistedSession {
   readonly sourcePath: string
   readonly title?: string
   readonly turns: number
@@ -125,6 +116,11 @@ export async function readOpenCodeSession(
       }
       return step
     }
+    // Text after a tool call opens the next step: in one step it would part the call from its result.
+    const bodyStep = (at?: number): MutableStep => {
+      if (step !== undefined && step.toolCalls.length > 0) step = undefined
+      return ensureStep(at)
+    }
     for (const message of messages) {
       const data = parseRecord(message['data'])
       if (data === undefined) continue
@@ -142,12 +138,12 @@ export async function readOpenCodeSession(
         if (part === undefined) continue
         if (part['type'] === 'text') {
           const text = stringField(part['text'])
-          if (text !== undefined) ensureStep(created).content.push({ type: 'text', text })
+          if (text !== undefined) bodyStep(created).content.push({ type: 'text', text })
           continue
         }
         if (part['type'] === 'reasoning') {
           const text = stringField(part['text'])
-          if (text !== undefined) ensureStep(created).content.push({ type: 'reasoning', text })
+          if (text !== undefined) bodyStep(created).content.push({ type: 'reasoning', text })
           continue
         }
         if (part['type'] !== 'tool') continue
@@ -176,7 +172,7 @@ export async function readOpenCodeSession(
     const createdAt = numberField(row['time_created']) ?? 0
     return {
       session: {
-        id: targetId ?? sourceId,
+        id: targetId ?? openCodeSessionId(sourceId),
         source: { tool: 'opencode', path, sessionId: sourceId },
         createdAt,
         ...(cwd !== undefined ? { cwd } : {}),
@@ -190,6 +186,15 @@ export async function readOpenCodeSession(
   }
 }
 
+/**
+ * The DSH id of an imported OpenCode session. Prefixed, so it never equals the OpenCode id: a session under the
+ * source's own id reads as native to other importers (dsh-chat-import hides those sources). Imports by earlier
+ * versions used the bare id; they are still found and reused.
+ */
+export function openCodeSessionId(sourceId: string): string {
+  return `opencode-${sourceId}`
+}
+
 /** Import one OpenCode session into DSH session persistence. */
 export async function importOpenCodeSession(
   ctx: Context,
@@ -197,30 +202,13 @@ export async function importOpenCodeSession(
   sourceId: string,
   options: { readonly targetId?: string } = {},
 ): Promise<OpenCodeImportReport> {
-  const persistence = dshService(ctx, 'sessionPersistence') as SessionPersistence | undefined
-  if (persistence === undefined) throw new Error('sessionPersistence service is not available')
   const parsed = await readOpenCodeSession(path, sourceId, options.targetId)
   if (parsed.session.turns.length === 0) throw new Error(`nothing to import from OpenCode session ${sourceId}: it has no conversation`)
   const synthesized = synthesizeDshSession(parsed.session)
   const events = synthesized.events
-  const handle = await persistence.create({
-    version: 4,
-    id: synthesized.meta.id,
-    createdAt: synthesized.meta.createdAt,
-    isSeeded: false,
-    ...(synthesized.meta.cwd !== undefined ? { cwd: synthesized.meta.cwd } : {}),
-    delegationDepth: synthesized.meta.delegationDepth,
-    ...(synthesized.meta.origin !== undefined ? { origin: synthesized.meta.origin } : {}),
-    ...(synthesized.meta.parentSession !== undefined ? { parentSession: synthesized.meta.parentSession } : {}),
-  })
-  try {
-    await handle.append(events)
-    await handle.flush()
-  } finally {
-    await handle.close()
-  }
+  const persisted = await persistImported(ctx, synthesized, options.targetId === undefined ? [sourceId] : [])
   return {
-    id: synthesized.meta.id,
+    ...persisted,
     sourcePath: path,
     ...(parsed.title !== undefined ? { title: parsed.title } : {}),
     turns: synthesized.stats.turns,
@@ -265,6 +253,10 @@ function readOpenCodeV2(db: Database, path: string, sourceId: string, targetId?:
     }
     return step
   }
+  const bodyStep = (at?: number): MutableStep => {
+    if (step !== undefined && step.toolCalls.length > 0) step = undefined
+    return ensureStep(at)
+  }
   for (const message of messages) {
     const data = parseRecord(message['data'])
     if (data === undefined) continue
@@ -282,12 +274,12 @@ function readOpenCodeV2(db: Database, path: string, sourceId: string, targetId?:
       if (block === undefined) continue
       if (block['type'] === 'text') {
         const text = stringField(block['text'])
-        if (text !== undefined) ensureStep(created).content.push({ type: 'text', text })
+        if (text !== undefined) bodyStep(created).content.push({ type: 'text', text })
         continue
       }
       if (block['type'] === 'reasoning') {
         const text = stringField(block['text'])
-        if (text !== undefined) ensureStep(created).content.push({ type: 'reasoning', text })
+        if (text !== undefined) bodyStep(created).content.push({ type: 'reasoning', text })
         continue
       }
       if (block['type'] !== 'tool') continue
@@ -315,7 +307,7 @@ function readOpenCodeV2(db: Database, path: string, sourceId: string, targetId?:
   const createdAt = numberField(row['time_created']) ?? 0
   return {
     session: {
-      id: targetId ?? sourceId,
+      id: targetId ?? openCodeSessionId(sourceId),
       source: { tool: 'opencode', path, sessionId: sourceId },
       createdAt,
       ...(cwd !== undefined ? { cwd } : {}),

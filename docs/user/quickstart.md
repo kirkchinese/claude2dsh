@@ -47,11 +47,13 @@ Every part that cannot fully run in DSH, and why. Where an adapter could fill th
 
 | Screen | What it is for |
 |---|---|
-| Import sessions | Import Claude Code, Codex and OpenCode sessions as DSH sessions, then continue them in DSH |
+| Import sessions | Import Claude Code, Codex and OpenCode sessions as DSH sessions and open them at once to continue them in DSH. Importing one again opens the session it became. While [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) is installed, this screen points to its **Import sessions** button in the sidebar instead |
 | Settings | Extra folders to search for plugins, whether to discover automatically, and which CLAUDE.md / AGENTS.md files are added to new sessions |
 | Diagnostics | Rows that failed, parts that failed to mount, the shell hooks run in, Bun, and the Harness Forge, DSH and Node.js versions: what to include in a bug report |
 
 ![A Claude Code session imported into DSH and continued](../assets/continue-session.jpg)
+
+**Works well with dsh-chat-import.** For more sources (40+ agents) and options, install [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import): **Install** on the first-run banner or on the Import sessions screen asks first, then installs it through DSH's plugin manager. Without the plugin manager, run `dsh plugin --profile web add dsh-chat-import`.
 
 ## In a conversation
 

@@ -111,10 +111,11 @@ Harness Forge 是一个 npm 包，包含多个插件行（row）。每一行都�
 
 ## 搭配使用
 
-两个独立的可选 DSH 插件，装了之后 Harness Forge 会配合使用：
+独立的可选 DSH 插件，装了之后 Harness Forge 会配合使用：
 
 - [能力目录](https://github.com/kirkchinese/dsh-capability-catalog)（`@kirkchinese/dsh-capability-catalog`）：导入的 stdio MCP 服务经它的精简索引提供；
-- [Recollect](https://github.com/kirkchinese/DSH-Recollect)（`@kirkchinese/dsh-recollect`）：记忆与指令文件；Harness Forge 的指令文件行会让位给它。
+- [Recollect](https://github.com/kirkchinese/DSH-Recollect)（`@kirkchinese/dsh-recollect`）：记忆与指令文件；Harness Forge 的指令文件行会让位给它；
+- [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import)（`dsh-chat-import`）：把 Claude Code、Codex、OpenCode 等 40 多种智能体的对话导入为可以接着聊的 DSH 会话。Harness Forge 的会话导入会让位给它；首次打开时的提示条或 **更多 → 导入会话** 里的 **安装** 通过 DSH 的插件管理器安装它。
 
 ## 安全
 

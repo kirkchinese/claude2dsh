@@ -24,6 +24,8 @@ export const DSH_SERVICES = {
   approval: '@deepseek-ai/dsh-user-approval',
   capabilityCatalog: '@kirkchinese/dsh-capability-catalog',
   capabilityCatalogServers: '@kirkchinese/dsh-capability-catalog',
+  /** Not DSH's: dsh-chat-import's session import; Harness Forge yields its own to it. */
+  chatImport: 'dsh-chat-import',
   commands: '@deepseek-ai/dsh-commands',
   deepseekAccount: '@deepseek-ai/dsh-deepseek-account',
   llm: '@deepseek-ai/dsh-llm',
@@ -44,6 +46,7 @@ export const DSH_SERVICES = {
   userQuestions: '@deepseek-ai/dsh-user-questions',
   webServer: '@deepseek-ai/dsh-host-webserver',
   workingDirectory: '@deepseek-ai/dsh-working-directory',
+  workspaceRegistry: '@deepseek-ai/dsh-workspace',
 } as const
 
 /** Events listened to with `ctx.on`, by the DSH package that declares them. */

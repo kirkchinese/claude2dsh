@@ -11,7 +11,17 @@ Fill with AI, after a test with a real model on claude-hud's status line.
 - **The first questions come right away.** The creation-mode agent now asks its questions from the brief alone, before reading any files. In the test the wait fell from almost five minutes to a few seconds.
 - **Fewer approvals.** The creation session starts in `~/dsh-adapters`, so writing the adapter's source no longer asks for approval in Workspace Write mode. Plugin Manager actions still ask, as DSH requires, unless the session runs with Full access.
 - **The agent reports when it is done.** Once `harness_verify_port` confirms the adapter, the agent sends its final report at once instead of waiting for optional reviews.
+- **Imported sessions open at once.** An imported session is registered with the running DSH: it shows in the sidebar with its title, under the workspace of its project, and **Open session** works right away instead of failing with `sessions.retain: unknown session` until DSH restarts.
+- **Codex tool output reads as the model saw it.** Output wrapped as `{"output": …, "metadata": …}` imports as its output text.
+- **Imported sessions can be continued.** Assistant text that came after a tool call (Codex, OpenCode) goes into the next step, so the call stays next to its result; before, the first new message in such a session could fail with HTTP 400.
+- **Compressed Codex rollouts.** `rollout-*.jsonl.zst` files (Codex 0.167+) are found and imported.
+- **Importing again opens the session.** Importing a session that was imported before opens that session instead of failing with "already exists".
+- **Codex and OpenCode imports get their own ids** (`codex-…`, `opencode-…`), so other importers no longer take them for native DSH sessions. Sessions imported earlier under the source's id keep working and are reused.
 - **One status line, one gap.** A `statusLine` in `~/.claude/settings.json` that runs a plugin's own script is shown as part of that plugin (for example claude-hud) instead of as a second gap under your own settings, and it is covered when the plugin's part is.
+
+### Added
+
+- **dsh-chat-import is recommended for session import.** The first-run banner and **More → Import sessions** offer [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) (Claude Code, Codex, OpenCode and 40+ other agents) with **Install**, which asks first and installs it through DSH's plugin manager. While it is installed, Harness Forge's own import steps aside and points to its **Import sessions** button in the sidebar.
 
 ## 0.4.0 - 2026-11-27
 

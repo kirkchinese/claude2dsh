@@ -8,17 +8,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { claudeCodeAdapter, synthesizeDshSession, type ClaudeReadOptions, type DiscoveredSession } from '@kirkchinese/harness-forge-core'
-import { dshService } from '../dsh/host.js'
-
-interface PersistenceHandle {
-  append(events: readonly unknown[]): Promise<void>
-  flush(): Promise<void>
-  close(): Promise<void>
-}
-
-interface SessionPersistence {
-  create(header: Record<string, unknown>): Promise<PersistenceHandle>
-}
+import { persistImported, type PersistedSession } from './persist.js'
 
 /** One discoverable Claude Code transcript. */
 export interface SessionCandidate {
@@ -32,8 +22,7 @@ export interface SessionCandidate {
 }
 
 /** Result of one session import. */
-export interface SessionImportReport {
-  readonly id: string
+export interface SessionImportReport extends PersistedSession {
   readonly sourcePath: string
   readonly title?: string
   readonly turns: number
@@ -71,8 +60,6 @@ export async function importClaudeSession(
   sourcePath: string,
   options: { readonly includeSubagents?: boolean; readonly targetId?: string } = {},
 ): Promise<SessionImportReport> {
-  const persistence = dshService(ctx, 'sessionPersistence') as SessionPersistence | undefined
-  if (persistence === undefined) throw new Error('sessionPersistence service is not available')
   const candidate: DiscoveredSession = {
     ref: sourcePath,
     sourceId: sourcePath,
@@ -85,24 +72,9 @@ export async function importClaudeSession(
   if (parsed.session.turns.length === 0) throw new Error(`nothing to import from ${sourcePath}: ${parsed.stats.reasons.join('; ') || 'no conversation in the transcript'}`)
   const synthesized = synthesizeDshSession(parsed.session)
   const events = synthesized.events
-  const handle = await persistence.create({
-    version: 4,
-    id: synthesized.meta.id,
-    createdAt: synthesized.meta.createdAt,
-    isSeeded: false,
-    ...(synthesized.meta.cwd !== undefined ? { cwd: synthesized.meta.cwd } : {}),
-    delegationDepth: synthesized.meta.delegationDepth,
-    ...(synthesized.meta.origin !== undefined ? { origin: synthesized.meta.origin } : {}),
-    ...(synthesized.meta.parentSession !== undefined ? { parentSession: synthesized.meta.parentSession } : {}),
-  })
-  try {
-    await handle.append(events)
-    await handle.flush()
-  } finally {
-    await handle.close()
-  }
+  const persisted = await persistImported(ctx, synthesized)
   return {
-    id: synthesized.meta.id,
+    ...persisted,
     sourcePath,
     ...(parsed.session.title !== undefined ? { title: parsed.session.title } : {}),
     turns: synthesized.stats.turns,

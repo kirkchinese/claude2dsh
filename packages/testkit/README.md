@@ -45,7 +45,7 @@ model requests, events and stderr there.
 | `user-setup` | a `~/.claude` skill loads and its `settings.json` hook runs |
 | `codex-plugin` | a Codex plugin's skill loads |
 | `instructions` | `~/.claude/CLAUDE.md`, `.claude/CLAUDE.md` and an `@import` reach the system prompt; the project `CLAUDE.md` is left to DSH and not added twice |
-| `session-import` | a Claude Code transcript imports through the plugin's Remote API and continues in DSH with its history |
+| `session-import` | a Claude Code transcript imports through the plugin's Remote API, is live at once (opens without a restart) in the workspace of its directory, and continues in DSH with its history |
 | `plugin-install` | a session installs a local bundle (`fixtures/noop-bundle`) with `plugin_manager` `install_bundle`, as Fill with AI's agent does: the call returns, the bundle is applied live (HMR on) and listed enabled. pnpm 11 can finish the first install in the profile and not exit; the check bounds that with a 20 s `idleTimeoutMs` and retries once, as the port prompt tells the agent |
 
 ## Layout

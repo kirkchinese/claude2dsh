@@ -111,10 +111,11 @@ Turning a row off removes what it mounted; the parts it served show as inactive 
 
 ## Works well with
 
-Two separate, optional DSH plugins. Harness Forge uses them when they are installed:
+Separate, optional DSH plugins. Harness Forge uses them when they are installed:
 
 - [Capability catalog](https://github.com/kirkchinese/dsh-capability-catalog) (`@kirkchinese/dsh-capability-catalog`): imported stdio MCP servers go through its compact index.
 - [Recollect](https://github.com/kirkchinese/DSH-Recollect) (`@kirkchinese/dsh-recollect`): memory and instruction files; Harness Forge's Instructions row steps aside for it.
+- [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) (`dsh-chat-import`): imports conversations from Claude Code, Codex, OpenCode and 40+ other agents as DSH sessions you can continue. Harness Forge's session import steps aside for it; **Install** on the first-run banner or under **More → Import sessions** installs it through DSH's plugin manager.
 
 ## Safety
 

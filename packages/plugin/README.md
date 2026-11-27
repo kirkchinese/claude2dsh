@@ -24,6 +24,10 @@ Also: **Import sessions**, **Settings**, **Diagnostics**. The model can use the 
 
 This package installs one DSH plugin row per capability: Harness Forge (required by the others), skills, commands, agents, hooks, MCP servers, Claude Code mods, OpenCode plugins, instructions, sessions, porting and workbench. Each can be switched off in DSH's **Plugins** page without affecting the rest.
 
+## Works well with
+
+[dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) imports conversations from Claude Code, Codex, OpenCode and 40+ other agents as DSH sessions you can continue. While it is installed, Harness Forge's own session import steps aside for it; **Install** under **More → Import sessions** (or on the first-run banner) installs it through DSH's plugin manager.
+
 ## Safety
 
 Migrated hooks, MCP servers and plugin code run with your permissions, as in their original harness. Migrate only plugins you trust.

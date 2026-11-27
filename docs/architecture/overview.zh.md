@@ -38,7 +38,7 @@ packages/
 | `harness-forge-mods` | `./mods` | `src/mods/row.ts` | Claude Code mods 引擎 |
 | `harness-forge-opencode` | `./opencode` | `src/opencode/row.ts` | 在 Bun 中运行的 OpenCode 插件 |
 | `harness-forge-context` | `./context` | `src/context/row.ts` | 把指令文件加进系统提示；让位给 Recollect |
-| `harness-forge-sessions` | `./sessions` | `src/sessions/row.ts` | 会话导入 |
+| `harness-forge-sessions` | `./sessions` | `src/sessions/row.ts` | 会话导入；dsh-chat-import 运行时让位给它 |
 | `harness-forge-porter` | `./porter` | `src/porting/row.ts` | 移植说明与创造模式会话 |
 | `harness-forge-workbench` | `./workbench` | `src/workbench/row.ts` | 工作台页面调用的 Remote 方法（`harnessCompat` 命名空间） |
 
@@ -61,7 +61,7 @@ mcp/         MCP 行：挂载、远程（HTTP/SSE）服务、OAuth、能力目�
 mods/        mods 行：Claude Code mods 引擎
 opencode/    OpenCode 行：Bun 运行时
 context/     上下文行：指令文件
-sessions/    会话行：Claude Code、Codex、OpenCode 会话导入
+sessions/    会话行：Claude Code、Codex、OpenCode 会话导入，登记到运行中的 DSH；dsh-chat-import 运行时让位
 porting/     移植行：移植说明与创造模式会话
 workbench/   工作台行：Remote 服务、总览、设置、适配器覆盖、模型工具
 presets/     ./preset-tool-filter 和 ./preset-fs-search 两个导出

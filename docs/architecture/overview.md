@@ -38,7 +38,7 @@ The plugin package exposes one [Cordis](https://www.npmjs.com/package/@deepseek-
 | `harness-forge-mods` | `./mods` | `src/mods/row.ts` | Claude Code mods engine |
 | `harness-forge-opencode` | `./opencode` | `src/opencode/row.ts` | OpenCode plugins in Bun |
 | `harness-forge-context` | `./context` | `src/context/row.ts` | Instruction files in the system prompt; yields to Recollect |
-| `harness-forge-sessions` | `./sessions` | `src/sessions/row.ts` | Session import |
+| `harness-forge-sessions` | `./sessions` | `src/sessions/row.ts` | Session import; yields to dsh-chat-import when it runs |
 | `harness-forge-porter` | `./porter` | `src/porting/row.ts` | Port briefs and creation-mode sessions |
 | `harness-forge-workbench` | `./workbench` | `src/workbench/row.ts` | The Remote methods (`harnessCompat` namespace) the workbench page calls |
 
@@ -61,7 +61,7 @@ mcp/         mcp row: mounting, remote (HTTP/SSE) servers, OAuth, the capability
 mods/        mods row: the Claude Code mods engine
 opencode/    opencode row: the Bun runtime
 context/     context row: instruction files
-sessions/    sessions row: Claude Code, Codex and OpenCode session import
+sessions/    sessions row: Claude Code, Codex and OpenCode session import, registered with the running DSH; yields to dsh-chat-import
 porting/     porter row: port briefs and creation-mode sessions
 workbench/   workbench row: the Remote service, overview, settings, adapter coverage, model tools
 presets/     the ./preset-tool-filter and ./preset-fs-search exports

@@ -22,6 +22,7 @@ import { waitingParts } from '../forge/projects.js'
 import type { RowApis } from '../forge/contract.js'
 import { forgeVerifyDeps, livePorts, verifyPort } from '../porting/verify-port.js'
 import { stateOf } from '../porting/port-sessions.js'
+import { installChatImport, sessionImportStatus } from '../sessions/chat-import.js'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
@@ -273,6 +274,16 @@ export class HarnessRemoteService extends TypertRemoteService {
     ))
   }
 
+  /** Who imports sessions (`{ provider: 'harness-forge' | 'dsh-chat-import', canInstall, command }`). */
+  sessionImport(): Promise<unknown> {
+    return this.guard('sessionImport', () => sessionImportStatus(this.forge.ctx))
+  }
+
+  /** Install and enable dsh-chat-import through DSH's plugin manager; the browser asks the person first. */
+  installChatImport(): Promise<unknown> {
+    return this.guard('installChatImport', () => installChatImport(this.forge.ctx))
+  }
+
   // --- mod surfaces -------------------------------------------------------------
 
   /**
@@ -453,6 +464,8 @@ export const REMOTE_METHODS: ReadonlyArray<readonly [string, 'unary' | 'stream',
   ['signIn', 'unary', true],
   ['sessions', 'unary', true],
   ['importSession', 'unary', true],
+  ['sessionImport', 'unary', false],
+  ['installChatImport', 'unary', false],
   ['modSurfaces', 'stream', true],
   ['modAct', 'unary', true],
   ['modClose', 'unary', true],

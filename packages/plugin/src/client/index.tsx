@@ -23,6 +23,7 @@ import { DiscoverScreen } from './discover.js'
 import { MigratedScreen, TrustBanners } from './migrated.js'
 import { GapsScreen } from './gaps.js'
 import { DiagnosticsScreen, SessionsScreen, SettingsScreen } from './secondary.js'
+import { ChatImportOffer, useSessionImport } from './chat-import.js'
 
 const NS = 'harnessForge'
 const PANEL_ID = 'harness-forge' as never
@@ -108,6 +109,7 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   const [error, setError] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(false)
   const [introDismissed, setIntroDismissed] = useState(readDismissed)
+  const sessionImport = useSessionImport()
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -159,7 +161,12 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
 
         {!introDismissed && secondary === undefined ? (
           <div className="hf-intro">
-            <p>{t('intro')}</p>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p>{t('intro')}</p>
+              {sessionImport.status?.provider === 'harness-forge'
+                ? <div style={{ marginTop: 10 }}><ChatImportOffer t={t} status={sessionImport.status} reload={sessionImport.reload} /></div>
+                : null}
+            </div>
             <button className="hf-btn" onClick={dismissIntro}>{t('introDismiss')}</button>
           </div>
         ) : null}

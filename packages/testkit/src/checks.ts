@@ -273,11 +273,14 @@ export const checks: readonly Check[] = [
       assert(result?.ok === true, `importSession failed: ${result?.text ?? 'no call'}`)
       const sessionId = /"(?:sessionId|id|targetId)":"([^"]+)"/u.exec(result.text)?.[1]
       assert(sessionId !== undefined, `importSession returned no session id: ${result.text}`)
+      // Registered with the running DSH, so it opens at once (no restart), grouped under its project.
+      assert(result.text.includes('"live":true'), `the imported session is not live in DSH: ${result.text}`)
+      assert(result.text.includes('"workspace":'), `the imported session is not in the workspace of its directory: ${result.text}`)
       // The imported history is what the model sees when the session continues in DSH.
       const resumed = await runSession(sandbox, { name: 'resume', task: 'Continue.', cwd, args: ['--session-id', sessionId], policy: () => undefined })
       const request = firstAgentRequest(resumed)
       assert(requestText(request).includes('IMPORT-MARK-a1b2'), 'the imported conversation did not reach the model')
-      return `imported as ${sessionId} and continued with its history`
+      return `imported as ${sessionId}, live at once in its workspace, and continued with its history`
     },
   },
   {

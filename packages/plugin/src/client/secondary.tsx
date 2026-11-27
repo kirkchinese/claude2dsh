@@ -1,11 +1,13 @@
 /**
- * The pages behind "More": import sessions, settings (with what is added to
- * new sessions, when the Host reports it) and diagnostics.
+ * The pages behind "More": import sessions (or, while dsh-chat-import runs,
+ * where its import is), settings (with what is added to new sessions, when
+ * the Host reports it) and diagnostics.
  * @module @kirkchinese/harness-forge/client
  */
 import { useCallback, useEffect, useState } from 'react'
 import { call } from './typert.js'
 import { fill, harnessName, messageOf, Notice, ROW_TITLE, type Source, type TFn } from './shared.js'
+import { ChatImportOffer, ChatImportProvided, useSessionImport } from './chat-import.js'
 
 interface SessionView {
   readonly path: string
@@ -15,7 +17,19 @@ interface SessionView {
   readonly createdAt?: number
 }
 
-export function SessionsScreen({ t, openSession }: { t: TFn; openSession: (id: string) => void }): JSX.Element {
+export function SessionsScreen({ t, openSession }: { t: TFn; openSession: (id: string) => void }): JSX.Element | null {
+  const { status, reload } = useSessionImport()
+  if (status?.provider === 'dsh-chat-import') return <ChatImportProvided t={t} />
+  return (
+    <div>
+      {status !== undefined ? <div style={{ marginBottom: 16 }}><ChatImportOffer t={t} status={status} reload={reload} /></div> : null}
+      <ForgeSessions t={t} openSession={openSession} />
+    </div>
+  )
+}
+
+/** Harness Forge's own import, while dsh-chat-import is not there. */
+function ForgeSessions({ t, openSession }: { t: TFn; openSession: (id: string) => void }): JSX.Element {
   const [source, setSource] = useState<Source>('claude-code')
   const [sessions, setSessions] = useState<SessionView[] | undefined>(undefined)
   const [busy, setBusy] = useState<string | undefined>(undefined)

@@ -1,6 +1,7 @@
 /**
  * The sessions row: Claude Code, Codex and OpenCode sessions imported into
- * DSH on demand, from the workbench. It holds no listener.
+ * DSH on demand, from the workbench. It holds no listener. While
+ * dsh-chat-import runs, it yields: session import is that plugin's.
  * @module @kirkchinese/harness-forge/sessions
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -10,6 +11,7 @@ import { FORGE_SERVICE, type HarnessForge } from '../forge/service.js'
 import { discoverOpenCodeSessions, importOpenCodeSession } from './opencode.js'
 import { discoverClaudeSessions, importClaudeSession } from './claude.js'
 import { rowEffect } from '../forge/row.js'
+import { chatImportRunning, YIELD_MESSAGE } from './chat-import.js'
 
 export const name = 'harness-forge-sessions'
 export const inject = [FORGE_SERVICE]
@@ -23,11 +25,13 @@ export function apply(ctx: Context): void {
 export function startSessions(ctx: Context, forge: HarnessForge): Disposer {
   const api: SessionsApi = {
     sessions: async (root, source) => {
+      if (chatImportRunning(ctx)) throw new Error(YIELD_MESSAGE)
       if (source === 'codex') return (await discoverCodexSessions(root)).map(session => ({ ...session, source: 'codex' as const }))
       if (source === 'opencode') return (await discoverOpenCodeSessions(root)).map(session => ({ ...session, source: 'opencode' as const }))
       return discoverClaudeSessions(root)
     },
     importSession: (path, targetId, source, sourceId) => {
+      if (chatImportRunning(ctx)) throw new Error(YIELD_MESSAGE)
       const options = targetId === undefined ? {} : { targetId }
       if (source === 'codex') return importCodexSession(ctx, path, options)
       if (source === 'opencode') {

@@ -41,7 +41,7 @@ Harness Forge 不给整个插件打“支持 / 不支持”的标签，而是看
 | 设置 | Claude Code 的 `settings.json` 和 Codex 配置：环境变量传给 hook、MCP 服务和 shell 命令；权限规则约束工具调用；`disableAllHooks` 和 `outputStyle` 生效 |
 | Claude Code mods | 打包后加载进每个会话的引擎，通过兼容层调用宿主 API |
 | OpenCode 插件 | 每个在自己的 Bun 进程里，按 OpenCode 的方式加载；它的 `client` 连接一个由 DSH 会话支撑、与 OpenCode 兼容的服务（见下表） |
-| 会话 | Claude Code、Codex、OpenCode 的会话导入为可以接着聊的 DSH 会话 |
+| 会话 | Claude Code、Codex（包括压缩的 `.jsonl.zst` rollout）、OpenCode 的会话导入为可以立即打开、接着聊的 DSH 会话；装有 [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) 时交给它导入 |
 
 ### Hook 事件
 

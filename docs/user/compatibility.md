@@ -41,7 +41,7 @@ A part served by an installed adapter shows as working, but not as checked until
 | Settings | Claude Code `settings.json` and Codex config: environment variables reach hooks, MCP servers and shell commands; permission rules gate tool calls; `disableAllHooks` and `outputStyle` apply |
 | Claude Code mods | Bundled and loaded into one engine per session, with a compatibility layer for the host API they call |
 | OpenCode plugins | Each in its own Bun process, loaded as OpenCode loads it; its `client` talks to an OpenCode-compatible server backed by DSH sessions (table below) |
-| Sessions | Claude Code, Codex and OpenCode sessions import as DSH sessions you can continue |
+| Sessions | Claude Code, Codex (also compressed `.jsonl.zst` rollouts) and OpenCode sessions import as DSH sessions you can open at once and continue; with [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) installed, import is left to it |
 
 ### Hook events
 

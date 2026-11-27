@@ -31,6 +31,8 @@ const METHODS: ReadonlyArray<readonly [string, 'unary' | 'stream', boolean]> = [
   ['signIn', 'unary', true],
   ['sessions', 'unary', true],
   ['importSession', 'unary', true],
+  ['sessionImport', 'unary', false],
+  ['installChatImport', 'unary', false],
   ['modSurfaces', 'stream', true],
   ['modAct', 'unary', true],
   ['modClose', 'unary', true],

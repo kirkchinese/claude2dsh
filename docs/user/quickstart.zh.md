@@ -47,11 +47,13 @@ dsh plugin --profile web add @kirkchinese/harness-forge
 
 | 页面 | 用途 |
 |---|---|
-| 导入会话 | 把 Claude Code、Codex、OpenCode 的会话导入为 DSH 会话，然后在 DSH 里接着聊 |
+| 导入会话 | 把 Claude Code、Codex、OpenCode 的会话导入为 DSH 会话，导入后可以立即打开，在 DSH 里接着聊。再次导入同一个会话会打开之前导入的那个。装有 [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) 时，这个页面改为指向侧边栏里它的 **导入会话** 按钮 |
 | 设置 | 额外搜索插件的文件夹、是否自动发现，以及哪些 CLAUDE.md / AGENTS.md 文件会加入新会话 |
 | 诊断 | 启动失败的行、挂载失败的部分、hook 使用的 shell、Bun，以及 Harness Forge、DSH 和 Node.js 的版本：报告问题时附上这些 |
 
 ![导入 DSH 后接着聊的 Claude Code 会话](../assets/continue-session.jpg)
+
+**搭配 dsh-chat-import。** 想导入更多来源（40 多种智能体）、需要更多选项，可以安装 [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import)：首次打开时的提示条或导入会话页面上的 **安装** 会先确认，再通过 DSH 的插件管理器安装。没有插件管理器时，运行 `dsh plugin --profile web add dsh-chat-import`。
 
 ## 在对话里使用
 
