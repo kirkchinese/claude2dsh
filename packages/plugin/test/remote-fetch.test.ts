@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { crc32, deflateRawSync, gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -475,8 +475,8 @@ describe('archives', () => {
     mkdirSync(join(checkout, 'plugin/.git'), { recursive: true })
     writeFileSync(join(checkout, 'plugin/a.txt'), 'a')
     writeFileSync(join(checkout, 'shared.txt'), 'shared')
-    execFileSync('ln', ['-s', '../shared.txt', join(checkout, 'plugin/inside')])
-    execFileSync('ln', ['-s', '/etc/hostname', join(checkout, 'plugin/outside')])
+    link('../shared.txt', join(checkout, 'plugin/inside'))
+    link('/etc/hostname', join(checkout, 'plugin/outside'))
     const dest = join(tempRoot(), 'copy')
     expect(copyTree(join(checkout, 'plugin'), dest, checkout).sort()).toEqual(['inside', 'outside'])
     expect(readFileSync(join(dest, 'a.txt'), 'utf8')).toBe('a')
@@ -625,8 +625,8 @@ describe('the extractor refuses what a plugin does not need', () => {
     const checkout = tempRoot()
     mkdirSync(join(checkout, 'real/skills'), { recursive: true })
     writeFileSync(join(checkout, 'real/skills/a.txt'), 'a')
-    execFileSync('ln', ['-s', 'real', join(checkout, 'alias')])
-    execFileSync('ln', ['-s', tmpdir(), join(checkout, 'outside')])
+    link('real', join(checkout, 'alias'), 'dir')
+    link(tmpdir(), join(checkout, 'outside'), 'dir')
     expect(() => copyTree(join(checkout, 'alias'), join(tempRoot(), 'x'), checkout)).toThrow(/link/u)
     expect(() => copyTree(join(checkout, 'outside'), join(tempRoot(), 'x'), checkout)).toThrow(/link/u)
     expect(() => copyTree(join(checkout, 'alias', 'skills'), join(tempRoot(), 'x'), checkout)).toThrow(/through a link/u)
@@ -681,6 +681,12 @@ describe('where git runs and what it may reach for a marketplace', () => {
 })
 
 /** Run with these proxy variables (and no others), then put the environment back. */
+/** A symbolic link, as a junction for a folder on Windows (where folder links may need a privilege). */
+function link(target: string, path: string, kind: 'file' | 'dir' = 'file'): void {
+  if (process.platform === 'win32' && kind === 'dir') symlinkSync(resolve(dirname(path), target), path, 'junction')
+  else symlinkSync(target, path, kind)
+}
+
 async function withProxyEnv<T>(values: Record<string, string>, run: () => Promise<T> | T): Promise<T> {
   const keys = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy']
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]))
@@ -706,7 +712,9 @@ describe('git takes the route Harness Forge chose', () => {
     const { git, calls } = recording()
     const root = tempRoot()
     const fetcher = new RemoteFetcher(root, { ...SYSTEM_DEPS, git, lookup: PUBLIC })
-    await withProxyEnv({ https_proxy: 'http://lower.example:3128', HTTPS_PROXY: 'http://upper.example:3128', no_proxy: 'direct.example', NO_PROXY: 'other.example' }, async () => {
+    // On Windows HTTPS_PROXY and https_proxy are one variable, so only the lowercase spelling is set there.
+    const both = process.platform === 'win32' ? {} : { HTTPS_PROXY: 'http://upper.example:3128', NO_PROXY: 'other.example' }
+    await withProxyEnv({ https_proxy: 'http://lower.example:3128', no_proxy: 'direct.example', ...both }, async () => {
       await fetcher.latest({ kind: 'git', url: 'HTTPS://Proxied.Example/a.git' })
       await fetcher.latest({ kind: 'git', url: 'https://direct.example/a.git' })
     })
@@ -723,7 +731,8 @@ describe('git takes the route Harness Forge chose', () => {
     }
   })
 
-  it('reads the proxy variables in curl\'s order, lowercase first', async () => {
+  // Windows environment names are case-insensitive: there is one variable, and no order between spellings.
+  it.skipIf(process.platform === 'win32')('reads the proxy variables in curl\'s order, lowercase first', async () => {
     await withProxyEnv({ https_proxy: 'http://lower.example:1', HTTPS_PROXY: 'http://upper.example:1', no_proxy: 'a.example', NO_PROXY: 'b.example' }, () => {
       expect(proxyFor(new URL('https://x.example/'))?.host).toBe('lower.example:1')
       expect(proxyFor(new URL('https://a.example/'))).toBeUndefined()
@@ -777,11 +786,11 @@ describe('what is read from a checkout before the copy', () => {
     const checkout = tempRoot()
     mkdirSync(join(checkout, 'real/.claude-plugin'), { recursive: true })
     writeFileSync(join(checkout, 'real/.claude-plugin/plugin.json'), '{"name":"real"}')
-    execFileSync('ln', ['-s', 'real', join(checkout, 'alias')])
+    link('real', join(checkout, 'alias'), 'dir')
     mkdirSync(join(checkout, 'linked/.claude-plugin'), { recursive: true })
-    execFileSync('ln', ['-s', '/etc/hostname', join(checkout, 'linked/.claude-plugin/plugin.json')])
+    link('/etc/hostname', join(checkout, 'linked/.claude-plugin/plugin.json'))
     mkdirSync(join(checkout, 'folder'), { recursive: true })
-    execFileSync('ln', ['-s', '../real/.claude-plugin', join(checkout, 'folder/.claude-plugin')])
+    link('../real/.claude-plugin', join(checkout, 'folder/.claude-plugin'), 'dir')
     expect(RemoteFetcher.inside(checkout, 'real')).toBe(join(checkout, 'real'))
     expect(() => RemoteFetcher.inside(checkout, 'alias')).toThrow(/link/u)
     expect(() => RemoteFetcher.inside(checkout, 'alias/.claude-plugin')).toThrow(/link/u)

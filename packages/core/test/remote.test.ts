@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { dependencyProblem, describeSpec, DEFAULT_MARKETPLACES, githubOf, githubTarball, gitTransport, isValidRef, marketplaceProblem, npmPage, pageOfSpec, parseMarketplace, parseRemoteInput, specIdentity, specOfSource, type MarketplaceSource } from '../src/index.js'
 
@@ -92,7 +93,7 @@ describe('marketplace entry sources', () => {
   it('resolves each source form', () => {
     const by = new Map(index.entries.map(entry => [entry.name, entry]))
     expect(index.description).toBe('From metadata')
-    expect(by.get('bare')?.source).toMatchObject({ kind: 'path', path: '/market/plugins/bare' })
+    expect(by.get('bare')?.source).toMatchObject({ kind: 'path', path: resolve('/market/plugins/bare') })
     expect(specOfSource(by.get('sub')!.source)).toEqual({ kind: 'git', url: 'https://github.com/acme/mono.git', github: { owner: 'acme', repo: 'mono' }, ref: 'v1', sha: 'b'.repeat(40), subpath: 'tools/sub' })
     expect(specOfSource(by.get('url')!.source)).toEqual({ kind: 'git', url: 'https://gitlab.example.com/x/y.git' })
     expect(specOfSource(by.get('pkg')!.source)).toEqual({ kind: 'npm', package: '@acme/p', version: '^1', registry: 'https://npm.example.com' })
