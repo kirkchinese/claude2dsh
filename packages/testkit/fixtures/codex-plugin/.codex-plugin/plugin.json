@@ -1,0 +1,6 @@
+{
+  "name": "e2e-codex",
+  "version": "1.0.0",
+  "description": "Minimal Codex plugin for the Harness Forge end-to-end smoke test",
+  "skills": "./skills/"
+}

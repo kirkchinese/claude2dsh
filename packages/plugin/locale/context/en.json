@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge instructions",
+    "description": "Adds Claude Code's instruction files that DSH does not read (~/.claude/CLAUDE.md, .claude/CLAUDE.md, @path imports) and Codex's global AGENTS.md to the system prompt. Yields when the Recollect plugin runs. Needs the Harness Forge row."
+  }
+}

@@ -1,0 +1,4 @@
+packages:
+  - packages/*
+minimumReleaseAgeExclude:
+  - '@opencode-ai/sdk@1.19.6'

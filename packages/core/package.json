@@ -1,0 +1,61 @@
+{
+  "name": "@kirkchinese/harness-forge-core",
+  "version": "0.4.0",
+  "description": "Dialect-neutral IR, plugin manifest parsing, discovery and compatibility planning for Harness Forge",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "pnpm run build",
+    "clean": "node --eval \"import('node:fs/promises').then(({ rm }) => rm('lib', { force: true, recursive: true }))\""
+  },
+  "dependencies": {
+    "ajv": "8.17.1",
+    "smol-toml": "1.4.2",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kirkchinese/harness-forge.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "dsh",
+    "harness-forge",
+    "claude-code",
+    "codex",
+    "opencode",
+    "agent-plugins"
+  ],
+  "homepage": "https://github.com/kirkchinese/harness-forge#readme",
+  "bugs": {
+    "url": "https://github.com/kirkchinese/harness-forge/issues"
+  }
+}

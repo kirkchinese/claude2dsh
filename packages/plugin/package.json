@@ -1,0 +1,250 @@
+{
+  "name": "@kirkchinese/harness-forge",
+  "version": "0.4.0",
+  "description": "Use Claude Code, Codex and OpenCode plugins, settings and sessions in DSH",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./preset-tool-filter": {
+      "types": "./lib/presets/tool-filter.d.ts",
+      "default": "./lib/presets/tool-filter.js"
+    },
+    "./preset-fs-search": {
+      "types": "./lib/presets/fs-search.d.ts",
+      "default": "./lib/presets/fs-search.js"
+    },
+    "./porter": {
+      "types": "./lib/porting/row.d.ts",
+      "default": "./lib/porting/row.js"
+    },
+    "./porter/locale/*.json": "./locale/porter/*.json",
+    "./porter/icon": "./assets/icon.svg",
+    "./sessions": {
+      "types": "./lib/sessions/row.d.ts",
+      "default": "./lib/sessions/row.js"
+    },
+    "./sessions/locale/*.json": "./locale/sessions/*.json",
+    "./sessions/icon": "./assets/icon.svg",
+    "./opencode": {
+      "types": "./lib/opencode/row.d.ts",
+      "default": "./lib/opencode/row.js"
+    },
+    "./opencode/locale/*.json": "./locale/opencode/*.json",
+    "./opencode/icon": "./assets/icon.svg",
+    "./mods": {
+      "types": "./lib/mods/row.d.ts",
+      "default": "./lib/mods/row.js"
+    },
+    "./mods/locale/*.json": "./locale/mods/*.json",
+    "./mods/icon": "./assets/icon.svg",
+    "./mcp": {
+      "types": "./lib/mcp/row.d.ts",
+      "default": "./lib/mcp/row.js"
+    },
+    "./mcp/locale/*.json": "./locale/mcp/*.json",
+    "./mcp/icon": "./assets/icon.svg",
+    "./hooks": {
+      "types": "./lib/hooks/row.d.ts",
+      "default": "./lib/hooks/row.js"
+    },
+    "./hooks/locale/*.json": "./locale/hooks/*.json",
+    "./hooks/icon": "./assets/icon.svg",
+    "./agents": {
+      "types": "./lib/agents/row.d.ts",
+      "default": "./lib/agents/row.js"
+    },
+    "./agents/locale/*.json": "./locale/agents/*.json",
+    "./agents/icon": "./assets/icon.svg",
+    "./context": {
+      "types": "./lib/context/row.d.ts",
+      "default": "./lib/context/row.js"
+    },
+    "./context/locale/*.json": "./locale/context/*.json",
+    "./context/icon": "./assets/icon.svg",
+    "./commands": {
+      "types": "./lib/commands/row.d.ts",
+      "default": "./lib/commands/row.js"
+    },
+    "./commands/locale/*.json": "./locale/commands/*.json",
+    "./commands/icon": "./assets/icon.svg",
+    "./skills": {
+      "types": "./lib/skills/row.d.ts",
+      "default": "./lib/skills/row.js"
+    },
+    "./skills/locale/*.json": "./locale/skills/*.json",
+    "./skills/icon": "./assets/icon.svg",
+    "./workbench": {
+      "types": "./lib/workbench/row.d.ts",
+      "default": "./lib/workbench/row.js"
+    },
+    "./workbench/locale/*.json": "./locale/workbench/*.json",
+    "./workbench/icon": "./assets/icon.svg",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./assets/icon.svg",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "runtime",
+    "skills",
+    "assets",
+    "locale",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:client": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:client": "tsc -p tsconfig.client.json",
+    "test": "vitest run",
+    "clean": "node --eval \"import('node:fs/promises').then(({ rm }) => Promise.all(['lib'].map((path) => rm(path, { force: true, recursive: true }))))\"",
+    "prepack": "pnpm run build && pnpm run build:client"
+  },
+  "dependencies": {
+    "@kirkchinese/harness-forge-core": "workspace:*",
+    "@modelcontextprotocol/client": "2.2.0",
+    "@opencode-ai/sdk": "1.19.6",
+    "js-yaml": "^4.3.2",
+    "yaml": "^2.8.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.1.0 <5",
+    "@deepseek-ai/cordis-plugin-include": ">=1.1.0 <2",
+    "@deepseek-ai/dsh-agent-preset-registry": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-commands": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-mcp-client": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-session": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-skill": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-tool-fs-search": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-tool-subagent": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.3",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.2-rc.3",
+    "@deepseek-ai/schemastery": ">=3.19.0 <4"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/cordis-plugin-include": "1.1.0",
+    "@deepseek-ai/dsh-agent-preset-registry": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-client-locale": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-client-ui-layout": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-client-ui-sidebar": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-commands": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-mcp-client": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-session-format-catalog": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-skill": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-tool-subagent": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-typert-generator": "0.0.1-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@modelcontextprotocol/server": "2.2.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.19.0",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "~18.3.7",
+    "playwright-core": "^1.65.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18",
+    "zod": "4.6.6",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-tool-fs-search": "0.2.2-rc.5",
+    "@deepseek-ai/dsh-hook-protocol": "0.2.2-rc.5",
+    "rolldown": "1.3.2"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.2-rc.3"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kirkchinese/harness-forge.git",
+    "directory": "packages/plugin"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "harness-forge",
+    "claude-code",
+    "codex",
+    "opencode"
+  ],
+  "homepage": "https://github.com/kirkchinese/harness-forge#readme",
+  "bugs": {
+    "url": "https://github.com/kirkchinese/harness-forge/issues"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/cordis-plugin-include": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-preset-registry": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-commands": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-mcp-client": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-skill": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-fs-search": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-subagent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  }
+}

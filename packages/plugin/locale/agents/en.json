@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge agents",
+    "description": "Makes migrated agents (subagents) available to DSH's delegation tool, with their model, skills and MCP servers. Needs the Harness Forge row."
+  }
+}

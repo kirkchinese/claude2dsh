@@ -1,0 +1,22 @@
+{
+  "name": "harness-forge-workspace",
+  "private": true,
+  "description": "Harness Forge: run Claude Code, Codex and OpenCode plugins in DeepSeek Harness",
+  "type": "module",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @kirkchinese/harness-forge-core build && pnpm --filter @kirkchinese/harness-forge build && pnpm --filter @kirkchinese/harness-forge build:client",
+    "typecheck": "pnpm --filter @kirkchinese/harness-forge-core typecheck && pnpm --filter @kirkchinese/harness-forge typecheck && pnpm --filter @kirkchinese/harness-forge typecheck:client && pnpm --filter @kirkchinese/harness-forge-testkit typecheck",
+    "test": "pnpm -r --no-bail --workspace-concurrency=1 test",
+    "e2e": "pnpm --filter @kirkchinese/harness-forge-testkit e2e",
+    "check:pack": "node scripts/check-pack.mjs"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kirkchinese/harness-forge.git"
+  }
+}

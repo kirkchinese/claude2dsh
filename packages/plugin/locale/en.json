@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge",
+    "description": "Use Claude Code, Codex and OpenCode plugins, settings and sessions in DSH. Open Harness Forge in the sidebar to see what was found on this computer and migrate it. The other Harness Forge rows each run one kind of part and can be switched off on their own."
+  }
+}

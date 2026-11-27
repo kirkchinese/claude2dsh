@@ -1,0 +1,26 @@
+{
+  "name": "@kirkchinese/dsh-harness-e2e-lab",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test-only DSH plugin used by the Harness Forge end-to-end smoke test",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.5"
+  },
+  "license": "MIT",
+  "engines": {
+    "dsh": ">=0.2.1-rc.2"
+  }
+}

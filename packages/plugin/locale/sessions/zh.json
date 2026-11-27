@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge 会话导入",
+    "description": "把以前的 Claude Code、Codex 和 OpenCode 对话导入为 DSH 会话（Harness Forge → 更多 → 导入会话）。需要 Harness Forge 主行。"
+  }
+}

@@ -1,0 +1,15 @@
+node_modules
+.pnpm-store/
+lib/
+coverage/
+*.tgz
+*.log
+.eslintcache
+.DS_Store
+__pycache__/
+*.pyc
+
+AGENTS.md
+/.agents/
+/.lab/
+/.npm-cache/

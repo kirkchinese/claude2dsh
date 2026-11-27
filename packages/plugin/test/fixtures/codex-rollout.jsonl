@@ -1,0 +1,5 @@
+{"timestamp":"2026-11-08T00:00:00.000Z","type":"session_meta","payload":{"session_id":"codex-fixture-session","timestamp":"2026-11-08T00:00:00.000Z","cwd":"C:/work"}}
+{"timestamp":"2026-11-08T00:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Run the echo tool"}}
+{"timestamp":"2026-11-08T00:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Calling echo."}]}}
+{"timestamp":"2026-11-08T00:00:03.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"call-1","name":"echo","input":"{\"text\":\"ok\"}"}}
+{"timestamp":"2026-11-08T00:00:04.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-1","output":[{"type":"input_text","text":"ok"}]}}

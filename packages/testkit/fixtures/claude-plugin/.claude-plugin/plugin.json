@@ -1,0 +1,5 @@
+{
+  "name": "e2e-claude",
+  "version": "1.0.0",
+  "description": "Minimal Claude Code plugin for the Harness Forge end-to-end smoke test"
+}

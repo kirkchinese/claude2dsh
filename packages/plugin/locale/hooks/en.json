@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge hooks",
+    "description": "Runs migrated Claude Code and Codex hooks when DSH does the matching work, such as before a tool runs. Needs the Harness Forge row."
+  }
+}

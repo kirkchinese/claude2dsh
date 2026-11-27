@@ -1,0 +1,28 @@
+- insert:
+    - id: harness-forge
+      name: '@kirkchinese/harness-forge'
+      config: {}
+    - id: harness-forge-porter
+      name: '@kirkchinese/harness-forge/porter'
+    - id: harness-forge-sessions
+      name: '@kirkchinese/harness-forge/sessions'
+    - id: harness-forge-opencode
+      name: '@kirkchinese/harness-forge/opencode'
+    - id: harness-forge-mods
+      name: '@kirkchinese/harness-forge/mods'
+    - id: harness-forge-mcp
+      name: '@kirkchinese/harness-forge/mcp'
+    - id: harness-forge-hooks
+      name: '@kirkchinese/harness-forge/hooks'
+    - id: harness-forge-agents
+      name: '@kirkchinese/harness-forge/agents'
+    - id: harness-forge-commands
+      name: '@kirkchinese/harness-forge/commands'
+    - id: harness-forge-context
+      name: '@kirkchinese/harness-forge/context'
+    - id: harness-forge-skills
+      name: '@kirkchinese/harness-forge/skills'
+      config:
+        skillRoots: []
+    - id: harness-forge-workbench
+      name: '@kirkchinese/harness-forge/workbench'

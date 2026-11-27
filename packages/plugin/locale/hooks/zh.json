@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge 钩子",
+    "description": "在 DSH 做对应工作时（例如运行工具前）执行迁移来的 Claude Code 和 Codex 钩子。需要 Harness Forge 主行。"
+  }
+}

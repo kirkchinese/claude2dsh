@@ -1,0 +1,44 @@
+name: e2e
+
+# A real DSH, the packed plugin and a scripted model: the smoke test that catches a DSH upgrade breaking the plugin.
+# `0.2.2-rc.5` is the latest DSH release, `0.2.2-rc.3` the oldest one the plugin supports.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        dsh: [0.2.2-rc.5, 0.2.2-rc.3]
+    name: e2e (DSH ${{ matrix.dsh }})
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install DSH
+        run: npm install -g "@deepseek-ai/dsh@${{ matrix.dsh }}" --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs
+      - run: dsh --version
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm e2e
+        env:
+          E2E_LOGS: ${{ runner.temp }}/e2e-logs
+      - name: Keep the session logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-logs-dsh-${{ matrix.dsh }}
+          path: ${{ runner.temp }}/e2e-logs
+          if-no-files-found: ignore

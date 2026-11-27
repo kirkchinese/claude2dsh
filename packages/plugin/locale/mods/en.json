@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge Claude Code mods",
+    "description": "Runs migrated Claude Code mods in each session and shows what they draw above the prompt. Needs the Harness Forge row."
+  }
+}

@@ -1,0 +1,3 @@
+- insert:
+    - id: e2e-noop
+      name: e2e-noop-bundle

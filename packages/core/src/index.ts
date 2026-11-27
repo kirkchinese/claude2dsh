@@ -1,0 +1,28 @@
+/**
+ * Harness Forge core: dialect-neutral plugin discovery and compatibility
+ * vocabulary. Pure logic; no DSH runtime imports.
+ * @module @kirkchinese/harness-forge-core
+ */
+export * from './types.js'
+export * from './naming.js'
+export * from './paths.js'
+export * from './frontmatter.js'
+export * from './manifest.js'
+export * from './schema.js'
+export * from './assess.js'
+export * from './hook-events.js'
+export * from './marketplace.js'
+export * from './dialects/opencode/scan.js'
+export * from './contracts.js'
+export * from './fingerprint.js'
+export * from './plan.js'
+export * from './license.js'
+export * from './port-brief.js'
+export * from './discover.js'
+export * from './dialects/index.js'
+export * from './dialects/claude-code/user-assets.js'
+export * from './dialects/codex/user-assets.js'
+export * from './dialects/codex/skill-policy.js'
+export * from './sessions/index.js'
+export * from './instructions.js'
+export * from './trust.js'

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge 指令文件",
+    "description": "把 DSH 自己不读取的 Claude Code 指令文件（~/.claude/CLAUDE.md、.claude/CLAUDE.md、@path 导入）和 Codex 的全局 AGENTS.md 加入系统提示。Recollect 插件运行时整体让位。需要 Harness Forge 主行。"
+  }
+}

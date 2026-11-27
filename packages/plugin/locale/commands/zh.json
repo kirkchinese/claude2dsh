@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge 命令",
+    "description": "把迁移来的斜杠命令和 Claude Code 输出风格加入 DSH。需要 Harness Forge 主行。"
+  }
+}

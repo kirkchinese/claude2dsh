@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge MCP servers",
+    "description": "Connects migrated MCP servers, including ones that need you to sign in. Needs the Harness Forge row."
+  }
+}

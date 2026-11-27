@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge OpenCode plugins",
+    "description": "Runs migrated OpenCode code plugins, each in its own Bun process. Needs the Harness Forge row; Bun is installed on first use if missing."
+  }
+}

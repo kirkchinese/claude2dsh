@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge 智能体",
+    "description": "让迁移来的智能体（子代理）可通过 DSH 的委派工具使用，并带上它们的模型、技能和 MCP 服务器。需要 Harness Forge 主行。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge OpenCode 插件",
+    "description": "运行迁移来的 OpenCode 代码插件，每个在自己的 Bun 进程中。需要 Harness Forge 主行；缺少 Bun 时首次使用会自动安装。"
+  }
+}

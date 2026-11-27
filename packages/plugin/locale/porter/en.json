@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge porting",
+    "description": "Describes a Claude Code, Codex or OpenCode plugin part DSH cannot run as it is and hands the brief to DSH's creation mode, which writes and installs a local adapter plugin. Turn it off to hide porting. Needs the Harness Forge row."
+  }
+}

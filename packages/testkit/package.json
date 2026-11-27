@@ -1,0 +1,29 @@
+{
+  "name": "@kirkchinese/harness-forge-testkit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end smoke test for Harness Forge: a real DSH, the packed plugin and a scripted model",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "e2e": "node src/main.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kirkchinese/harness-forge.git",
+    "directory": "packages/testkit"
+  }
+}

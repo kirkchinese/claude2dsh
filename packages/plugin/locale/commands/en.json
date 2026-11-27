@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge commands",
+    "description": "Adds migrated slash commands and Claude Code output styles to DSH. Needs the Harness Forge row."
+  }
+}

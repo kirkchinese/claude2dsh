@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [24]
+        include:
+          # The oldest Node.js the packages support.
+          - os: ubuntu-latest
+            node: 22
+    name: check (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      # OpenCode plugins run in Bun; the runtime tests load a real plugin in it.
+      - uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @kirkchinese/harness-forge-core build
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter @kirkchinese/harness-forge build
+      - run: pnpm --filter @kirkchinese/harness-forge build:client
+
+  # What `pnpm publish` would ship: `workspace:*` is replaced by a real version, and every export target is in the tarball.
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @kirkchinese/harness-forge-core build
+      - run: node scripts/check-pack.mjs

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge 移植",
+    "description": "说明 DSH 无法原样运行的 Claude Code、Codex 或 OpenCode 插件部分，并把任务说明交给 DSH 的创造模式，由它编写并安装本地适配器插件。关闭后不再提供移植。需要 Harness Forge 主行。"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Harness Forge sessions",
+    "description": "Imports past Claude Code, Codex and OpenCode conversations as DSH sessions (Harness Forge → More → Import sessions). Needs the Harness Forge row."
+  }
+}
