@@ -17,6 +17,7 @@ import {
   type MarketplaceIndex,
   type Observation,
   type Plan,
+  scanRoot as scanForeignRoot,
 } from '@kirkchinese/harness-forge-core'
 import { createForeignShell, type ForeignShell } from '../hooks/shell.js'
 import { Invocations } from '../shared/invocation.js'
@@ -29,6 +30,8 @@ import { Ledger, type ApplyResult, type InstallReport } from './ledger.js'
 import { ProjectAssets } from './projects.js'
 import { WorkspaceTrust } from './trust.js'
 import { ImportedSettings } from './settings.js'
+import { RemotePlugins } from './remote/service.js'
+import type { FetchDeps, FetchLimits } from './remote/fetch.js'
 
 export type { AgentReport, ApplyResult, HookReport, InstallReport, McpReport } from './ledger.js'
 
@@ -60,6 +63,8 @@ export class HarnessForge {
   /** Claude Code and Codex project assets per session. */
   readonly projects: ProjectAssets
   readonly ledger: Ledger
+  /** Plugins fetched from the network into `<dataRoot>/remote`. */
+  readonly remote: RemotePlugins
   private readonly apis = new Map<keyof RowApis, unknown>()
   private readonly watchers = new Map<keyof RowApis, Set<{ use: (api: never) => Disposer | void; release?: Disposer | void }>>()
   private readonly recentFaults: RowFault[] = []
@@ -69,12 +74,29 @@ export class HarnessForge {
    * @param statePath - the ledger file.
    * @param dataRoot - profile-local writable directory (shims, OAuth state, mod store).
    */
-  constructor(readonly ctx: Context, readonly statePath: string, readonly dataRoot: string) {
+  /** `remote`: what plugins from the network are fetched with (tests replace git, npm, fetch and the resolver). */
+  constructor(readonly ctx: Context, readonly statePath: string, readonly dataRoot: string, options: { readonly remote?: { readonly deps?: FetchDeps; readonly limits?: FetchLimits } } = {}) {
     this.shell = createForeignShell(process.env, dataRoot)
     this.invocations = new Invocations(ctx, name => this.lookup('agents')?.presetOf(name), (agent, signal) => sessionDirectory(ctx, agent, signal))
     this.settings = new ImportedSettings(sessionId => this.invocations.rules(sessionId))
     this.ledger = new Ledger(ctx, statePath, dataRoot, error => this.fault('ledger', error))
     this.projects = new ProjectAssets(this.ledger, dataRoot, new WorkspaceTrust(statePath), error => this.fault('projects', error))
+    this.remote = new RemotePlugins(join(dataRoot, 'remote'), {
+      scan: (root, source, replacing) => {
+        // The new copy of an installed plugin keeps its name, which the installed copy otherwise holds.
+        if (replacing !== undefined && this.ledger.live.has(replacing)) {
+          const plain = scanForeignRoot(root, source)
+          if (plain.id === replacing) return plain
+        }
+        return this.scan(root, source)
+      },
+      install: async (root, source) => {
+        const report = await this.install(root, source)
+        return { pluginId: report.plugin.id, report }
+      },
+      reroot: (pluginId, root, source) => this.ledger.exclusive(() => this.ledger.rerootNow(pluginId, root, source)),
+      installed: pluginId => this.ledger.live.has(pluginId),
+    }, options.remote?.deps, options.remote?.limits)
     this.ledger.registerMounter('settings', {
       mount: async ({ component, scope }) => {
         if (component.kind !== 'settings') throw new HarnessError('component-failed', `action expects settings: ${component.id}`)
@@ -271,6 +293,12 @@ export class HarnessForge {
     return this.ledger.exclusive(async () => {
       if (!await this.ledger.teardown(id)) return false
       this.ledger.persist()
+      // A plugin fetched from the network takes its files with it; a failure there leaves the removal done.
+      try {
+        this.remote.released(id)
+      } catch (error: unknown) {
+        this.fault('remote', error)
+      }
       return true
     })
   }

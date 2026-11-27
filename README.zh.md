@@ -26,6 +26,7 @@
 大多数插件作者只为一个工具写插件。Harness Forge 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件，它读取你已经装好的插件，让它们在 DSH 里运行：
 
 - **Claude Code**（完整支持）：插件、插件市场、你的 `~/.claude` 和项目里的 `.claude/`；
+- **直接从网络获取**：粘贴 Claude Code 或 Codex 的插件市场（`owner/repo`、git 地址或 `marketplace.json` 网址）、单个插件仓库或 OpenCode 的 npm 包，确认后即可安装，不需要装原来的工具。Anthropic 和 OpenAI 的插件市场已经列好，可以直接打开；
 - **Codex** 和 **OpenCode**：插件、你的 `~/.codex`、OpenCode 项目和代码插件；
 - **任何使用通用格式的工具**：`SKILL.md` 技能、MCP JSON、`AGENTS.md`。把一个技能文件夹（可附带 `.mcp.json`）加进插件文件夹，它就作为一个插件读取；默认已列出 Gemini CLI 的 `~/.gemini/skills`。`~/.agents/skills` 由 DSH 自己加载。
 
@@ -49,6 +50,7 @@ dsh plugin --profile web add @kirkchinese/harness-forge
 
 1. **打开 Harness Forge**（DSH 侧边栏）。**发现与迁移** 列出这台电脑上找到的 Claude Code、Codex、OpenCode 插件和你自己的设置，逐项标出可用、部分可用或无法使用，并写明原因。
 2. **迁移。** 点 **全部迁移**，或逐个插件迁移。之后可以在 **已迁移** 里关闭单个部分或撤销迁移。
+   这台电脑上没有 Claude Code？在 **获取插件** 里打开 `anthropics/claude-plugins-official` 等插件市场，或粘贴 `owner/repo`、npm 包名，直接从网络安装。
 3. **使用。** 新开一个会话。技能在技能目录里，命令在 `/` 菜单里，智能体可以接受委派，hook 在对应事件上触发。
 
 ![“发现与迁移”页面：这台电脑上找到的 Claude Code 和 Codex 插件，每个标出可用或部分可用](docs/assets/discover.zh.jpg)
@@ -119,7 +121,7 @@ Harness Forge 是一个 npm 包，包含多个插件行（row）。每一行都�
 
 ## 安全
 
-迁移来的 hook、MCP 服务和插件代码以你的权限运行，与在原工具里相同。只迁移你信任的插件。Windows 上 hook 在 Git Bash 中运行（与 Claude Code 相同），其他系统用 bash。
+迁移来的 hook、MCP 服务和插件代码以你的权限运行，与在原工具里相同。只迁移你信任的插件。从网络安装插件之前，Harness Forge 会显示它的来源、确切的提交和包含的部分，并提醒哪些部分会运行代码。Windows 上 hook 在 Git Bash 中运行（与 Claude Code 相同），其他系统用 bash。
 
 ## 文档
 

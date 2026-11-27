@@ -29,7 +29,35 @@ The first screen lists, per harness (Claude Code, Codex, OpenCode), what this co
 
 Press **Migrate all** to migrate everything not migrated yet, or migrate one plugin. Migrating changes nothing in the original harness: plugins run from where they are installed.
 
-From the same screen you can **browse a marketplace**: enter a folder with a `.claude-plugin/marketplace.json` (for example one under `~/.claude/plugins/marketplaces`) to see its plugins and install them.
+## Get plugins from the internet
+
+You don't need Claude Code, Codex or OpenCode installed to use their plugins. Under **Get plugins** on the same screen, paste one of these and press **Open**:
+
+| You paste | What it is |
+| --- | --- |
+| `owner/repo`, `owner/repo@v2`, `https://github.com/owner/repo` | A GitHub repository: a Claude Code or Codex marketplace, or a single plugin |
+| `https://github.com/owner/repo/tree/main/plugins/x` | One plugin inside a larger repository |
+| Any git URL (`https://…`, `git@host:path`, `ssh://…`), optionally with `#ref` | A marketplace or plugin on another git host |
+| `https://example.com/marketplace.json` | A marketplace file on a website. Its plugins must point at their own repositories, because the website has no other files |
+| `opencode-wakatime`, `@scope/name@1.2.0` | An OpenCode plugin on npm |
+| A folder path | A marketplace or plugin already on disk |
+
+These marketplaces are listed ready to open. Each one is fetched only when you open it:
+
+- `claude-plugins-official` (`anthropics/claude-plugins-official`) and `claude-community` (`anthropics/claude-plugins-community`): [Anthropic's official and community marketplaces](https://code.claude.com/docs/en/plugins/anthropic-marketplaces)
+- `anthropic-agent-skills` (`anthropics/skills`) and `knowledge-work-plugins` (`anthropics/knowledge-work-plugins`): Anthropic's topic marketplaces
+- `openai-curated` (`openai/plugins`): OpenAI's [Codex plugins](https://developers.openai.com/codex/plugins/build)
+
+Press **Install** on a plugin. Harness Forge fetches it and shows a confirmation before it installs anything. The confirmation lists where the plugin comes from (with a link), the exact commit or version, and every part with whether it works in DSH. It also warns you when the plugin has hooks, MCP servers, settings or code, because those run with your permissions. Confirm, and the plugin appears in **Migrated** like any other.
+
+- **Where files go.** Downloads go into Harness Forge's own folder, `<profile>/.harness-forge/data/remote/`. Nothing is written into `~/.claude`, `~/.codex`, OpenCode's configuration or your DSH profile's configuration. Each install keeps its own copy, pinned to the commit it was fetched at.
+- **git or not.** With git installed, Harness Forge makes a shallow clone; for a plugin in a subfolder it is also sparse. Without git, which is common on Windows, GitHub repositories are downloaded as an archive over HTTPS. Other git hosts need git.
+- **Updates.** Under **Installed from the internet**, press **Check for updates**. It compares each plugin's commit (or npm version) with what its source points at now. **Update** fetches exactly the revision the check found and shows it for confirmation, like an install: what's new or changed, and whether it runs code. Only then is it applied, and parts you switched off stay off.
+- **Removal.** Remove the plugin in **Migrated**; its downloaded files are deleted with it.
+- **Proxies.** Harness Forge, git and npm use the proxy in `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY`, minus the hosts in `NO_PROXY`. Through a proxy, Harness Forge reaches only GitHub (`github.com`, `codeload.github.com`, `api.github.com`, `raw.githubusercontent.com`, `objects.githubusercontent.com`), npm's registry (`registry.npmjs.org`) or yours, and the hosts of sources you paste. A marketplace that points elsewhere is refused, with the host named.
+- **Not supported.** Marketplace entries that run a command (`"source": "command"`) are listed but can't be installed, since that would run a command from the marketplace on your computer. The same goes for zip archives in the ZIP64 format.
+
+The same box also opens a marketplace folder already on disk, for example one under `~/.claude/plugins/marketplaces`.
 
 ## Migrated
 
@@ -89,4 +117,4 @@ The skills row (`harness-forge-skills`) takes `skillRoots`: extra folders scanne
 
 ## Safety
 
-Migrated hooks, MCP servers and plugin code run with your permissions, as they do in their original harness. Migrate only plugins you trust.
+Migrated hooks, MCP servers and plugin code run with your permissions, as they do in their original harness. Migrate only plugins you trust. The same goes for plugins from the internet: check the source and contents in the confirmation before you install.

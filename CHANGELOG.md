@@ -4,7 +4,15 @@ All notable changes to Harness Forge are documented here. The format follows [Ke
 
 ## Unreleased
 
-Fill with AI, after a test with a real model on claude-hud's status line.
+Plugins straight from the internet, and Fill with AI fixes after a test with a real model on claude-hud's status line.
+
+### Added
+
+- **Plugins straight from the internet.** **Get plugins**, on the Discover screen, replaces "Browse a marketplace". It takes a Claude Code or Codex marketplace (`owner/repo`, a git URL or a `marketplace.json` URL), a single plugin repository or subfolder, or an OpenCode npm package. Anthropic's official, community, skills and knowledge-work marketplaces and OpenAI's curated Codex plugins are listed ready to open, and each is fetched only when you open it. You don't need the original harness.
+- **A confirmation before anything is installed.** It shows the source with a link, the exact commit or version (and the npm registry), every part with whether it works in DSH, and a warning when the plugin has hooks, MCP servers, settings or code. Nothing fetched runs before you confirm. What gets installed is exactly what the confirmation showed: if the files change in between, the install is refused. Once confirmed, the plugin goes through the usual install and appears in **Migrated**.
+- **Fetched into Harness Forge's own folder** (`<profile>/.harness-forge/data/remote/`), never into `~/.claude`, `~/.codex` or OpenCode's configuration. git fetches only the pinned commit, sparsely for a plugin in a subfolder, and without your git configuration, hooks or credential helpers. Without git, GitHub repositories are downloaded over HTTPS. For npm packages, npm doesn't run before you confirm: Harness Forge itself downloads the tarball of an exact version and checks it against its integrity. Once you confirm, dependencies are installed from the registry only, without install scripts. Archives with links or special files are refused. A marketplace may name only public HTTPS sources, and never this computer or your local network. Proxies in `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` (minus `NO_PROXY`) are used; through a proxy only GitHub, npm's registry or yours, and the hosts you paste are reached. Each operation is bounded in size and time while it runs. Network failures, including GitHub's rate limit, are reported in plain words.
+- **Check for updates and Update.** These compare each plugin's commit or npm version with its source. An update is shown and confirmed like an install: the new revision the check found, which parts are new or changed, and the code warning. It then keeps the parts you switched off. Removing a plugin deletes its downloaded files.
+- All marketplace entry sources Claude Code documents except `command`: relative paths (also bare names under `metadata.pluginRoot`), `github`, `url`, `git-subdir` (with `owner/repo` shorthand), `npm` and `archive`. An entry also acts as the plugin's manifest, following Claude Code's `strict` rules.
 
 ### Fixed
 

@@ -29,7 +29,35 @@ dsh plugin --profile web add @kirkchinese/harness-forge
 
 点 **全部迁移** 迁移所有尚未迁移的内容，或者逐个插件迁移。迁移不会改动原工具里的任何东西：插件从原来的安装位置运行。
 
-在同一页面还可以 **浏览插件市场**：输入一个带 `.claude-plugin/marketplace.json` 的文件夹（例如 `~/.claude/plugins/marketplaces` 下的目录），查看并安装其中的插件。
+## 从网络获取插件
+
+不用安装 Claude Code、Codex 或 OpenCode，也能使用它们的插件。在同一页面的 **获取插件** 里粘贴下面任意一种，然后点 **打开**：
+
+| 粘贴的内容 | 含义 |
+| --- | --- |
+| `owner/repo`、`owner/repo@v2`、`https://github.com/owner/repo` | GitHub 仓库：Claude Code 或 Codex 的插件市场，或单个插件 |
+| `https://github.com/owner/repo/tree/main/plugins/x` | 大仓库里的某一个插件 |
+| 任意 git 地址（`https://…`、`git@host:path`、`ssh://…`），可加 `#ref` | 其他 git 托管站点上的插件市场或插件 |
+| `https://example.com/marketplace.json` | 网站上的市场文件；网站上没有其他文件，所以其中的插件必须指向各自的仓库 |
+| `opencode-wakatime`、`@scope/name@1.2.0` | npm 上的 OpenCode 插件 |
+| 文件夹路径 | 已在磁盘上的插件市场或插件 |
+
+下面这些插件市场已经列好，点开时才会获取：
+
+- `claude-plugins-official`（`anthropics/claude-plugins-official`）和 `claude-community`（`anthropics/claude-plugins-community`）：[Anthropic 的官方与社区插件市场](https://code.claude.com/docs/en/plugins/anthropic-marketplaces)
+- `anthropic-agent-skills`（`anthropics/skills`）和 `knowledge-work-plugins`（`anthropics/knowledge-work-plugins`）：Anthropic 的专题插件市场
+- `openai-curated`（`openai/plugins`）：OpenAI 的 [Codex 插件](https://developers.openai.com/codex/plugins/build)
+
+在插件上点 **安装**，Harness Forge 会先获取插件并显示确认框，确认之前不会安装任何东西。确认框会列出插件的来源（带链接）、确切的提交或版本，以及每个部分是否能在 DSH 中使用。插件含有 hook、MCP 服务、设置或代码时，确认框还会提醒你，因为这些会以你的权限运行。确认后，插件会像其他插件一样出现在 **已迁移** 里。
+
+- **文件存放位置。** 下载的内容放在 Harness Forge 自己的目录 `<profile>/.harness-forge/data/remote/`，不会写入 `~/.claude`、`~/.codex`、OpenCode 的配置或 DSH 配置文件。每次安装都保留一份自己的副本，并固定在获取时的提交上。
+- **有没有 git。** 装了 git 时，Harness Forge 会做浅克隆；如果插件在子目录里，还只检出那个子目录。没有 git 时（Windows 上很常见），GitHub 仓库会通过 HTTPS 下载压缩包；其他 git 托管站点需要 git。
+- **更新。** 在 **从网络安装的插件** 下点 **检查更新**，它会把每个插件的提交（或 npm 版本）与来源当前指向的版本比较。**更新** 会获取检查时找到的那个版本，先像安装一样请你确认（显示哪些部分是新增的、哪些有改动，以及它是否会运行代码），确认后才应用，你关掉的部分保持关闭。
+- **移除。** 在 **已迁移** 中移除插件，它下载的文件会一并删除。
+- **代理。** Harness Forge、git 和 npm 都会使用 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY` 中的代理，并跳过 `NO_PROXY` 中的主机。通过代理时，Harness Forge 只访问 GitHub（`github.com`, `codeload.github.com`, `api.github.com`, `raw.githubusercontent.com`, `objects.githubusercontent.com`）、npm 官方仓库（`registry.npmjs.org`）或你配置的仓库，以及你粘贴的来源所在的主机。插件市场如果指向其他主机，会被拒绝，并给出主机名。
+- **不支持的内容。** 需要运行命令的市场条目（`"source": "command"`）会列出但不能安装，因为那会在你的电脑上运行市场提供的命令。ZIP64 格式的 zip 压缩包同样不支持。
+
+同一个输入框也可以打开已在磁盘上的插件市场文件夹，例如 `~/.claude/plugins/marketplaces` 下的目录。
 
 ## 已迁移
 
@@ -89,4 +117,4 @@ dsh plugin --profile web add @kirkchinese/harness-forge
 
 ## 安全
 
-迁移来的 hook、MCP 服务和插件代码以你的权限运行，与在原工具里相同。只迁移你信任的插件。
+迁移来的 hook、MCP 服务和插件代码以你的权限运行，与在原工具里相同。只迁移你信任的插件；从网络安装的插件也一样，安装前请看确认框里的来源和内容。

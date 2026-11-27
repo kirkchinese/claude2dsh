@@ -25,6 +25,10 @@ export interface MarketplaceSource {
   /** npm package name. */
   readonly package?: string
   readonly version?: string
+  /** npm registry URL. */
+  readonly registry?: string
+  /** Zip URL of an `archive` source is `url`; this is its pinned digest. */
+  readonly sha256?: string
   /** Original declaration for diagnostics. */
   readonly raw: unknown
 }
@@ -38,6 +42,8 @@ export interface MarketplaceEntry {
   readonly category?: string
   readonly tags: readonly string[]
   readonly source: MarketplaceSource
+  /** The entry as written: with no `plugin.json` of its own, the plugin's manifest (Claude Code's rule). */
+  readonly fields: Readonly<Record<string, unknown>>
 }
 
 /** A parsed marketplace index. */
@@ -99,18 +105,33 @@ function marketplaceRoot(manifestPath: string): string {
   return dirname(manifestPath)
 }
 
+/** Options of {@link parseMarketplace}. */
+export interface ParseMarketplaceOptions {
+  /**
+   * False for a `marketplace.json` fetched by URL: there are no files beside it,
+   * so its relative entries cannot be installed (Claude Code's rule).
+   */
+  readonly filesAvailable?: boolean
+}
+
 /** Parse a marketplace document rooted at `root`. */
 export function parseMarketplace(
   data: Record<string, unknown>,
   root: string,
   manifestPath = join(root, 'marketplace.json'),
+  options: ParseMarketplaceOptions = {},
 ): MarketplaceIndex {
   const warnings: string[] = []
   const name = typeof data['name'] === 'string' && data['name'].trim().length > 0 ? data['name'].trim() : 'unnamed-marketplace'
-  const description = typeof data['description'] === 'string' ? data['description'] : undefined
+  const description = typeof data['description'] === 'string'
+    ? data['description']
+    : isPlainObject(data['metadata']) && typeof data['metadata']['description'] === 'string' ? data['metadata']['description'] : undefined
   const owner = isPlainObject(data['owner']) && typeof data['owner']['name'] === 'string'
     ? data['owner']['name']
     : undefined
+  const metadata = isPlainObject(data['metadata']) ? data['metadata'] : {}
+  const pluginRoot = typeof metadata['pluginRoot'] === 'string' ? metadata['pluginRoot'] : undefined
+  const context: SourceContext = { root, warnings, filesAvailable: options.filesAvailable !== false, ...(pluginRoot !== undefined ? { pluginRoot } : {}) }
   const plugins = data['plugins']
   if (!Array.isArray(plugins)) throw new MarketplaceError('plugins-missing', `marketplace ${name} has no plugins array`)
   const entries: MarketplaceEntry[] = []
@@ -124,7 +145,7 @@ export function parseMarketplace(
       warnings.push(`entry ${index + 1} has no name`)
       continue
     }
-    const source = parseSource(raw['source'], root, entryName, warnings)
+    const source = parseSource(raw['source'], context, entryName)
     if (source === undefined) continue
     entries.push({
       name: entryName,
@@ -134,22 +155,39 @@ export function parseMarketplace(
       ...(typeof raw['category'] === 'string' ? { category: raw['category'] } : {}),
       tags: Array.isArray(raw['tags']) ? raw['tags'].filter((tag): tag is string => typeof tag === 'string') : [],
       source,
+      fields: raw,
     })
   }
   return { name, ...(description !== undefined ? { description } : {}), ...(owner !== undefined ? { owner } : {}), root, manifestPath, entries, warnings }
 }
 
-function parseSource(raw: unknown, root: string, entryName: string, warnings: string[]): MarketplaceSource | undefined {
+interface SourceContext {
+  readonly root: string
+  readonly warnings: string[]
+  readonly filesAvailable: boolean
+  readonly pluginRoot?: string
+}
+
+/** A relative entry path inside the marketplace root, or undefined (with a warning) when it leaves it. */
+function insideRoot(declared: string, context: SourceContext, entryName: string, raw: unknown): MarketplaceSource | undefined {
+  if (!context.filesAvailable) {
+    context.warnings.push(`entry ${entryName} uses a relative path, which a marketplace.json fetched by URL cannot provide`)
+    return { kind: 'unknown', raw }
+  }
+  const path = resolve(context.root, declared)
+  if (!isInside(context.root, path)) {
+    context.warnings.push(`entry ${entryName} source escapes the marketplace root: ${declared}`)
+    return undefined
+  }
+  return { kind: 'path', path, raw }
+}
+
+function parseSource(raw: unknown, context: SourceContext, entryName: string): MarketplaceSource | undefined {
+  const { warnings } = context
   if (typeof raw === 'string') {
-    const path = raw.startsWith('.') || isAbsolute(raw) ? resolve(root, raw) : undefined
-    if (path !== undefined && !isInside(root, path)) {
-      warnings.push(`entry ${entryName} source escapes the marketplace root: ${raw}`)
-      return undefined
-    }
-    if (path !== undefined) return { kind: 'path', path, raw }
-    // Claude relative sources must start with './'; a bare name may be
-    // resolved under metadata.pluginRoot, which this first reader does not
-    // model. Report rather than invent a location.
+    if (raw.startsWith('.') || isAbsolute(raw)) return insideRoot(raw, context, entryName, raw)
+    // A bare name resolves under metadata.pluginRoot (Claude Code v2.1.239+).
+    if (context.pluginRoot !== undefined && /^[^/\\]+$/u.test(raw)) return insideRoot(join(context.pluginRoot, raw), context, entryName, raw)
     warnings.push(`entry ${entryName} has an unsupported relative source: ${raw}`)
     return { kind: 'unknown', raw }
   }
@@ -159,40 +197,33 @@ function parseSource(raw: unknown, root: string, entryName: string, warnings: st
   }
   const type = typeof raw['source'] === 'string' ? raw['source'] : ''
   if (type === 'local' || type === 'path' || type === '') {
-    const declared = typeof raw['path'] === 'string' ? raw['path'] : typeof raw['source'] === 'string' ? raw['source'] : undefined
+    const declared = typeof raw['path'] === 'string' ? raw['path'] : undefined
     if (declared === undefined) {
       warnings.push(`entry ${entryName} local source has no path`)
       return { kind: 'unknown', raw }
     }
-    const path = resolve(root, declared)
-    if (!isInside(root, path)) {
-      warnings.push(`entry ${entryName} source escapes the marketplace root: ${declared}`)
-      return undefined
-    }
-    return { kind: 'path', path, raw }
+    return insideRoot(declared, context, entryName, raw)
+  }
+  const pins = {
+    ...(typeof raw['ref'] === 'string' ? { ref: raw['ref'] } : {}),
+    ...(typeof raw['sha'] === 'string' ? { sha: raw['sha'] } : {}),
   }
   if (type === 'github') {
     const repo = typeof raw['repo'] === 'string' ? raw['repo'] : undefined
     if (repo === undefined) return { kind: 'unknown', raw }
-    return {
-      kind: 'git',
-      url: `https://github.com/${repo}.git`,
-      ...(typeof raw['ref'] === 'string' ? { ref: raw['ref'] } : {}),
-      ...(typeof raw['sha'] === 'string' ? { sha: raw['sha'] } : {}),
-      raw,
-    }
+    return { kind: 'git', url: `https://github.com/${repo}.git`, ...pins, raw }
   }
   if (type === 'url' || type === 'git' || type === 'git-subdir') {
     const url = typeof raw['url'] === 'string' ? raw['url'] : undefined
     if (url === undefined) return { kind: 'unknown', raw }
-    return {
-      kind: 'git',
-      url,
-      ...(typeof raw['path'] === 'string' ? { subpath: raw['path'] } : {}),
-      ...(typeof raw['ref'] === 'string' ? { ref: raw['ref'] } : {}),
-      ...(typeof raw['sha'] === 'string' ? { sha: raw['sha'] } : {}),
-      raw,
+    const subpath = typeof raw['path'] === 'string' ? raw['path'].replace(/^\.\//u, '') : undefined
+    if (subpath !== undefined && (subpath.split(/[\\/]/u).includes('..') || isAbsolute(subpath))) {
+      warnings.push(`entry ${entryName} source path escapes its repository: ${subpath}`)
+      return undefined
     }
+    // git-subdir takes GitHub owner/repo shorthand; url and git take a full URL.
+    const full = type === 'git-subdir' && /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/u.test(url) ? `https://github.com/${url}.git` : url
+    return { kind: 'git', url: full, ...(subpath !== undefined && subpath.length > 0 && subpath !== '.' ? { subpath } : {}), ...pins, raw }
   }
   if (type === 'npm') {
     const pkg = typeof raw['package'] === 'string' ? raw['package'] : undefined
@@ -201,9 +232,18 @@ function parseSource(raw: unknown, root: string, entryName: string, warnings: st
       kind: 'npm',
       package: pkg,
       ...(typeof raw['version'] === 'string' ? { version: raw['version'] } : {}),
+      ...(typeof raw['registry'] === 'string' ? { registry: raw['registry'] } : {}),
       raw,
     }
   }
-  if (type === 'archive' || type === 'command') return { kind: type, raw }
+  if (type === 'archive') {
+    return {
+      kind: 'archive',
+      ...(typeof raw['url'] === 'string' ? { url: raw['url'] } : {}),
+      ...(typeof raw['sha256'] === 'string' ? { sha256: raw['sha256'] } : {}),
+      raw,
+    }
+  }
+  if (type === 'command') return { kind: 'command', raw }
   return { kind: 'unknown', raw }
 }

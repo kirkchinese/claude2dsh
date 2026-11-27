@@ -87,6 +87,31 @@ Harness Forge 不给整个插件打“支持 / 不支持”的标签，而是看
 
 远程 MCP 服务和调用外部程序的 hook 需要网络或本机上有那些程序；缺少时这个部分以对应错误失败。
 
+## 从网络获取的插件
+
+**获取插件** 按工具能获取的内容如下。插件都走与本地插件相同的安装路径，所以上面各表同样适用于它的各个部分。
+
+| 工具 | 插件市场 | 市场条目里的插件来源 | 直接粘贴 |
+| --- | --- | --- | --- |
+| Claude Code | git 仓库中的 `.claude-plugin/marketplace.json`（`owner/repo`、git 地址、`@ref`/`#ref`），或 `marketplace.json` 的网址 | 相对路径（包括 `metadata.pluginRoot` 下的纯名称）、`github`、`url` 和 `git-subdir`（仅 HTTPS，可带 `ref` 或 40 位完整 `sha`，也可写作 `URL#sha`）、`npm`（来自 npm 官方仓库或你配置的仓库）、`archive`（HTTPS 上的 zip，按 `sha256` 校验）；`command` 会列出但不安装 | 插件仓库或其中的子目录 |
+| Codex | git 仓库中的 `.agents/plugins/marketplace.json` | `local`、`url`、`git-subdir`、`npm` | 插件仓库（`.codex-plugin/plugin.json`） |
+| OpenCode | （OpenCode 没有插件市场） | 无 | npm 包（`name`、`name@version`、`@scope/name`） |
+
+按 Claude Code 的规则，市场条目本身也是一份清单：插件没有 `plugin.json` 时，条目就是清单；有的话，条目里的 `skills`、`commands`、`agents` 和 `hooks` 会加进去，除非条目写了 `"strict": false`。Harness Forge 把合并后的清单写进它自己的插件副本里，所以像 `anthropics/skills` 这种在条目里按路径列出技能的市场，安装后得到的正是条目指定的那些技能。
+
+OpenCode 的 npm 插件在 Bun 运行时中运行，与磁盘上找到的 OpenCode 代码插件相同。确认之前，npm 完全不会运行。Harness Forge 自己从 npm 配置的仓库读取这个包：仓库地址取 `npm_config_registry` 或 `~/.npmrc` 中的 `registry=` 一行，都没有时用 npm 官方仓库。版本只能是确切的版本号或 `latest` 这样的标签，不能是版本范围。它从仓库自己的地址下载该版本的压缩包，并按仓库给出的 sha512 校验值核对。不读取按作用域配置的仓库，也不使用仓库登录凭据。确认界面会显示仓库地址，以及插件声明了多少个依赖。这些依赖在你确认后，像 OpenCode 安装插件那样，用 `npm install --ignore-scripts` 从该仓库安装。插件若直接或间接依赖 git 仓库、网址或本地目录，会被拒绝安装。确认之后，npm 会按它自己的配置解析依赖，过程中可能访问其他主机，例如你的 npm 设置或仓库重定向所指的主机。Harness Forge 检查的是解析结果中记录的包：每个包都必须是来自该仓库、带完整性校验值的压缩包。
+
+### 确认之前来源能做什么
+
+你确认之前，取回的内容一概不会运行：插件和插件市场的钩子、脚本、git 设置、安装步骤都不会。安装的就是你在确认界面看到的内容：如果下载的文件在你看过之后发生变化，或者更新时的版本与“检查更新”找到的不一致，Harness Forge 会拒绝安装。
+
+- **插件市场只能指向公网 HTTPS 来源。** 其中的 git 条目必须是公网地址上的 `https://` 地址，并且不跟随重定向。`archive` 通过 HTTPS 下载。`npm` 条目只能指定 npm 官方仓库或你配置的仓库。插件市场不能让 Harness Forge 访问这台电脑、你的局域网，也不能让它使用 `ssh`、`file:` 或其他 git 传输方式。你自己粘贴的来源可以是任意主机，可用 `https`、`http`、`ssh`、`git` 或 `file`；但任何重定向，即使来自你粘贴的地址，也必须指向公网地址。
+- **不使用代理时，每个连接都发往检查过的地址。** Harness Forge 自己的下载（插件市场文件、GitHub 压缩包、npm 元数据和压缩包）都连接到它检查过的地址。对插件市场里的 git 地址，git 同样只连接到检查过的地址，这需要 git 2.37 或更新版本。没有满足条件的 git 时，GitHub 上的来源改为下载压缩包，其他主机则拒绝获取。
+- **使用代理时，只访问已知的主机。** Harness Forge 使用 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY` 中设置的代理（`http://` 或 `https://` 代理，需要时可带用户名和密码），并跳过 `NO_PROXY` 中的主机，与 git 和 npm 的做法相同。主机名由代理解析，Harness Forge 无法知道它实际指向哪里。因此通过代理时，它只访问 `github.com`, `codeload.github.com`, `api.github.com`, `raw.githubusercontent.com`, `objects.githubusercontent.com`, `registry.npmjs.org`、你配置的 npm 仓库，以及你自己粘贴的来源所在的主机。插件市场条目或重定向如果指向其他主机，会被拒绝，并给出主机名。要从这样的主机安装，请自己粘贴那个来源；如果能直接访问该主机，也可以把它加入 `NO_PROXY`。这依赖于你的代理：主机名由代理解析、连接也由代理建立，所以对上面这些主机，Harness Forge 信任代理的结果。即使经过代理，证书仍按主机名校验。git 使用 Harness Forge 选定的路线（经代理或直连），不自行读取代理变量（代理密码通过环境变量交给 git，这需要 git 2.31 或更新版本），也不跟随 HTTP 重定向；仓库搬迁后，需要粘贴它的新地址。
+- **不含链接。** 插件只由普通文件和目录组成。含有链接、硬链接或设备文件的压缩包不会被解压；从仓库复制插件时，其中的链接会被略去，确认界面会列出略去了哪些。
+- **git 不使用你的 git 配置运行。** 它不读取你的全局和系统设置、钩子、模板、凭据助手和 `GIT_*` 环境变量，也不获取子模块或 LFS 文件。因此不支持通过 HTTPS 访问私有仓库；以 `ssh` 地址（`git@host:owner/repo.git`）粘贴的私有仓库可以使用你自己的 SSH 密钥。
+- **有上限。** 每个操作最多 10 分钟。下载、克隆或安装写入的内容一旦超过大小上限就会立即停止，即使服务器无视部分克隆的请求也是如此。固定的提交单独获取；如果服务器不允许这样做，Harness Forge 会报告出来，而不是下载整个历史。
+
 ## 工作区信任
 
 项目会带来它自己的部分：Claude Code 的 `.claude/` 和 `.mcp.json`，Codex 的 `.codex/`。其中一些会在会话开始时就在你的电脑上运行代码或访问网络，因此与 Claude Code 一样，要等你信任该工作区后才启用：

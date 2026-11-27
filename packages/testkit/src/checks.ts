@@ -3,8 +3,10 @@
  * what was observed: what reached the model, what a tool returned, what a hook left on disk. Checks name no
  * internal module of the plugin, only what a person or the model can see.
  */
+import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { FIXTURES, profileDir, runSession, type Sandbox, type Session } from './dsh.ts'
 import { toolResults } from './helpers.ts'
 import { isAuxiliary, requestText, systemText, toolNames, type MessagesRequest, type Policy, type Reply } from './mock-llm.ts'
@@ -97,6 +99,28 @@ function scenario(name: string, start: () => Promise<Session>): Promise<Session>
     scenarios.set(name, session)
   }
   return session
+}
+
+/**
+ * A Claude Code marketplace in a local git repository, as one on GitHub is: an entry inside it and its
+ * `.claude-plugin/marketplace.json`. Returns its `file://` URL, which Harness Forge clones as it clones a remote.
+ */
+function localMarketplace(sandbox: Sandbox): string {
+  const dir = sandbox.directory('net-market')
+  const files: Record<string, string> = {
+    '.claude-plugin/marketplace.json': JSON.stringify({ name: 'e2e-net-market', owner: { name: 'E2E' }, plugins: [{ name: 'net-plugin', source: './plugins/net-plugin', description: 'Fetched from a marketplace' }] }),
+    'plugins/net-plugin/.claude-plugin/plugin.json': JSON.stringify({ name: 'net-plugin', version: '1.0.0' }),
+    'plugins/net-plugin/skills/net-skill/SKILL.md': '---\nname: net-skill\ndescription: E2E network skill\n---\n\nNET-BODY-6e1f: the network word is lantern.\n',
+  }
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true })
+    writeFileSync(join(dir, path), content)
+  }
+  const git = (...args: string[]): void => { execFileSync('git', ['-c', 'user.email=e2e@example.invalid', '-c', 'user.name=E2E', ...args], { cwd: dir, stdio: 'ignore' }) }
+  git('init', '-q', '-b', 'main')
+  git('add', '.')
+  git('commit', '-qm', 'marketplace')
+  return pathToFileURL(dir).href
 }
 
 const hookScenario = (sandbox: Sandbox): Promise<Session> => scenario('hooks', () => runSession(sandbox, {
@@ -355,6 +379,39 @@ export const checks: readonly Check[] = [
       const platformBound = platformPackagesOf(profileDir(sandbox), '@kirkchinese/harness-forge')
       assert(platformBound.length === 0, `Harness Forge brings packages restricted to an OS or CPU into the profile: ${platformBound.join(', ')}`)
       return 'installed on the first call, applied live and listed; no platform-specific package from Harness Forge'
+    },
+  },
+  {
+    name: 'network-install',
+    async run(sandbox) {
+      // What "Get plugins" does: open a marketplace, fetch an entry and show what it contains, then install it.
+      const url = localMarketplace(sandbox)
+      const remote = (method: string, request: Record<string, unknown>): Reply => call('lab_remote', { namespace: REMOTE_NAMESPACE, method, request })
+      const policy: Policy = (request, seen) => {
+        const turn = seen.filter(item => !isAuxiliary(item)).length
+        if (turn === 0) return remote('remoteOpen', { input: url })
+        if (turn === 1) return remote('remotePrepare', { input: url, entry: 'net-plugin' })
+        if (turn === 2) {
+          const token = /"token":"([0-9a-f]+)"/u.exec(lastMessageText(request))?.[1]
+          return token === undefined ? { text: 'no token' } : remote('remoteInstall', { token })
+        }
+        return undefined
+      }
+      const installing = await runSession(sandbox, { name: 'network-install', task: 'Install the plugin.', policy })
+      const [opened, prepared, installed] = toolResults(installing.events, 'lab_remote')
+      assert(opened?.ok === true && opened.text.includes('e2e-net-market') && opened.text.includes('net-plugin'), `remoteOpen did not list the marketplace: ${opened?.text ?? 'no call'}`)
+      assert(prepared?.ok === true && prepared.text.includes('"name":"net-skill"') && /"revision":"[0-9a-f]{12}"/u.test(prepared.text), `remotePrepare did not show the parts and the commit: ${prepared?.text ?? 'no call'}`)
+      assert(installed?.ok === true, `remoteInstall failed: ${installed?.text ?? 'no call'}`)
+      const fetched = join(profileDir(sandbox), '.harness-forge', 'data', 'remote', 'plugins')
+      assert(existsSync(fetched), 'nothing was fetched into Harness Forge\'s data directory')
+      assert(!existsSync(join(sandbox.home, '.claude', 'plugins')), 'the install wrote into ~/.claude')
+
+      // The next session has the plugin, as one installed from disk.
+      const using = await runSession(sandbox, { name: 'network-skill', task: 'What is the network word?', policy: steps(call('skill', { name: 'net-skill' })) })
+      assert(requestText(firstAgentRequest(using)).includes('`net-skill`: E2E network skill'), 'the fetched skill is not in the model\'s skill catalog')
+      const [loaded] = toolResults(using.events, 'skill')
+      assert(loaded?.ok === true && loaded.text.includes('NET-BODY-6e1f'), `the fetched skill did not load: ${loaded?.text ?? 'no skill call'}`)
+      return 'opened a git marketplace, confirmed, installed; its skill loads in the next session'
     },
   },
 ]

@@ -112,6 +112,7 @@ export type HarnessErrorCode =
   | 'host-capability-missing'
   | 'runtime-failed'
   | 'marketplace-failed'
+  | 'fetch-failed'
   | 'plugins-missing'
   | 'entry-not-found'
   | 'unsupported-source'

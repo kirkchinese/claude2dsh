@@ -248,6 +248,62 @@ export class HarnessRemoteService extends TypertRemoteService {
     })
   }
 
+  // --- plugins from the network ------------------------------------------------
+
+  /** The default marketplaces, the ones the person added, what was installed from the network, and whether git is installed. */
+  remoteSources(): Promise<unknown> {
+    return this.guard('remoteSources', () => this.forge.remote.sources())
+  }
+
+  /** Open a pasted marketplace or plugin (`owner/repo`, a git URL, a marketplace.json URL, an npm package, a local folder): its entries, fetched now. */
+  remoteOpen(request: Record<string, unknown>): Promise<unknown> {
+    return this.guard('remoteOpen', () => this.forge.remote.open(required(request, 'input', 'remoteOpen')))
+  }
+
+  /** Stop listing a marketplace the person added. */
+  remoteForget(request: Record<string, unknown>): Promise<unknown> {
+    return this.guard('remoteForget', () => ({ forgotten: this.forge.remote.forget(required(request, 'input', 'remoteForget')) }))
+  }
+
+  /**
+   * Fetch one plugin (a marketplace's `entry`, or the pasted `input` itself) and say what it contains, to confirm:
+   * `{ token, name, source, page?, revision, parts, runsCode, … }`. Nothing is installed yet.
+   */
+  remotePrepare(request: Record<string, unknown>): Promise<unknown> {
+    return this.guard('remotePrepare', () => this.forge.remote.prepare(required(request, 'input', 'remotePrepare'), text(request, 'entry') || undefined))
+  }
+
+  /** Install (or, for an update, apply) exactly what `remotePrepare` or `remotePrepareUpdate` showed. */
+  remoteInstall(request: Record<string, unknown>): Promise<unknown> {
+    return this.guard('remoteInstall', async () => {
+      const result = await this.forge.remote.install(required(request, 'token', 'remoteInstall'))
+      if (result.report === undefined) return { pluginId: result.pluginId, revision: result.revision, updated: result.updated }
+      // Plain JSON: absent fields dropped, as every other answer has them.
+      return JSON.parse(JSON.stringify({ ...reportOf(result.report as InstallReport), revision: result.revision, updated: result.updated })) as unknown
+    })
+  }
+
+  /** Drop a confirmation the person declined, with the files it fetched. */
+  remoteCancel(request: Record<string, unknown>): Promise<unknown> {
+    return this.guard('remoteCancel', () => ({ cancelled: this.forge.remote.cancel(required(request, 'token', 'remoteCancel')) }))
+  }
+
+  /**
+   * Compare what was installed from the network with its source now
+   * (`{ updates: [{ pluginId, current, latest?, update, token?, error? }] }`); `token` names the revision found.
+   */
+  remoteCheckUpdates(request: Record<string, unknown> | undefined): Promise<unknown> {
+    return this.guard('remoteCheckUpdates', async () => ({ updates: await this.forge.remote.checkUpdates(text(request, 'pluginId') || undefined) }))
+  }
+
+  /**
+   * Fetch the revision a check found (`{ pluginId, token }`) and say what it contains and what changed, to confirm
+   * like an install; `remoteInstall` with the returned token applies it.
+   */
+  remotePrepareUpdate(request: Record<string, unknown>): Promise<unknown> {
+    return this.guard('remotePrepareUpdate', () => this.forge.remote.prepareUpdate(required(request, 'pluginId', 'remotePrepareUpdate'), required(request, 'token', 'remotePrepareUpdate')))
+  }
+
   // --- sign-in, sessions ------------------------------------------------------
 
   signIns(): Promise<unknown> {
@@ -460,6 +516,14 @@ export const REMOTE_METHODS: ReadonlyArray<readonly [string, 'unary' | 'stream',
   ['removePlugin', 'unary', true],
   ['marketplaceScan', 'unary', true],
   ['marketplaceInstall', 'unary', true],
+  ['remoteSources', 'unary', false],
+  ['remoteOpen', 'unary', true],
+  ['remoteForget', 'unary', true],
+  ['remotePrepare', 'unary', true],
+  ['remoteInstall', 'unary', true],
+  ['remoteCancel', 'unary', true],
+  ['remoteCheckUpdates', 'unary', true],
+  ['remotePrepareUpdate', 'unary', true],
   ['signIns', 'unary', false],
   ['signIn', 'unary', true],
   ['sessions', 'unary', true],

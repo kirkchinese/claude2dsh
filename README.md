@@ -26,6 +26,7 @@
 Most plugin authors write for one harness. Harness Forge is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that reads the plugins you already have and runs them in DSH:
 
 - **Claude Code** fully: plugins, marketplaces, your `~/.claude` and a project's `.claude/`.
+- **Straight from the internet**: paste a Claude Code or Codex marketplace (`owner/repo`, a git URL or a `marketplace.json` URL), a single plugin repository, or an OpenCode npm package, then confirm and install. You don't need the original harness. Anthropic's and OpenAI's marketplaces are listed ready to open.
 - **Codex** and **OpenCode**: plugins, your `~/.codex`, OpenCode projects and code plugins.
 - **Any harness that uses the common formats**: `SKILL.md` skills, MCP JSON, `AGENTS.md`. Add a folder of skills (with an optional `.mcp.json`) to the plugin folders and it is read as one plugin; Gemini CLI's `~/.gemini/skills` is listed by default. DSH already loads `~/.agents/skills` itself.
 
@@ -49,6 +50,7 @@ then start DSH again. For another profile, put its name in place of `web`; the d
 
 1. **Open Harness Forge** in the DSH sidebar. **Discover & migrate** lists the Claude Code, Codex and OpenCode plugins found on this computer, plus your own settings. Each part is marked as working, partly working or not possible, with the reason.
 2. **Migrate.** Press **Migrate all**, or migrate one plugin at a time. You can switch single parts off or undo a migration later in **Migrated**.
+   No Claude Code here? Under **Get plugins**, open a marketplace such as `anthropics/claude-plugins-official`, or paste `owner/repo` or an npm package, and install from the internet.
 3. **Work.** Start a session. Skills are in the skill catalog, commands are in the `/` menu, agents can take delegated tasks, and hooks fire on their events.
 
 ![The Discover & migrate screen: Claude Code and Codex plugins found on this computer, each marked works or partly works](docs/assets/discover.en.jpg)
@@ -119,7 +121,7 @@ Separate, optional DSH plugins. Harness Forge uses them when they are installed:
 
 ## Safety
 
-Migrated hooks, MCP servers and plugin code run with your permissions, as they do in their original harness. Migrate only plugins you trust. On Windows, hooks run in Git Bash (as in Claude Code); elsewhere in bash.
+Migrated hooks, MCP servers and plugin code run with your permissions, as they do in their original harness. Migrate only plugins you trust. Before a plugin from the internet is installed, Harness Forge shows its source, exact commit and parts, and warns about parts that run code. On Windows, hooks run in Git Bash (as in Claude Code); elsewhere in bash.
 
 ## Documentation
 

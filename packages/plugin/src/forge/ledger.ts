@@ -570,6 +570,37 @@ export class Ledger {
     return true
   }
 
+  /**
+   * Move an installed plugin to a new copy of its source (an update fetched
+   * into a directory of its own): its registrations are withdrawn and the new
+   * copy applied under the same id, keeping the parts the person switched off,
+   * its install time and its receipts. When the new copy does not apply, the
+   * old one is applied again and the failure is thrown.
+   */
+  async rerootNow(id: string, root: string, source?: string): Promise<ApplyResult> {
+    this.assertAlive()
+    const install = this.live.get(id)
+    if (install === undefined) throw new HarnessError('not-installed', `no installed plugin ${id}`)
+    const previous = install.record
+    if (!await this.teardown(id)) throw new HarnessError('not-installed', `no installed plugin ${id}`)
+    const holder = (record: InstalledPluginRecord): LiveInstall => ({ record, mounts: new LiveMounts(this.faultOf), outcomes: new Map() })
+    this.live.set(id, holder({ ...previous, root: resolve(root), source: source ?? previous.source }))
+    try {
+      const plan = this.planNow(root, source ?? previous.source)
+      if (plan.pluginId !== id) throw new HarnessError('manifest-invalid', `the new copy is a different plugin (${plan.pluginId}, not ${id})`, { suggestion: 'Remove the plugin and install the new one.' })
+      return await this.applyNow(plan)
+    } catch (error: unknown) {
+      this.live.set(id, holder(previous))
+      try {
+        await this.applyNow(this.planNow(previous.root, previous.source))
+      } catch {
+        this.keepUnrestored(previous, messageOf(error))
+      }
+      this.persist()
+      throw error
+    }
+  }
+
   /** Release one installation without deciding whether the ledger survives. */
   async teardown(id: string): Promise<boolean> {
     const install = this.live.get(id)
