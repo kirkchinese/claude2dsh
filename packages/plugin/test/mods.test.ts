@@ -157,7 +157,7 @@ describe('mods instruction files', () => {
     write('home/work/repo/sub/CLAUDE.local.md', 'sub local')
 
     const files = claudeInstructionFiles(join(root, 'home/work/repo/sub'), join(root, 'home'))
-    expect(files.map(file => [file.path.slice(root.length + 1), file.kind, file.content])).toEqual([
+    expect(files.map(file => [file.path.slice(root.length + 1).replaceAll('\\', '/'), file.kind, file.content])).toEqual([
       ['home/.claude/CLAUDE.md', 'user', 'user'],
       ['home/work/repo/CLAUDE.md', 'project', 'repository\n@notes.md'],
       ['home/work/repo/notes.md', 'import', 'notes'],
