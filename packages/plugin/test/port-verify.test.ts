@@ -33,7 +33,10 @@ describe('the port prompt', () => {
   const prompt = portPrompt({ plugin, component, brief: '# Port "statusline" of claude-hud to DSH\n\nfacts\n', language: 'zh-CN' })
 
   it('asks once, with the default source directory and the brief\'s questions, before writing code', () => {
-    expect(prompt).toContain('ONE concise message')
+    expect(prompt).toContain('Your first reply is ONE concise message')
+    expect(prompt).toContain('Use only the brief: do not call tools, inspect files or the runtime, or plan the implementation before the answer')
+    expect(prompt).toContain('Now read the original files and load the `dsh-doc` skill')
+    expect(prompt).toContain('find and read the installed dsh-doc references directly')
     expect(prompt).toContain('`~/dsh-adapters/dsh-adapter-claude-hud-statusline`, because it is outside every workspace')
     expect(prompt).toContain('"Questions for the user" in the brief')
     expect(prompt).toMatch(/Never ask what you can look up/u)

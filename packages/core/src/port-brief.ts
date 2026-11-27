@@ -104,6 +104,9 @@ export function extensionPointsFor(component: ForeignComponent, gaps: readonly G
   const kinds = new Set(gaps.map(gap => gap.kind))
   if (component.kind === 'ui' || kinds.has('ui-surface')) {
     points.add('Client UI plugin: a React component registered into a Web slot through `ctx.slots` (dsh-doc `references/ui-plugin.md`), styled with the `--dsw-alias-*` theme tokens')
+    if (component.kind === 'ui' && component.surface === 'statusline') {
+      points.add('For the default Web status-line placement, look for the session-scoped `conversation.composer.dock` slot below the composer; confirm it at runtime after the user replies')
+    }
     points.add('Host session projection with `wire.view`, so the Client receives a value already derived from the session log')
     points.add('A Host Remote namespace (a `TypertRemoteService`) when the Client half needs Host data that is not a session projection')
   }
@@ -131,9 +134,9 @@ export function extensionPointsFor(component: ForeignComponent, gaps: readonly G
 export function openQuestionsFor(component: ForeignComponent, gaps: readonly Gap[]): string[] {
   const questions: string[] = []
   if (component.kind === 'ui' && component.surface === 'statusline') {
-    questions.push('Where the status line shows: DSH draws none of its own and several Web slots could hold one line per session (confirm their names with `cordis_inspect_query` before asking). Default: the slot nearest to where Claude Code draws it, one line under the message input.')
+    questions.push('Where the status line shows in the DSH Web UI. Default: just below the message input.')
   } else if (component.kind === 'ui' && component.surface !== 'output-style') {
-    questions.push(`Where the ${component.surface} surface appears in the DSH Web UI, when more than one slot fits (confirm slot names with \`cordis_inspect_query\` first). Default: the slot closest to where the original shows it.`)
+    questions.push(`Where the ${component.surface} surface appears in the DSH Web UI. Default: as close as possible to where the original shows it.`)
   }
   for (const gap of gaps) {
     if (gap.kind === 'unsupported-event') questions.push(`Which DSH event stands in for each event DSH never raises (${gap.summary}), or whether to leave one out. Default: the nearest lifecycle event you found, named in the question.`)

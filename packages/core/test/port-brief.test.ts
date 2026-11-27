@@ -58,7 +58,8 @@ describe('the porting brief', () => {
     expect(defaultAdapterDir('dsh-adapter-claude-hud-statusline')).toBe('~/dsh-adapters/dsh-adapter-claude-hud-statusline')
     expect(brief).toContain('## Questions for the user')
     expect(brief).toContain("- Where the adapter's source lives. Default: `~/dsh-adapters/dsh-adapter-claude-hud-statusline`.")
-    expect(brief).toMatch(/- Where the status line shows: [^\n]*Default: the slot nearest to where Claude Code draws it/u)
+    expect(openQuestionsFor(component, gaps)).toEqual(['Where the status line shows in the DSH Web UI. Default: just below the message input.'])
+    expect(brief).toContain('`conversation.composer.dock` slot below the composer; confirm it at runtime after the user replies')
     const hooks = { id: 'h', kind: 'hooks', name: 'hooks', configPath: 'hooks.json', modules: [], events: [] } as never
     expect(openQuestionsFor(hooks, [{ id: 'g', componentId: 'h', kind: 'unsupported-event', summary: 'events DSH never raises: Notification', detail: '', suggestedAction: 'port' } as never]))
       .toEqual([expect.stringContaining('Which DSH event stands in for each event DSH never raises (events DSH never raises: Notification)')])
