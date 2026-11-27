@@ -106,14 +106,43 @@ async function namespace(): Promise<Namespace> {
   return ready
 }
 
-/** Call one workbench method; a failure throws an Error carrying the Host's reason. */
+/** A failed call: the Host's reason, and the Remote error code when there is one. */
+export class CallError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message)
+    this.name = 'CallError'
+  }
+}
+
+/** Gateway codes for an endpoint that no running Host service answers: the workbench row is off. */
+const NOT_SERVED = new Set(['gateway/invocation-unavailable', 'gateway/service-unavailable', 'gateway/method-unavailable', 'gateway/definition-unavailable'])
+
+/**
+ * Whether a failed call means the `harness-forge-workbench` row is switched off: the page is
+ * there (the client is declared once per package) but nothing on the Host answers `harnessCompat`.
+ */
+export function isWorkbenchOff(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as { code?: unknown }).code
+  if (typeof code === 'string' && NOT_SERVED.has(code)) return true
+  return /harness-forge-workbench/u.test(error.message)
+    || /harnessCompat\/\w+.*(?:no active Remote method|active Service .* is unavailable|has no callable method|definition was withdrawn)/u.test(error.message)
+}
+
+/** Call one workbench method; a failure throws a CallError carrying the Host's reason. */
 export async function call<T>(method: string, request?: Record<string, unknown>): Promise<T> {
   const target = (await namespace())[method]
-  if (typeof target !== 'function') throw new Error(`Harness Forge has no method ${method}`)
-  const result = await (request === undefined ? target() : target(request)) as unknown
+  if (typeof target !== 'function') throw new CallError(`Harness Forge has no method ${method}`)
+  let result: unknown
+  try {
+    result = await (request === undefined ? target() : target(request)) as unknown
+  } catch (error: unknown) {
+    const code = (error as { code?: unknown } | null)?.code
+    throw new CallError(error instanceof Error ? error.message : String(error), typeof code === 'string' ? code : undefined)
+  }
   if (typeof result === 'object' && result !== null && 'ok' in result) {
     const outcome = result as { ok: boolean; value?: unknown; error?: { message?: string; code?: string } }
-    if (!outcome.ok) throw new Error(outcome.error?.message ?? outcome.error?.code ?? `${method} failed`)
+    if (!outcome.ok) throw new CallError(outcome.error?.message ?? outcome.error?.code ?? `${method} failed`, outcome.error?.code)
     return outcome.value as T
   }
   return result as T

@@ -2,10 +2,13 @@
 import { open, readdir, stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import type { AdapterOptions, DiscoveredSession } from '../../../sessions/index.js'
-import type { ClaudeFileProbe, RawJson } from './types.js'
+import type { ClaudeFileProbe, RawJson, RawRecord } from './types.js'
+import { ClaudeTitle } from './title.js'
 import { parseTimestamp } from '../../../sessions/time.js'
 
 const PROBE_BYTES = 256 * 1024
+/** A `/rename` or a generated title is appended as the session goes on, so the end of a long file is read for it too. */
+const TAIL_BYTES = 64 * 1024
 
 async function probeHead(filePath: string, auxiliary: boolean): Promise<ClaudeFileProbe> {
   const handle = await open(filePath, 'r')
@@ -15,36 +18,48 @@ async function probeHead(filePath: string, auxiliary: boolean): Promise<ClaudeFi
     const buffer = Buffer.alloc(length)
     const { bytesRead } = await handle.read(buffer, 0, length, 0)
     const head = buffer.toString('utf8', 0, bytesRead)
-    return parseProbe(head, basename(filePath).replace(/\.jsonl$/i, ''), auxiliary)
+    let tail = ''
+    if (size > length) {
+      const tailLength = Math.min(TAIL_BYTES, size - length)
+      const tailBuffer = Buffer.alloc(tailLength)
+      const read = await handle.read(tailBuffer, 0, tailLength, size - tailLength)
+      // The first line read from the middle of the file is partial.
+      tail = tailBuffer.toString('utf8', 0, read.bytesRead).replace(/^[^\n]*\n/u, '')
+    }
+    return parseProbe(head, tail, basename(filePath).replace(/\.jsonl$/i, ''), auxiliary)
   } finally {
     await handle.close()
   }
 }
 
-function parseProbe(head: string, fileStem: string, auxiliary: boolean): ClaudeFileProbe {
-  const lines = head.split('\n')
+function records(text: string): RawJson[] {
+  const out: RawJson[] = []
+  for (const raw of text.split('\n')) {
+    if (raw.length === 0) continue
+    try {
+      out.push(JSON.parse(raw) as RawJson)
+    } catch {
+      // A line cut at the end of the head, or a malformed one.
+    }
+  }
+  return out
+}
+
+function parseProbe(head: string, tail: string, fileStem: string, auxiliary: boolean): ClaudeFileProbe {
   let sessionId: string | undefined
   let agentId: string | undefined
   let cwd: string | undefined
-  let title: string | undefined
   let createdAt: number | undefined
-  for (const raw of lines) {
-    if (raw.length === 0) continue
-    let record: RawJson
-    try {
-      record = JSON.parse(raw) as RawJson
-    } catch {
-      continue
-    }
+  const titles = new ClaudeTitle()
+  for (const record of records(head)) {
     if (sessionId === undefined && typeof record.sessionId === 'string' && record.sessionId.length > 0) sessionId = record.sessionId
     if (agentId === undefined && typeof record.agentId === 'string' && record.agentId.length > 0) agentId = record.agentId
     if (cwd === undefined && typeof record.cwd === 'string' && record.cwd.length > 0) cwd = record.cwd
     if (createdAt === undefined && record.timestamp !== undefined) createdAt = parseTimestamp(record.timestamp, createdAt)
-    if (title === undefined && record.type === 'ai-title' && typeof record.aiTitle === 'string' && record.aiTitle.trim().length > 0) {
-      title = record.aiTitle.trim()
-    }
-    if (cwd !== undefined && createdAt !== undefined && title !== undefined) break
+    titles.observe(record as RawRecord)
   }
+  for (const record of records(tail)) titles.observe(record as RawRecord)
+  const title = titles.title
   return {
     sourceId: auxiliary ? (agentId ?? fileStem) : (sessionId ?? fileStem),
     ...(cwd !== undefined ? { cwd } : {}),

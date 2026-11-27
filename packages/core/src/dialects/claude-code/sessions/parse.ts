@@ -14,6 +14,7 @@ import type {
 import type { RawJson, RawLine, RawRecord } from './types.js'
 import { isAuxiliaryTranscriptPath } from './discover.js'
 import { parseTimestamp } from '../../../sessions/time.js'
+import { ClaudeTitle } from './title.js'
 
 /** Adapter read options. */
 export interface ClaudeReadOptions extends AdapterOptions {
@@ -201,7 +202,7 @@ export async function readClaudeSession(ref: DiscoveredSession, options: ClaudeR
   let cwd: string | undefined
   let createdAt: number | undefined
   let model: string | undefined
-  let explicitTitle: string | undefined
+  const titles = new ClaudeTitle()
 
   for (const entry of rawLines) {
     const rec = entry.record
@@ -210,17 +211,7 @@ export async function readClaudeSession(ref: DiscoveredSession, options: ClaudeR
     if (createdAt === undefined) createdAt = parseTimestamp(rec.timestamp, createdAt)
     const recModel = typeof rec.message?.model === 'string' ? rec.message.model : typeof rec.model === 'string' ? rec.model : undefined
     if (model === undefined && recModel !== undefined) model = recModel
-    if (rec.type === 'ai-title' && typeof rec.aiTitle === 'string' && rec.aiTitle.trim().length > 0) {
-      explicitTitle = rec.aiTitle.trim()
-    }
-    if (rec.type === 'summary') {
-      const candidate = typeof rec.summary === 'string' && rec.summary.trim().length > 0
-        ? rec.summary
-        : typeof rec.title === 'string' && rec.title.trim().length > 0
-          ? rec.title
-          : undefined
-      if (candidate !== undefined) explicitTitle = candidate
-    }
+    titles.observe(rec)
   }
 
   const fileStem = basename(ref.ref).replace(/\.jsonl$/i, '')
@@ -344,7 +335,7 @@ export async function readClaudeSession(ref: DiscoveredSession, options: ClaudeR
     })),
   }))
 
-  const title = explicitTitle ?? (normalizedTurns[0] !== undefined ? firstTitle(normalizedTurns[0].prompt) : undefined)
+  const title = titles.title
   const session: NormalizedSession = {
     id,
     source: { tool: 'claude-code', path: ref.ref, sessionId: sourceId },
@@ -438,11 +429,6 @@ function isAuxiliaryTranscript(filePath: string, fileStem: string, sessionId: st
     return `file name ${fileStem} does not match source sessionId ${sessionId}`
   }
   return undefined
-}
-
-function firstTitle(prompt: string): string | undefined {
-  const text = prompt.trim().replace(/\s+/g, ' ')
-  return text.length > 0 ? text : undefined
 }
 
 function emptySession(ref: DiscoveredSession, sourceId: string, createdAt: number | undefined, cwd: string | undefined): NormalizedSession {

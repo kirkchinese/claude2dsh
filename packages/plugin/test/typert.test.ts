@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
+import { isRemoteJsonValue, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import { HarnessRemoteService, REMOTE_METHODS } from '../src/workbench/remote.js'
-import { TYPERT_REMOTE } from '../src/client/typert.js'
+import { call, isWorkbenchOff, setMountedRemote, TYPERT_REMOTE } from '../src/client/typert.js'
 
 /** A Remote service over a stand-in shared service (its rows' APIs in `rows`), without a Cordis context. */
 function remoteOver(forge: Record<string, unknown>, rows: Record<string, unknown> = {}): HarnessRemoteService {
@@ -96,6 +96,72 @@ describe('harnessCompat Remote namespace', () => {
     expect(await remote.adapterRead({ adapter: 'demo-statusline', session: 's2', cols: 90 })).toEqual({ lines: ['s2 #3'], at: 3 })
     surface.dispose()
     await expect(async () => { for await (const _ of remote.adapterSurface({ adapter: 'demo-statusline', session: 's1' })) break }).rejects.toMatchObject({ message: 'no adapter surface "demo-statusline" is registered in this DSH' })
+  })
+
+  it('answers every method as lossless JSON, whatever the service hands back', async () => {
+    // What a service might return: absent fields as `undefined`, at any depth (an install report's `receipt`, say).
+    const dirty = (): Record<string, unknown> => ({
+      kept: 'yes', gone: undefined, count: 1, zero: -0,
+      nested: { gone: undefined, list: ['a', undefined, { gone: undefined, kept: true }] },
+      // Enough of a plugin and a report for the methods that summarise one.
+      plugin: { id: 'claude-code:p', name: 'p', source: 'claude-code', root: '/p', version: undefined, license: undefined, ref: { manifestKind: 'plugin.json' }, manifest: {}, components: [], warnings: [] },
+      report: undefined, pluginId: 'claude-code:p', revision: 'r1', updated: false,
+      receipt: undefined, outcomes: [], alreadyInstalled: true,
+      name: 'm', entries: [], warnings: [], components: [],
+    })
+    const service = new Proxy({}, { get: (_target, key) => key === 'then' ? undefined : () => dirty() })
+    const remote = remoteOver({
+      install: dirty, installMarketplace: dirty, uninstall: () => true, setPartEnabled: () => true,
+      scanMarketplace: dirty,
+      remote: service,
+      projects: { workspaces: () => [dirty()], setTrust: () => ({ stillLive: [dirty()] }), trust: { list: () => [dirty()], state: () => ({ workspace: '/nowhere', trusted: false, sources: [], gone: undefined }), dismiss: () => undefined } },
+      ctx: {},
+      statePath: join(import.meta.dirname, 'no-such-state'),
+    }, { context: service, mcp: service, sessions: { sessions: () => [dirty()], importSession: dirty }, mods: service })
+    Object.defineProperty(remote, 'workbench', { value: new Proxy({}, { get: () => () => dirty() }) })
+    const request: Record<string, unknown> = {
+      path: '/p', token: 't', input: 'i', id: 'claude-code:p', name: 'm', pluginId: 'claude-code:p', componentId: 'c', enabled: true,
+      cwd: '/nowhere', trusted: true, dismissed: true, server: 's', source: 'claude-code', session: 's', pane: 'p', generation: 1,
+    }
+    const answered: string[] = []
+    for (const [method, mode, takesRequest] of REMOTE_METHODS) {
+      if (mode === 'stream' || ['adapterRead', 'portBrief', 'portGap', 'verifyPort', 'installChatImport'].includes(method)) continue
+      const call = (remote as unknown as Record<string, (request?: unknown) => Promise<unknown>>)[method]!
+      const answer = await call.call(remote, takesRequest ? request : undefined)
+      expect(isRemoteJsonValue(answer) || answer === undefined, `${method} answers ${JSON.stringify(answer)}`).toBe(true)
+      answered.push(method)
+    }
+    expect(answered).toEqual(expect.arrayContaining(['installPlugin', 'marketplaceInstall', 'remoteInstall', 'overview', 'sessions', 'importSession']))
+    // An adapter's surface is the adapter's answer; it is cleaned the same way, read once or streamed.
+    remote.registerAdapterSurface('dirty', { read: dirty })
+    expect(isRemoteJsonValue(await remote.adapterRead({ adapter: 'dirty' }))).toBe(true)
+    for await (const value of remote.adapterSurface({ adapter: 'dirty' }, AbortSignal.timeout(1000))) {
+      expect(isRemoteJsonValue(value)).toBe(true)
+      break
+    }
+    // A number JSON cannot carry is refused with a reason, not sent as null.
+    remote.registerAdapterSurface('nan', { read: () => ({ at: Number.NaN }) })
+    await expect(remote.adapterRead({ adapter: 'nan' })).rejects.toMatchObject({ code: 'harness-forge/failed', message: expect.stringMatching(/at.*NaN/u) })
+  })
+
+  it('tells a call the workbench row cannot answer (it is off) from an ordinary failure', async () => {
+    const failing = (error: unknown) => ({ overview: () => Promise.resolve({ ok: false, error }), settings: () => Promise.reject(error as Error) })
+    // What the browser's Remote namespace answers while no Host service serves harnessCompat.
+    setMountedRemote(failing({ code: 'gateway/invocation-unavailable', message: 'typert gateway: harnessCompat/overview: no active Remote method exports this endpoint' }))
+    const off = await call('overview').catch((error: unknown) => error)
+    expect(isWorkbenchOff(off)).toBe(true)
+    expect(off).toMatchObject({ code: 'gateway/invocation-unavailable' })
+    setMountedRemote(failing(Object.assign(new Error('typert gateway: harnessCompat/settings: active Service "harnessCompat" is unavailable'), { code: 'gateway/service-unavailable' })))
+    expect(isWorkbenchOff(await call('settings').catch((error: unknown) => error))).toBe(true)
+    // A failure the workbench itself reports is shown as it is.
+    setMountedRemote(failing({ code: 'harness-forge/failed', message: 'the Harness Forge mcp row is off; turn it on in Plugin Manager' }))
+    expect(isWorkbenchOff(await call('overview').catch((error: unknown) => error))).toBe(false)
+    expect(isWorkbenchOff(new Error('network down'))).toBe(false)
+    // The notice is worded in both languages.
+    for (const language of ['en', 'zh']) {
+      const strings = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'src', 'client', 'locale', `${language}.json`), 'utf8')) as Record<string, string>
+      expect(strings['workbenchOff']).toMatch(/workbench/u)
+    }
   })
 
   it('ends the stream at once when the session\'s mods draw nothing', async () => {

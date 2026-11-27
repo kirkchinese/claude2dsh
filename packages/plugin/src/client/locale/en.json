@@ -216,5 +216,6 @@
   "viewTask": "View task",
   "openConversation": "Open conversation",
   "portInProgress": "In progress",
-  "portVerified": "Done — verified"
+  "portVerified": "Done — verified",
+  "workbenchOff": "The Harness Forge workbench row is off — turn it on in Plugins."
 }

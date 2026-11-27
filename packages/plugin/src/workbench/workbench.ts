@@ -6,7 +6,7 @@
  */
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
+import { join, relative, resolve, isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { assess, claudeSettingsStatusLine, claudeStatusLineProvider, discoverPlugins, pluginId, type CompatibilityVector, type DiscoveredPlugin, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
 import { itemOf, overviewOf, unreadableItemOf, type AdapterCoverage, type Overview, type OverviewItem } from './overview.js'
@@ -275,12 +275,23 @@ export class Workbench {
     return { scanned, unreadable, link: { settingsId: settings.component.id, providerId: provider.component.id, name: provider.plugin.name } }
   }
 
+  /** Whether an installed plugin was fetched from the network: its files are in Harness Forge's own download folders. */
+  private fetched(root: string): boolean {
+    const dataRoot = this.installs.dataRoot as string | undefined
+    if (dataRoot === undefined) return false
+    return [join(dataRoot, 'remote'), join(dataRoot, 'marketplace-cache')].some((dir) => {
+      const path = relative(resolve(dir), resolve(root))
+      return path.length > 0 && !path.startsWith('..') && !isAbsolute(path)
+    })
+  }
+
   /** The workbench's plain-language view of every harness: see `overview.ts`. */
   async overview(): Promise<Overview> {
     const adapters = await this.enabledAdapters()
     const { scanned, unreadable, link } = this.overviewSources()
     const items = scanned.map(({ plugin, record }) => itemOf(plugin, record, adapters))
-    return overviewOf([...items, ...unreadable], link)
+    const marked = [...items, ...unreadable].map(item => item.installed && this.fetched(item.root) ? { ...item, fetched: true as const } : item)
+    return overviewOf(marked, link)
   }
 
   /** Read-only workbench diagnostics: host services, mounts, tool budget and row failures. */

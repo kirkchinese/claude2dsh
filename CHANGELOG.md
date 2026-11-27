@@ -26,6 +26,11 @@ Plugins straight from the internet, and Fill with AI fixes after a test with a r
 - **Importing again opens the session.** Importing a session that was imported before opens that session instead of failing with "already exists".
 - **Codex and OpenCode imports get their own ids** (`codex-…`, `opencode-…`), so other importers no longer take them for native DSH sessions. Sessions imported earlier under the source's id keep working and are reused.
 - **One status line, one gap.** A `statusLine` in `~/.claude/settings.json` that runs a plugin's own script is shown as part of that plugin (for example claude-hud) instead of as a second gap under your own settings, and it is covered when the plugin's part is.
+- **Every workbench answer reaches the browser.** DSH's Remote channel refuses answers with empty fields, so some actions failed, such as adding an already-installed plugin again by path. Every answer is now sent as plain JSON, and a number JSON can't carry is reported with its place.
+- **Claude Code sessions show their title in Import sessions** instead of their id: the `/rename` name, else Claude Code's generated title, else the latest summary, else your first message (not slash commands, their output or system reminders). The imported DSH session gets the same title.
+- **Plugins installed from the internet stay out of the Claude Code, Codex and OpenCode sections** of Discover, which list only what was found in those harnesses' own folders. They show in **Get plugins** (as installed) and in **Migrated**.
+- **One clear notice when the workbench row is off.** The Harness Forge page says "The Harness Forge workbench row is off — turn it on in Plugins" instead of showing screens where every action fails.
+- **Chinese detail page in Plugin Manager.** With DSH in Chinese, Harness Forge's page in **Plugins** shows a Chinese description instead of the English README.
 
 ### Added
 

@@ -52,7 +52,20 @@ try {
         problems.push(`${name}: exports target ${target} is not in the tarball`)
       }
     }
-    console.log(`${name}@${manifest.version}: ${files.size} files, ${new Set(targets).size} export targets checked`)
+    // Plugin Manager shows `meta.detail` of `locale/<language>.json` (else the README) as the bundle's page, and omits raw HTML.
+    const documents = new Set(files.has('README.md') ? ['README.md'] : [])
+    for (const file of [...files].filter(file => /^locale\/[^/]+\.json$/u.test(file))) {
+      const detail = JSON.parse(run('tar', ['-xzOf', path, `package/${file}`])).meta?.detail
+      if (detail === undefined) continue
+      if (!files.has(detail)) problems.push(`${name}: ${file} names detail document ${detail}, which is not in the tarball`)
+      else documents.add(detail)
+    }
+    for (const document of documents) {
+      const text = run('tar', ['-xzOf', path, `package/${document}`]).replace(/```[\s\S]*?```/gu, '').replace(/`[^`\n]*`/gu, '')
+      const html = /<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?>/u.exec(text)
+      if (html !== null) problems.push(`${name}: ${document} contains raw HTML (${html[0]}), which Plugin Manager omits`)
+    }
+    console.log(`${name}@${manifest.version}: ${files.size} files, ${new Set(targets).size} export targets checked, detail documents: ${[...documents].join(', ') || 'none'}`)
   }
   const core = manifests.get(packages[0].name)
   const plugin = manifests.get(packages[1].name)

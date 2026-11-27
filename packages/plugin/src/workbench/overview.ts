@@ -68,6 +68,8 @@ export interface OverviewItem {
   readonly counts: Readonly<Record<PartState, number>>
   /** Of the parts that work, how many have run here and been checked. */
   readonly checked: number
+  /** Installed from the network ("Get plugins"), not found in a harness's own folders. */
+  readonly fetched?: true
 }
 
 export interface OverviewHarness {
@@ -82,7 +84,10 @@ export interface OverviewHarness {
 }
 
 export interface Overview {
+  /** What was found on this computer in each harness's own folders. */
   readonly harnesses: readonly OverviewHarness[]
+  /** Plugins installed from the network: migrated, but in no harness's folders. */
+  readonly fetched: readonly OverviewItem[]
 }
 
 /** An installed adapter and the parts it brings: plugin name and component name of the original. */
@@ -219,7 +224,7 @@ export function unreadableItemOf(record: { readonly id: string; readonly name: s
   }
 }
 
-/** Group items by harness, in dialect order: own assets first, then installed plugins, then the rest by name. */
+/** Group items by harness, in dialect order: own assets first, then installed plugins, then the rest by name; those fetched from the network apart. */
 export function overviewOf(items: readonly OverviewItem[], link?: { readonly settingsId: string; readonly providerId: string; readonly name: string }): Overview {
   const provider = link === undefined ? undefined : items.flatMap(item => item.parts).find(part => part.id === link.providerId)
   if (link !== undefined && provider !== undefined) {
@@ -235,6 +240,8 @@ export function overviewOf(items: readonly OverviewItem[], link?: { readonly set
       return { ...item, parts: item.parts.map(part => part === settings ? alias : part), counts, checked: item.checked - Number(settings.state === 'works' && settings.checked) }
     })
   }
+  const fetched = items.filter(item => item.fetched === true).sort((a, b) => a.name.localeCompare(b.name, 'en'))
+  items = items.filter(item => item.fetched !== true)
   const known = dialects().map(dialect => ({ source: dialect.id, label: dialect.label }))
   const unknown = [...new Set(items.map(item => item.source))].filter(source => !known.some(dialect => dialect.source === source)).map(source => ({ source, label: source }))
   return {
@@ -247,5 +254,6 @@ export function overviewOf(items: readonly OverviewItem[], link?: { readonly set
       const checked = own.reduce((sum, item) => sum + item.checked, 0)
       return [{ source, label, items: own, counts, checked, toMigrate: own.filter(item => !item.installed).length }]
     }),
+    fetched,
   }
 }

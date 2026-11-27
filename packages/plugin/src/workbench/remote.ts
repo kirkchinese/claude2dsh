@@ -82,6 +82,38 @@ function reportOf(report: InstallReport): Record<string, unknown> {
   }
 }
 
+/**
+ * An answer as plain JSON, the only kind DSH's Remote carrier passes: fields
+ * that are `undefined` (or functions) are dropped, an `undefined` list item
+ * becomes `null`, `-0` becomes `0`, and anything with `toJSON` is converted as
+ * JSON would. A number JSON cannot carry, a bigint or a cycle is refused with
+ * where it sits, instead of reaching the browser as something else.
+ */
+export function plainJson(value: unknown, at = 'answer', ancestors = new Set<object>()): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error(`${at} is ${String(value)}, which JSON cannot carry`)
+    return value === 0 ? 0 : value
+  }
+  if (typeof value === 'bigint') throw new Error(`${at} is a bigint, which JSON cannot carry`)
+  if (typeof value !== 'object') return undefined
+  if (ancestors.has(value)) throw new Error(`${at} refers to itself, which JSON cannot carry`)
+  const toJSON = (value as { toJSON?: unknown }).toJSON
+  if (typeof toJSON === 'function') return plainJson((toJSON as () => unknown).call(value), at, ancestors)
+  ancestors.add(value)
+  try {
+    if (Array.isArray(value)) return value.map((item: unknown, index) => plainJson(item, `${at}[${String(index)}]`, ancestors) ?? null)
+    const plain: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value)) {
+      const converted = plainJson(item, `${at}.${key}`, ancestors)
+      if (converted !== undefined) plain[key] = converted
+    }
+    return plain
+  } finally {
+    ancestors.delete(value)
+  }
+}
+
 /** What an adapter's surface shows for one session (the ui-slot template's `{ lines, at }`). */
 export interface AdapterSurfaceSource {
   /** `request`: what the browser half sent with it (a width, say). */
@@ -108,10 +140,10 @@ export class HarnessRemoteService extends TypertRemoteService {
     return api
   }
 
-  /** Run one operation; anything it throws reaches the browser with its message. */
-  private async guard<T>(operation: string, run: () => T | Promise<T>): Promise<T> {
+  /** Run one operation and answer it as plain JSON; anything it throws reaches the browser with its message. */
+  private async guard(operation: string, run: () => unknown): Promise<unknown> {
     try {
-      return await run()
+      return plainJson(await run(), operation)
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && (error as { isDSHRemoteError?: unknown }).isDSHRemoteError === true) throw error
       throw new RemoteError('harness-forge/failed', error instanceof Error ? error.message : String(error), { operation }, { cause: error })
@@ -278,8 +310,7 @@ export class HarnessRemoteService extends TypertRemoteService {
     return this.guard('remoteInstall', async () => {
       const result = await this.forge.remote.install(required(request, 'token', 'remoteInstall'))
       if (result.report === undefined) return { pluginId: result.pluginId, revision: result.revision, updated: result.updated }
-      // Plain JSON: absent fields dropped, as every other answer has them.
-      return JSON.parse(JSON.stringify({ ...reportOf(result.report as InstallReport), revision: result.revision, updated: result.updated })) as unknown
+      return { ...reportOf(result.report as InstallReport), revision: result.revision, updated: result.updated }
     })
   }
 
@@ -361,7 +392,7 @@ export class HarnessRemoteService extends TypertRemoteService {
     })
     try {
       while (signal?.aborted !== true) {
-        while (queue.length > 0) yield queue.shift()
+        while (queue.length > 0) yield plainJson(queue.shift(), 'modSurfaces')
         await Promise.race([new Promise<void>((resolve) => { wake = resolve }), aborted])
         wake = undefined
       }
@@ -441,7 +472,7 @@ export class HarnessRemoteService extends TypertRemoteService {
           pending = false
           const source = this.adapterSurfaces.get(id)
           if (source === undefined) return
-          yield await source.read(session, request)
+          yield plainJson(await source.read(session, request), 'adapterSurface')
           continue
         }
         await Promise.race([new Promise<void>((resolve) => { wake = resolve }), aborted])

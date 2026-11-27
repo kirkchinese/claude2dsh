@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Harness Forge",
-    "description": "在 DSH 中使用 Claude Code、Codex 和 OpenCode 的插件、设置与会话。在侧边栏打开 Harness Forge，即可查看这台电脑上找到的内容并迁移。其他 Harness Forge 行各自运行一类部分，可以单独关闭。"
+    "description": "在 DSH 中使用 Claude Code、Codex 和 OpenCode 的插件、设置与会话。在侧边栏打开 Harness Forge，即可查看这台电脑上找到的内容并迁移。其他 Harness Forge 行各自运行一类部分，可以单独关闭。",
+    "detail": "docs/DETAIL.zh.md"
   }
 }

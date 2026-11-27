@@ -15,10 +15,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 
 import en from './locale/en.json' with { type: 'json' }
 import zh from './locale/zh.json' with { type: 'json' }
-import contribution, { call, setMountedRemote, setMountedRemoteError } from './typert.js'
+import contribution, { call, isWorkbenchOff, setMountedRemote, setMountedRemoteError } from './typert.js'
 import { CSS } from './styles.js'
 import { registerModsDock } from './mods.js'
-import { isGap, messageOf, Notice, type Harness, type Key, type TFn, type Workspace } from './shared.js'
+import { isGap, messageOf, Notice, type Harness, type Item, type Key, type TFn, type Workspace } from './shared.js'
 import { DiscoverScreen } from './discover.js'
 import { MigratedScreen, TrustBanners } from './migrated.js'
 import { GapsScreen } from './gaps.js'
@@ -104,9 +104,11 @@ function MoreMenu({ t, onPick }: { t: TFn; onPick: (screen: Secondary) => void }
 function HarnessPage({ t }: { t: TFn }): JSX.Element {
   const [screen, setScreen] = useState<Screen>('discover')
   const [harnesses, setHarnesses] = useState<readonly Harness[] | undefined>(undefined)
+  const [fetched, setFetched] = useState<readonly Item[]>([])
   const [workspaces, setWorkspaces] = useState<readonly Workspace[]>([])
   const [signInWaiting, setSignInWaiting] = useState<readonly string[]>([])
   const [error, setError] = useState<string | undefined>(undefined)
+  const [workbenchOff, setWorkbenchOff] = useState(false)
   const [loading, setLoading] = useState(false)
   const [introDismissed, setIntroDismissed] = useState(readDismissed)
   const sessionImport = useSessionImport()
@@ -114,11 +116,17 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const overview = await call<{ harnesses: Harness[]; workspaces?: Workspace[] }>('overview')
+      const overview = await call<{ harnesses: Harness[]; fetched?: Item[]; workspaces?: Workspace[] }>('overview')
       setHarnesses(overview.harnesses)
+      setFetched(overview.fetched ?? [])
       setWorkspaces(overview.workspaces ?? [])
       setError(undefined)
     } catch (cause: unknown) {
+      // Nothing on the Host answers: every screen would fail the same way, so the page says why once.
+      if (isWorkbenchOff(cause)) {
+        setWorkbenchOff(true)
+        return
+      }
       setError(messageOf(cause))
     } finally {
       setLoading(false)
@@ -138,11 +146,23 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
     }
   }
 
-  const items = (harnesses ?? []).flatMap(harness => harness.items)
+  // Plugins installed from the network are migrated (and may have gaps) but were not found in a harness's folders.
+  const items = [...(harnesses ?? []).flatMap(harness => harness.items), ...fetched]
   const migrated = items.filter(item => item.installed)
   const gapCount = items.reduce((sum, item) => sum + item.parts.filter(isGap).length, 0)
   const counts: Record<Main, number> = { discover: 0, migrated: migrated.length, gaps: gapCount }
   const secondary = SECONDARY.find(([value]) => value === screen)
+
+  if (workbenchOff) {
+    return (
+      <div className="hf-page">
+        <style>{CSS}</style>
+        <div className="hf-column">
+          <div className="hf-empty" role="alert">{t('workbenchOff')}</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="hf-page">

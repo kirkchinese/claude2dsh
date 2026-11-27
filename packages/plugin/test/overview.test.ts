@@ -106,6 +106,32 @@ describe('workbench overview', () => {
     } finally { vi.unstubAllEnvs() }
   })
 
+  it('lists a plugin installed from the network apart from what the harnesses\' folders hold', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hf-overview-fetched-'))
+    roots.push(home)
+    const dataRoot = join(home, 'data')
+    const local = plugin()
+    const fetchedRoot = join(dataRoot, 'remote', 'plugins', 'abc', 'demo')
+    mkdirSync(join(fetchedRoot, '.claude-plugin'), { recursive: true })
+    writeFileSync(join(fetchedRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'fetched', license: 'MIT' }))
+    const record = (id: string, root: string) => ({ id, name: id.split(':')[1], source: 'claude-code', root, installedAt: '2026-11-27T00:00:00Z', components: [] })
+    vi.stubEnv(process.platform === 'win32' ? 'USERPROFILE' : 'HOME', home)
+    try {
+      const workbench = new Workbench({ ledger: {
+        statePath: join(home, 'state.json'), dataRoot, live: new Map(),
+        list: () => [record('claude-code:demo', local.root), record('claude-code:fetched', fetchedRoot)],
+        scan: (root: string) => scanPlugin(root, { source: 'claude-code' }).plugin,
+      } } as never)
+      vi.spyOn(workbench, 'enabledAdapters').mockResolvedValue([])
+      const overview = await workbench.overview()
+      const claude = overview.harnesses.find(harness => harness.source === 'claude-code')!
+      // What the harness's folders hold stays (other test plugins may be found too); the network install does not.
+      expect(claude.items.map(item => item.name)).toContain('demo')
+      expect(claude.items.map(item => item.name)).not.toContain('fetched')
+      expect(overview.fetched).toMatchObject([{ name: 'fetched', installed: true, fetched: true }])
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it('groups by harness and counts what is left to migrate', () => {
     const overview = overviewOf([itemOf(plugin(), undefined)])
     const claude = overview.harnesses.find(harness => harness.source === 'claude-code')!
