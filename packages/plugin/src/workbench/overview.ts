@@ -21,7 +21,7 @@
  */
 import { adapterPackageName, assess, dialects, type ComponentOutcome, type ForeignComponent, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
 
-export type PartState = 'works' | 'partial' | 'needs-port' | 'unsupported' | 'failed' | 'inactive' | 'off'
+export type PartState = 'works' | 'partial' | 'needs-port' | 'unsupported' | 'failed' | 'inactive' | 'off' | 'provided'
 
 export type ReasonCode =
   | 'events-never-raised'
@@ -51,6 +51,8 @@ export interface OverviewPart {
   readonly portGap?: string
   /** The installed adapter that covers this part. */
   readonly adapter?: string
+  /** Another part supplies this settings entry; only that part counts toward the overview. */
+  readonly providedBy?: { readonly name: string; readonly adapter?: string }
 }
 
 export interface OverviewItem {
@@ -101,7 +103,7 @@ export function coveringAdapter(plugin: Pick<ForeignPlugin, 'name'>, component: 
 const ALWAYS_SHOWN: ReadonlySet<string> = new Set(['claude-code', 'codex', 'opencode'])
 
 function emptyCounts(): Record<PartState, number> {
-  return { works: 0, partial: 0, 'needs-port': 0, unsupported: 0, failed: 0, inactive: 0, off: 0 }
+  return { works: 0, partial: 0, 'needs-port': 0, unsupported: 0, failed: 0, inactive: 0, off: 0, provided: 0 }
 }
 
 /** The specifics after "…: " in a gap summary (event or handler names), else the summary. */
@@ -218,7 +220,21 @@ export function unreadableItemOf(record: { readonly id: string; readonly name: s
 }
 
 /** Group items by harness, in dialect order: own assets first, then installed plugins, then the rest by name. */
-export function overviewOf(items: readonly OverviewItem[]): Overview {
+export function overviewOf(items: readonly OverviewItem[], link?: { readonly settingsId: string; readonly providerId: string; readonly name: string }): Overview {
+  const provider = link === undefined ? undefined : items.flatMap(item => item.parts).find(part => part.id === link.providerId)
+  if (link !== undefined && provider !== undefined) {
+    items = items.map(item => {
+      const settings = item.parts.find(part => part.id === link.settingsId)
+      if (settings === undefined) return item
+      const counts = { ...item.counts, [settings.state]: item.counts[settings.state] - 1 }
+      const alias: OverviewPart = {
+        id: settings.id, kind: settings.kind, name: settings.name,
+        state: 'provided', checked: provider.checked, reasons: [],
+        providedBy: { name: link.name, ...(provider.adapter !== undefined ? { adapter: provider.adapter } : {}) },
+      }
+      return { ...item, parts: item.parts.map(part => part === settings ? alias : part), counts, checked: item.checked - Number(settings.state === 'works' && settings.checked) }
+    })
+  }
   const known = dialects().map(dialect => ({ source: dialect.id, label: dialect.label }))
   const unknown = [...new Set(items.map(item => item.source))].filter(source => !known.some(dialect => dialect.source === source)).map(source => ({ source, label: source }))
   return {

@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
-import { scanPlugin, type ComponentOutcome } from '@kirkchinese/harness-forge-core'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import { scanClaudeUserAssets, scanPlugin, type ComponentOutcome } from '@kirkchinese/harness-forge-core'
 import { itemOf, overviewOf, partOf, unreadableItemOf } from '../src/workbench/overview.js'
+import { Workbench } from '../src/workbench/workbench.js'
 
 const roots: string[] = []
 afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }) })
@@ -66,6 +67,43 @@ describe('workbench overview', () => {
     const item = itemOf(plugin(), undefined, [{ name: 'dsh-adapter-demo-statusline', ports: [{ plugin: 'demo', component: 'statusline' }] }])
     expect(item.parts.find(part => part.kind === 'ui')).toMatchObject({ state: 'works', checked: false, adapter: 'dsh-adapter-demo-statusline' })
     expect(item.checked).toBe(0)
+  })
+
+  it('projects a configured plugin status line as one port, with coverage reflected in settings', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hf-overview-owner-'))
+    roots.push(home)
+    const claude = join(home, '.claude')
+    mkdirSync(claude)
+    const pluginRoot = join(claude, 'plugins', 'cache', 'market', 'hud', '1.0')
+    mkdirSync(join(pluginRoot, '.claude-plugin'), { recursive: true })
+    writeFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'hud' }))
+    writeFileSync(join(pluginRoot, 'hud.mjs'), '')
+    writeFileSync(join(home, 'standalone.mjs'), '')
+    writeFileSync(join(claude, 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { 'hud@market': [{ installPath: pluginRoot }] } }))
+    const settings = (path: string): void => writeFileSync(join(claude, 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command: `node "${path}"` } }))
+    settings(join(pluginRoot, 'hud.mjs'))
+    vi.stubEnv(process.platform === 'win32' ? 'USERPROFILE' : 'HOME', home)
+    try {
+      const workbench = new Workbench({ ledger: {
+        statePath: join(home, 'state.json'), live: new Map(), list: () => [],
+        scan: (root: string) => root === claude ? scanClaudeUserAssets(home) : scanPlugin(root, { source: 'claude-code' }).plugin,
+      } } as never)
+      const adapters = vi.spyOn(workbench, 'enabledAdapters').mockResolvedValue([])
+      const before = (await workbench.overview()).harnesses.find(harness => harness.source === 'claude-code')!
+      expect(before.counts['needs-port']).toBe(1)
+      expect(before.items.flatMap(item => item.parts).filter(part => part.portGap !== undefined)).toMatchObject([{ id: 'claude-code:hud:ui:statusline' }])
+      expect(before.items.find(item => item.own)?.parts).toMatchObject([{ name: 'statusline-settings', state: 'provided', providedBy: { name: 'hud' } }])
+      expect(workbench.findPlugin('claude-code:hud').gaps.filter(gap => gap.kind === 'ui-surface')).toMatchObject([{ componentId: 'claude-code:hud:ui:statusline' }])
+      expect(workbench.findPlugin('claude-code:user').plugin.components).toEqual([])
+      adapters.mockResolvedValue([{ name: 'dsh-adapter-hud-statusline', ports: [{ plugin: 'hud', component: 'statusline' }] }])
+      const after = (await workbench.overview()).harnesses.find(harness => harness.source === 'claude-code')!
+      expect(after.counts['needs-port']).toBe(0)
+      expect(after.items.find(item => item.own)?.parts).toMatchObject([{ state: 'provided', providedBy: { name: 'hud', adapter: 'dsh-adapter-hud-statusline' } }])
+      expect(after.items.flatMap(item => item.parts).filter(part => part.adapter !== undefined)).toHaveLength(1)
+      settings(join(home, 'standalone.mjs'))
+      const standalone = (await workbench.overview()).harnesses.find(harness => harness.source === 'claude-code')!
+      expect(standalone.items.find(item => item.own)?.parts).toMatchObject([{ name: 'statusline-settings', state: 'needs-port' }])
+    } finally { vi.unstubAllEnvs() }
   })
 
   it('groups by harness and counts what is left to migrate', () => {

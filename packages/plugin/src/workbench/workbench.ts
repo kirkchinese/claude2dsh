@@ -5,15 +5,17 @@
  * @module @kirkchinese/harness-forge
  */
 import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { assess, discoverPlugins, pluginId, type CompatibilityVector, type DiscoveredPlugin, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
+import { assess, claudeSettingsStatusLine, claudeStatusLineProvider, discoverPlugins, pluginId, type CompatibilityVector, type DiscoveredPlugin, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
 import { itemOf, overviewOf, unreadableItemOf, type AdapterCoverage, type Overview, type OverviewItem } from './overview.js'
 import { adapterCoverage, enabledAdapters, type PluginManagerLike } from './adapter-coverage.js'
 import { readSettings, writeSettings, type HarnessSettings } from './settings.js'
 import { messageOf } from '../shared/util.js'
 import { dshService, type DshService } from '../dsh/host.js'
 import type { HarnessForge } from '../forge/service.js'
+import type { InstalledPluginRecord } from '../forge/state.js'
 import { findBun } from '../opencode/bun.js'
 
 /** A package's version as this process resolves it, if it resolves. */
@@ -127,21 +129,15 @@ export class Workbench {
    * an installed plugin's recorded ones, else those its scan shows.
    */
   findPlugin(id: string): { readonly plugin: ForeignPlugin; readonly gaps: readonly Gap[] } {
-    const record = this.installs.list().find(item => item.id === id)
-    if (record !== undefined) {
-      const plugin = this.installs.scan(record.root, record.source)
-      return { plugin, gaps: record.compat?.gaps ?? assess(plugin).gaps }
-    }
-    // The overview lists a discovered plugin under its scanned id; the discovered name is only a hint.
-    const found = this.discover().plugins.filter(item => !item.installed)
-    for (const item of [...found.filter(item => pluginId(item.source, item.name) === id), ...found.filter(item => pluginId(item.source, item.name) !== id)]) {
-      let plugin: ForeignPlugin
-      try {
-        plugin = this.installs.scan(item.root, item.source)
-      } catch {
-        continue
+    const { scanned, link } = this.overviewSources(id)
+    const found = scanned.find(({ plugin }) => plugin.id === id)
+    if (found !== undefined) {
+      const { plugin, record } = found
+      const gaps = record?.compat?.gaps ?? assess(plugin).gaps
+      if (link !== undefined && plugin.components.some(part => part.id === link.settingsId)) {
+        return { plugin: { ...plugin, components: plugin.components.filter(part => part.id !== link.settingsId) }, gaps: gaps.filter(gap => gap.componentId !== link.settingsId) }
       }
-      if (plugin.id === id) return { plugin, gaps: assess(plugin).gaps }
+      return { plugin, gaps }
     }
     throw new Error(`no plugin ${id} is installed or discovered`)
   }
@@ -242,29 +238,49 @@ export class Workbench {
     return enabledAdapters(this.adapters(), dshService(this.forge.ctx, 'pluginManager') as PluginManagerLike | undefined)
   }
 
-  /** The workbench's plain-language view of every harness: see `overview.ts`. */
-  async overview(): Promise<Overview> {
-    const adapters = await this.enabledAdapters()
-    const items: OverviewItem[] = []
+  /** Scan the roots the overview lists, and attribute the user's configured status line. */
+  private overviewSources(requiredId?: string) {
+    const scanned: Array<{ plugin: ForeignPlugin; record?: InstalledPluginRecord }> = []
+    const unreadable: OverviewItem[] = []
     const seen = new Set<string>()
     for (const record of this.installs.list()) {
       seen.add(resolve(record.root).toLowerCase())
       try {
-        items.push(itemOf(this.installs.scan(record.root, record.source), record, adapters))
+        scanned.push({ plugin: this.installs.scan(record.root, record.source), record })
       } catch (error: unknown) {
+        if (record.id === requiredId) throw error
         // Its files are gone or unreadable: it stays listed, every part an error, with why.
-        items.push(unreadableItemOf(record, messageOf(error)))
+        unreadable.push(unreadableItemOf(record, messageOf(error)))
       }
     }
     for (const found of this.discover().plugins) {
       if (found.installed || seen.has(resolve(found.root).toLowerCase())) continue
       try {
-        items.push(itemOf(this.installs.scan(found.root, found.source), undefined, adapters))
+        scanned.push({ plugin: this.installs.scan(found.root, found.source) })
       } catch {
         // An unreadable root has nothing to show.
       }
     }
-    return overviewOf(items)
+    const settings = scanned.map(({ plugin }) => claudeSettingsStatusLine(plugin)).find(item => item !== undefined)
+    const provider = settings === undefined ? undefined : claudeStatusLineProvider(settings.command, scanned.map(({ plugin }) => plugin), homedir())
+    if (provider === undefined || settings === undefined) return { scanned, unreadable }
+    const source = scanned.find(item => item.plugin === provider.plugin)!
+    if (!source.plugin.components.some(part => part.id === provider.component.id)) {
+      source.plugin = { ...source.plugin, components: [...source.plugin.components, provider.component] }
+      if (source.record?.compat !== undefined) {
+        const gap = assess(source.plugin).gaps.find(item => item.componentId === provider.component.id)
+        if (gap !== undefined) source.record = { ...source.record, compat: { ...source.record.compat, gaps: [...source.record.compat.gaps, gap] } }
+      }
+    }
+    return { scanned, unreadable, link: { settingsId: settings.component.id, providerId: provider.component.id, name: provider.plugin.name } }
+  }
+
+  /** The workbench's plain-language view of every harness: see `overview.ts`. */
+  async overview(): Promise<Overview> {
+    const adapters = await this.enabledAdapters()
+    const { scanned, unreadable, link } = this.overviewSources()
+    const items = scanned.map(({ plugin, record }) => itemOf(plugin, record, adapters))
+    return overviewOf([...items, ...unreadable], link)
   }
 
   /** Read-only workbench diagnostics: host services, mounts, tool budget and row failures. */

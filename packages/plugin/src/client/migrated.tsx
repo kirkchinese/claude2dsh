@@ -14,14 +14,14 @@ function PartRow({ item, part, t, onToggle, busy }: { item: Item; part: Part; t:
   const rowTitle = row !== undefined && ROW_TITLE[row] !== undefined ? t(ROW_TITLE[row]) : row
   return (
     <div className="hf-part">
-      <button
+      {part.state === 'provided' ? null : <button
         className="hf-switch"
         role="switch"
         aria-checked={on}
         aria-label={fill(t('switchLabel'), { name: part.name })}
         disabled={busy}
         onClick={() => { onToggle(item, part, !on) }}
-      />
+      />}
       <div className="hf-part-main">
         <span className="hf-part-kind">{kindLabel(part.kind, t)}</span>
         <span className="hf-part-name">{part.name}</span>

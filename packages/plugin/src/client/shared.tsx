@@ -18,7 +18,7 @@ export function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-export type PartState = 'works' | 'partial' | 'needs-port' | 'unsupported' | 'failed' | 'inactive' | 'off'
+export type PartState = 'works' | 'partial' | 'needs-port' | 'unsupported' | 'failed' | 'inactive' | 'off' | 'provided'
 export type ReasonCode = 'events-never-raised' | 'cannot-block' | 'handlers-inert' | 'output-style' | 'experimental-runtime' | 'no-equivalent-ui' | 'not-mapped' | 'hosted-connector' | 'unknown-transport' | 'run-failed' | 'setup-failed' | 'unreadable' | 'row-off' | 'other'
 /** A dialect id: `claude-code`, `codex`, `opencode`, or a common format such as `agent-skills`. */
 export type Source = string
@@ -32,6 +32,7 @@ export interface Part {
   readonly reasons: ReadonlyArray<{ readonly code: ReasonCode; readonly detail: string }>
   readonly portGap?: string
   readonly adapter?: string
+  readonly providedBy?: { readonly name: string; readonly adapter?: string }
 }
 
 export interface Item {
@@ -84,6 +85,7 @@ export const STATE_COLOR: Record<PartState, string> = {
   failed: 'var(--dsw-alias-state-error-primary)',
   inactive: 'var(--dsw-alias-label-tertiary)',
   off: 'var(--dsw-alias-label-tertiary)',
+  provided: 'var(--dsw-alias-label-tertiary)',
 }
 
 export const STATE_LABEL: Record<PartState, Key> = {
@@ -94,6 +96,7 @@ export const STATE_LABEL: Record<PartState, Key> = {
   failed: 'stateFailed',
   inactive: 'stateInactive',
   off: 'stateOff',
+  provided: 'stateProvided',
 }
 
 const REASON_LABEL: Record<ReasonCode, Key | undefined> = {
@@ -151,7 +154,7 @@ export function isGap(part: Part): boolean {
 
 /** Parts the person or a row switched off don't count toward a verdict. */
 function counted(item: Item): readonly Part[] {
-  return item.parts.filter(part => part.state !== 'off' && part.state !== 'inactive')
+  return item.parts.filter(part => part.state !== 'off' && part.state !== 'inactive' && part.state !== 'provided')
 }
 
 export type Verdict = 'works' | 'partly' | 'none'
@@ -192,6 +195,13 @@ export function VerdictBar({ item, t }: { item: Item; t: TFn }): JSX.Element {
 
 /** A part's reasons in words, with the specifics in small monospace. */
 export function Reasons({ part, t }: { part: Part; t: TFn }): JSX.Element | null {
+  const provider = part.providedBy
+  if (provider !== undefined) return (
+    <div className="hf-reason">
+      {fill(t('providedBy'), { name: provider.name })}
+      {provider.adapter !== undefined ? ` · ${fill(t('coveredBy'), { name: provider.adapter })}` : ''}
+    </div>
+  )
   if (part.reasons.length === 0) return null
   return (
     <>
