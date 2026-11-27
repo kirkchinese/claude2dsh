@@ -2,6 +2,17 @@
 
 All notable changes to Harness Forge are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+Fill with AI, after a test with a real model on claude-hud's status line.
+
+### Fixed
+
+- **The first questions come right away.** The creation-mode agent now asks its questions from the brief alone, before reading any files. In the test the wait fell from almost five minutes to a few seconds.
+- **Fewer approvals.** The creation session starts in `~/dsh-adapters`, so writing the adapter's source no longer asks for approval in Workspace Write mode. Plugin Manager actions still ask, as DSH requires, unless the session runs with Full access.
+- **The agent reports when it is done.** Once `harness_verify_port` confirms the adapter, the agent sends its final report at once instead of waiting for optional reviews.
+- **One status line, one gap.** A `statusLine` in `~/.claude/settings.json` that runs a plugin's own script is shown as part of that plugin (for example claude-hud) instead of as a second gap under your own settings, and it is covered when the plugin's part is.
+
 ## 0.4.0 - 2026-11-27
 
 The first public release under the Harness Forge name: a smaller product, built around switchable rows, a new workbench, and DSH's own creation mode for the parts DSH cannot run.
