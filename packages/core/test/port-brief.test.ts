@@ -1,12 +1,23 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { adapterPackageName, assess, defaultAdapterDir, extensionPointsFor, gapsOf, openQuestionsFor, portBrief, scanPlugin } from '../src/index.js'
+
+/** Temporary folders made by these tests, removed once all of them have run. */
+const temporary: string[] = []
+afterAll(() => {
+  for (const dir of temporary.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  temporary.push(dir)
+  return dir
+}
 
 /** A Claude Code plugin with a status line its installer writes into settings.json. */
 function hud(): string {
-  const root = mkdtempSync(join(tmpdir(), 'hf-brief-'))
+  const root = tempDir('hf-brief-')
   mkdirSync(join(root, '.claude-plugin'), { recursive: true })
   writeFileSync(join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'claude-hud', version: '1.2.0', description: 'A HUD', license: 'MIT' }))
   writeFileSync(join(root, 'install.mjs'), "// points Claude Code's statusLine at the HUD in ~/.claude/settings.json\nexport {}\n")

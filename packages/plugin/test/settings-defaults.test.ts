@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -16,6 +16,7 @@ describe('default discovery roots', () => {
       expect(readSettings(join(started, 'missing', 'state.json')).discoveryRoots).not.toContain(resolve(started))
     } finally {
       process.chdir(before)
+      rmSync(started, { recursive: true, force: true })
     }
   })
 })

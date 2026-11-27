@@ -1,12 +1,23 @@
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { readState, retryFile } from '../src/forge/state.js'
+
+/** Temporary folders made by these tests, removed once all of them have run. */
+const temporary: string[] = []
+afterAll(() => {
+  for (const dir of temporary.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  temporary.push(dir)
+  return dir
+}
 
 describe('the ledger', () => {
   it('is empty when missing, and a ledger that is not JSON is kept aside before a new one starts', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hf-ledger-'))
+    const dir = tempDir('hf-ledger-')
     expect(readState(join(dir, 'state.json')).plugins).toEqual([])
     writeFileSync(join(dir, 'state.json'), '{ "schemaVersion": 2, "plugins": [')
     expect(readState(join(dir, 'state.json')).plugins).toEqual([])
@@ -14,7 +25,7 @@ describe('the ledger', () => {
   })
 
   it('refuses to answer "empty" when it cannot be read', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hf-ledger-'))
+    const dir = tempDir('hf-ledger-')
     // A directory where the ledger should be: EISDIR, not transient, not missing.
     const path = join(dir, 'state.json')
     mkdirSync(path)
