@@ -3,10 +3,9 @@
  * `turn.complete`.
  * @module @kirkchinese/harness-forge/mods
  */
-import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { loadInstructions } from '@kirkchinese/harness-forge-core'
 import { appendNotice } from '../../hooks/notice.js'
 import { claudeMdText } from '../engine.js'
 import { isRecord } from '../values.js'
@@ -66,9 +65,9 @@ export class ModTurns {
 
   /**
    * `prompt.context` for the conversation's first prompt: the instruction
-   * files Claude Code itself would load (CLAUDE.md from the root down, the
-   * user's, the local ones) and the blocks they frame. Files a hook adds that
-   * DSH's own instructions did not load enter the conversation as context.
+   * files Claude Code itself would load (found as core's `loadInstructions`
+   * finds them) and the blocks they frame. Files a hook adds that DSH's own
+   * instructions did not load enter the conversation as context.
    */
   private async promptContext(session: SessionMods, signal: AbortSignal): Promise<unknown[]> {
     session.isContextRaised = true
@@ -120,32 +119,12 @@ export class ModTurns {
 }
 
 /**
- * The instruction files Claude Code loads for a working directory: the
- * user's (~/.claude/CLAUDE.md), then from the filesystem root down to the
- * directory each CLAUDE.md and .claude/CLAUDE.md (project) and
- * CLAUDE.local.md (local).
+ * The instruction files Claude Code loads for a working directory, found by
+ * core's discovery: the user's (~/.claude/CLAUDE.md), then from the repository
+ * root (the working directory outside a repository) down to the directory each
+ * CLAUDE.md, .claude/CLAUDE.md and CLAUDE.local.md, with their `@path` imports.
+ * Every file is returned, including those DSH injects itself.
  */
 export function claudeInstructionFiles(cwd: string, home = homedir()): Array<{ path: string; kind: string; content: string }> {
-  const files: Array<{ path: string; kind: string; content: string }> = []
-  const read = (path: string, kind: string): void => {
-    if (!existsSync(path)) return
-    try {
-      files.push({ path, kind, content: readFileSync(path, 'utf8') })
-    } catch {
-      // An unreadable file is not loaded.
-    }
-  }
-  read(join(home, '.claude', 'CLAUDE.md'), 'user')
-  const dirs: string[] = []
-  for (let current = cwd; ; current = dirname(current)) {
-    dirs.unshift(current)
-    if (dirname(current) === current) break
-  }
-  for (const dir of dirs) {
-    if (dir === home) continue
-    read(join(dir, 'CLAUDE.md'), 'project')
-    read(join(dir, '.claude', 'CLAUDE.md'), 'project')
-    read(join(dir, 'CLAUDE.local.md'), 'local')
-  }
-  return files
+  return loadInstructions({ cwd, home, skipCodex: true }).files.map(({ path, kind, content }) => ({ path, kind, content }))
 }

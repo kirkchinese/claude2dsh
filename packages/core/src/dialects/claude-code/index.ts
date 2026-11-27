@@ -5,7 +5,7 @@
  * @module @kirkchinese/harness-forge-core
  */
 import { join, resolve } from 'node:path'
-import { scanPlugin } from '../../manifest.js'
+import { hasLayoutDirectory, scanPlugin } from '../../manifest.js'
 import { isDirectory, isFile, readJsonObject } from '../../paths.js'
 import type { Dialect, HarnessPluginEntry } from '../types.js'
 import { installedClaudePlugins, scanClaudeProjectAssets, scanClaudeUserAssets } from './user-assets.js'
@@ -19,7 +19,7 @@ export const claudeCodeDialect: Dialect = {
     {
       tier: 'layout',
       pluginRoot: false,
-      test: directory => ['skills', 'commands', 'agents', 'hooks'].some(name => isDirectory(join(directory, name))) || isFile(join(directory, '.mcp.json')),
+      test: directory => hasLayoutDirectory(directory, ['skills', 'commands', 'agents', 'hooks']) || isFile(join(directory, '.mcp.json')),
     },
   ],
   scan: (root, options) => scanPlugin(root, { source: 'claude-code', ...options }).plugin,

@@ -154,8 +154,16 @@ function classifyPortableManifest(data: Record<string, unknown>): ManifestKind {
 }
 
 function looksLikeClaudeLayout(root: string): boolean {
-  return ['skills', 'commands', 'agents', 'hooks', 'output-styles', 'workflows'].some(name => isDirectory(join(root, name)))
-    || isFile(join(root, '.mcp.json'))
+  return hasLayoutDirectory(root, ['skills', 'commands', 'agents', 'hooks', 'output-styles', 'workflows']) || isFile(join(root, '.mcp.json'))
+}
+
+/**
+ * Whether `root` holds one of the named plugin-layout directories. A directory
+ * that is itself a skill (it has a `SKILL.md`) is a skill folder that happens
+ * to be called `agents` or `hooks`, not a layout directory.
+ */
+export function hasLayoutDirectory(root: string, names: readonly string[]): boolean {
+  return names.some(name => isDirectory(join(root, name)) && !isFile(join(root, name, 'SKILL.md')))
 }
 
 /**
@@ -213,11 +221,15 @@ export function scanPlugin(root: string, options: ScanOptions): ScanResult {
   }
 
   addSkills(root, id, manifest, manifestKind, push, warn, usedSkillNames)
-  addCommands(root, id, manifest, manifestKind, push, warn, usedCommandNames)
-  addAgents(root, id, manifest, manifestKind, push, warn, usedAgentNames)
-  addHooks(root, id, manifest, manifestKind, push, warn)
+  // A folder of Agent Skills holds skills and MCP servers only: its `commands/` or `agents/` is a skill, not a plugin directory.
+  const skillsOnly = manifestKind === 'agent-skills'
+  if (!skillsOnly) {
+    addCommands(root, id, manifest, manifestKind, push, warn, usedCommandNames)
+    addAgents(root, id, manifest, manifestKind, push, warn, usedAgentNames)
+    addHooks(root, id, manifest, manifestKind, push, warn)
+  }
   addMcp(root, id, manifest, manifestKind, push, warn)
-  addUi(root, id, manifest, manifestKind, push, warn)
+  if (!skillsOnly) addUi(root, id, manifest, manifestKind, push, warn)
   addCode(root, id, manifest, manifestKind, components, push, warn)
   // A hooks file that only lists a mod's modules has no hooks of its own: the modules are the code components.
   for (let index = components.length - 1; index >= 0; index--) {

@@ -59,7 +59,8 @@ export function apply(ctx) {
     execute: async (args) => {
       const remote = ctx.get(String(args.namespace))
       if (remote === undefined || typeof remote[args.method] !== 'function') throw new Error(`no Remote method ${String(args.namespace)}.${String(args.method)}`)
-      return await remote[args.method](args.request ?? {})
+      // As over the wire: JSON, so a field left undefined is dropped (the tool output must be lossless JSON).
+      return JSON.parse(JSON.stringify(await remote[args.method](args.request ?? {})) ?? 'null')
     },
   }), 'harness-e2e-lab.remote')
 }

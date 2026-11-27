@@ -346,6 +346,82 @@ export const checks: readonly Check[] = [
     },
   },
   {
+    name: 'project-trust-revoke',
+    async run(sandbox) {
+      // Trust is a decision the person can take back: after it, a new session in the folder holds the project hook back again.
+      const cwd = sandbox.directory('trust-revoke')
+      mkdirSync(join(cwd, '.claude'), { recursive: true })
+      writeFileSync(join(cwd, '.claude/settings.json'), JSON.stringify({
+        permissions: { deny: ['Bash(echo E2E-DENIED:*)'] },
+        hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'cat >> "$CLAUDE_PROJECT_DIR/project-hook.log"' }] }] },
+      }))
+      const remote = (method: string, request: Record<string, unknown>): Reply => call('lab_remote', { namespace: REMOTE_NAMESPACE, method, request })
+      const trusting = await runSession(sandbox, {
+        name: 'trust-revoke-grant',
+        task: 'Trust the folder, run a command, then take the trust back.',
+        cwd,
+        policy: steps(
+          remote('trustWorkspace', { cwd, trusted: true }),
+          call('bash', { command: 'echo E2E-TRUSTED', description: 'Print a word' }),
+          remote('trustWorkspace', { cwd, trusted: false }),
+        ),
+      })
+      const log = join(cwd, 'project-hook.log')
+      assert(existsSync(log) && readFileSync(log, 'utf8').includes('E2E-TRUSTED'), 'the project hook did not run while the workspace was trusted')
+      const [granted, revoked] = toolResults(trusting.events, 'lab_remote')
+      assert(granted?.ok === true && granted.text.includes('"trusted":true'), `trustWorkspace did not trust the folder: ${granted?.text ?? 'no call'}`)
+      assert(revoked?.ok === true && revoked.text.includes('"trusted":false') && revoked.text.includes('"stillLive":[]'), `trustWorkspace did not revoke the trust: ${revoked?.text ?? 'no call'}`)
+      rmSync(log)
+
+      const after = await runSession(sandbox, {
+        name: 'trust-revoke-after',
+        task: 'Run the commands.',
+        cwd,
+        policy: steps(
+          remote('workspaceTrust', { cwd }),
+          call('bash', { command: 'echo E2E-REVOKED', description: 'Print a word' }),
+          call('bash', { command: 'echo E2E-DENIED', description: 'Print a word the project denies' }),
+        ),
+      })
+      const [status] = toolResults(after.events, 'lab_remote')
+      assert(status?.ok === true && status.text.includes('"trusted":false') && status.text.includes('waiting for you to trust this workspace'), `the folder is still trusted in a new session: ${status?.text ?? 'no call'}`)
+      const [ran, denied] = toolResults(after.events, 'bash')
+      assert(ran?.ok === true, `the command did not run: ${ran?.text ?? 'no bash call'}`)
+      assert(!existsSync(log), `the project hook ran after the trust was revoked: ${existsSync(log) ? readFileSync(log, 'utf8').slice(0, 200) : ''}`)
+      assert(denied?.ok === false && denied.text.includes('denied by the rule Bash(echo E2E-DENIED:*)'), `the deny rule did not apply after the revoke: ${denied?.text ?? 'none'}`)
+      return 'hook ran while trusted; after the revoke a new session holds it back and the deny rule still applies'
+    },
+  },
+  {
+    name: 'agent-skills-folder',
+    async run(sandbox) {
+      // A folder of SKILL.md skills with no plugin manifest, listed in Forge's settings: found, installed, and its skills load.
+      const folder = join(sandbox.root, 'team-skills')
+      cpSync(join(FIXTURES, 'agent-skills'), folder, { recursive: true })
+      const remote = (method: string, request: Record<string, unknown>): Reply => call('lab_remote', { namespace: REMOTE_NAMESPACE, method, request })
+      const installing = await runSession(sandbox, {
+        name: 'agent-skills-install',
+        task: 'List the skills folder and install it.',
+        policy: steps(
+          remote('saveSettings', { discoveryRoots: [folder] }),
+          remote('discover', {}),
+          remote('installPlugin', { path: folder, source: 'agent-skills' }),
+        ),
+      })
+      const [, discovered, installed] = toolResults(installing.events, 'lab_remote')
+      assert(discovered?.ok === true && discovered.text.includes('"source":"agent-skills"') && discovered.text.includes(folder), `discover did not find the listed folder as Agent Skills: ${discovered?.text.slice(0, 400) ?? 'no call'}`)
+      assert(installed?.ok === true, `installPlugin failed: ${installed?.text ?? 'no call'}`)
+
+      // The folder's `agents` skill is a skill, not a plugin directory: it must not turn the folder into a Claude plugin.
+      const using = await runSession(sandbox, { name: 'agent-skills-use', task: 'What is the folder word?', policy: steps(call('skill', { name: 'agents' })) })
+      const catalog = requestText(firstAgentRequest(using))
+      for (const line of ['`triage`: E2E triage skill', '`agents`: E2E skill named like a plugin directory']) assert(catalog.includes(line), `${line} is not in the model's skill catalog`)
+      const [loaded] = toolResults(using.events, 'skill')
+      assert(loaded?.ok === true && loaded.text.includes('AGENTS-SKILL-BODY-3e7d'), `the skill did not load: ${loaded?.text ?? 'no skill call'}`)
+      return 'folder listed, discovered as Agent Skills and installed; its skills are listed and one loads'
+    },
+  },
+  {
     name: 'plugin-install',
     async run(sandbox) {
       // What Fill with AI's agent does: install a local bundle directory with plugin_manager from inside a session.

@@ -100,6 +100,38 @@ describe('agent-skills dialect', () => {
     expect(plugin.components.map(component => [component.kind, component.name]).sort()).toEqual([['mcp', 'docs'], ['skill', 'release'], ['skill', 'review']])
   })
 
+  it('reads skills named like plugin directories as skills, not as a Claude layout', () => {
+    const root = tempRoot()
+    const folder = join(root, 'my-skills')
+    for (const name of ['agents', 'commands', 'hooks', 'review']) skill(folder, name)
+
+    expect(detectSource(folder)).toBe('agent-skills')
+    const plugin = scanRoot(folder)
+    expect(plugin.source).toBe('agent-skills')
+    expect(plugin.components.map(component => [component.kind, component.name]).sort()).toEqual([
+      ['skill', 'agents'],
+      ['skill', 'commands'],
+      ['skill', 'hooks'],
+      ['skill', 'review'],
+    ])
+    expect(discoverPlugins([folder], { home: root }).plugins.map(found => [found.source, found.components.skill, found.components.command, found.components.agent])).toEqual([['agent-skills', 4, 0, 0]])
+  })
+
+  it('still detects a bare Claude plugin by its commands, agents and hooks', () => {
+    const root = tempRoot()
+    for (const [name, files] of [
+      ['commands', { 'commands/go.md': '---\ndescription: Go\n---\nGo.\n' }],
+      ['agents', { 'agents/helper.md': '---\nname: helper\ndescription: Helps\n---\nHelp.\n' }],
+      ['hooks', { 'hooks/hooks.json': JSON.stringify({ hooks: {} }) }],
+    ] as const) {
+      const plugin = join(root, `bare-${name}`)
+      for (const [path, text] of Object.entries(files)) write(join(plugin, path), text)
+      expect(detectSource(plugin)).toBe('claude-code')
+      expect(detectDialect(plugin, false)?.id).toBe('claude-code')
+      expect(scanRoot(plugin).components.map(component => component.kind)).toEqual([name === 'commands' ? 'command' : name === 'agents' ? 'agent' : 'hooks'])
+    }
+  })
+
   it('names a harness skills folder after its harness', () => {
     const root = tempRoot()
     const folder = join(root, '.gemini', 'skills')

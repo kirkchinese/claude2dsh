@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { matches, selects } from '../src/mods/chain.js'
 import { ModsEngine, type EngineHost } from '../src/mods/engine.js'
 import { createExpect, ExpectationError } from '../src/mods/expect.js'
+import { claudeInstructionFiles } from '../src/mods/service/turns.js'
 import { runPluginTests } from './mods-testing.js'
 
 const temporary: string[] = []
@@ -136,4 +137,43 @@ test('an unanswered call names its event', async ($) => {
     expect(file?.tests.map(test => [test.name, test.ok])).toEqual([['counts', true], ['a wrong count fails', false], ['an unanswered call names its event', false]])
     expect(file?.tests[2]?.error).toContain('no implementation for tool.call')
   }, 30_000)
+})
+
+describe('mods instruction files', () => {
+  it('are found as core finds them: from the repository root down, never above it', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hf-mods-instructions-'))
+    temporary.push(root)
+    const write = (path: string, text: string): void => {
+      mkdirSync(join(root, path, '..'), { recursive: true })
+      writeFileSync(join(root, path), text)
+    }
+    write('CLAUDE.md', 'above the repository')
+    write('home/.claude/CLAUDE.md', 'user')
+    write('home/work/repo/.git/HEAD', 'ref: refs/heads/main\n')
+    write('home/work/CLAUDE.md', 'above the repository, below home')
+    write('home/work/repo/CLAUDE.md', 'repository\n@notes.md')
+    write('home/work/repo/notes.md', 'notes')
+    write('home/work/repo/sub/.claude/CLAUDE.md', 'sub')
+    write('home/work/repo/sub/CLAUDE.local.md', 'sub local')
+
+    const files = claudeInstructionFiles(join(root, 'home/work/repo/sub'), join(root, 'home'))
+    expect(files.map(file => [file.path.slice(root.length + 1), file.kind, file.content])).toEqual([
+      ['home/.claude/CLAUDE.md', 'user', 'user'],
+      ['home/work/repo/CLAUDE.md', 'project', 'repository\n@notes.md'],
+      ['home/work/repo/notes.md', 'import', 'notes'],
+      ['home/work/repo/sub/.claude/CLAUDE.md', 'project', 'sub'],
+      ['home/work/repo/sub/CLAUDE.local.md', 'local', 'sub local'],
+    ])
+  })
+
+  it('stop at the working directory outside a repository and outside the home directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hf-mods-instructions-'))
+    temporary.push(root)
+    mkdirSync(join(root, 'work', 'proj'), { recursive: true })
+    writeFileSync(join(root, 'CLAUDE.md'), 'filesystem root level')
+    writeFileSync(join(root, 'work', 'CLAUDE.md'), 'parent')
+    writeFileSync(join(root, 'work', 'proj', 'CLAUDE.md'), 'proj')
+
+    expect(claudeInstructionFiles(join(root, 'work', 'proj'), join(root, 'elsewhere')).map(file => file.content)).toEqual(['proj'])
+  })
 })

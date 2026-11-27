@@ -46,11 +46,15 @@ model requests, events and stderr there.
 | `codex-plugin` | a Codex plugin's skill loads |
 | `instructions` | `~/.claude/CLAUDE.md`, `.claude/CLAUDE.md` and an `@import` reach the system prompt; the project `CLAUDE.md` is left to DSH and not added twice |
 | `session-import` | a Claude Code transcript imports through the plugin's Remote API, is live at once (opens without a restart) in the workspace of its directory, and continues in DSH with its history |
+| `project-trust` | a cloned project's hook is held back until the folder is trusted and runs once it is; its deny rule applies at once |
+| `project-trust-revoke` | trust granted through the Remote API makes the project hook run; after it is revoked, a new session in the folder holds the hook back again and the deny rule still applies |
+| `agent-skills-folder` | a folder of `SKILL.md` skills with no plugin manifest (one named `agents`), listed in Forge's settings, is discovered as Agent Skills and installed; a session lists its skills and loads one |
 | `plugin-install` | a session installs a local bundle (`fixtures/noop-bundle`) with `plugin_manager` `install_bundle`, as Fill with AI's agent does: the call returns, the bundle is applied live (HMR on) and listed enabled. pnpm 11 can finish the first install in the profile and not exit; the check bounds that with a 20 s `idleTimeoutMs` and retries once, as the port prompt tells the agent |
+| `network-install` | a git marketplace opens through the Remote API, an entry is prepared (parts and commit shown), confirmed and installed into Harness Forge's own folder; its skill loads in the next session |
 
 ## Layout
 
-- `fixtures/claude-plugin`, `fixtures/codex-plugin`, `fixtures/claude-home/.claude`, `fixtures/sessions`, `fixtures/noop-bundle`: the inputs.
+- `fixtures/claude-plugin`, `fixtures/codex-plugin`, `fixtures/claude-home/.claude`, `fixtures/sessions`, `fixtures/noop-bundle`, `fixtures/agent-skills`: the inputs.
 - `lab-plugin`: the test-only DSH plugin.
 - `src/main.ts` the entry; `src/dsh.ts` sandbox, packing, profile and sessions; `src/checks.ts` the checks;
   `src/mock-llm.ts` the scripted model; `src/helpers.ts` the pure helpers.
