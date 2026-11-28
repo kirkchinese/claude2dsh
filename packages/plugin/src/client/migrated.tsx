@@ -6,7 +6,8 @@
  */
 import { useState } from 'react'
 import { call } from './typert.js'
-import { Chevron, fill, harnessName, isGap, itemName, kindLabel, messageOf, Notice, Reasons, ROW_TITLE, StateLabel, type Item, type Key, type Part, type TFn, type Workspace } from './shared.js'
+import { usePath } from './paths.js'
+import { Chevron, fill, harnessName, hasSessionStartPart, isGap, itemName, kindLabel, messageOf, Notice, Reasons, ROW_TITLE, StateLabel, type Item, type Key, type Part, type TFn, type Workspace } from './shared.js'
 
 function PartRow({ item, part, t, onToggle, busy }: { item: Item; part: Part; t: TFn; onToggle: (item: Item, part: Part, enabled: boolean) => void; busy: boolean }): JSX.Element {
   const on = part.state !== 'off'
@@ -79,6 +80,7 @@ function PluginRow({ item, t, onToggle, onRemove, onKeep, busy }: {
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const shown = usePath()
   const attention = item.parts.filter(part => isGap(part) || part.state === 'inactive').length
   const updated = item.updated
   return (
@@ -88,7 +90,7 @@ function PluginRow({ item, t, onToggle, onRemove, onKeep, busy }: {
           <Chevron open={open} />
           <span className="hf-item-main">
             <span className="hf-item-title">{itemName(item, t)}<span className="hf-tag">{harnessName(item.source)}</span></span>
-            <span className="hf-item-desc">{item.version !== undefined ? `${item.version} · ` : ''}{item.root}</span>
+            <span className="hf-item-desc">{item.version !== undefined ? `${item.version} · ` : ''}{shown(item.root)}</span>
             {updated !== undefined ? <span className="hf-item-desc">{fill(t('updatedBy'), { harness: harnessName(updated.harness), from: updated.from ?? '?', to: updated.to ?? '?' })}</span> : null}
           </span>
         </button>
@@ -154,6 +156,7 @@ function SignIns({ t, waiting }: { t: TFn; waiting: readonly string[] }): JSX.El
 export function TrustBanners({ t, workspaces, reload }: { t: TFn; workspaces: readonly Workspace[]; reload: () => Promise<void> }): JSX.Element | null {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
+  const folderOf = usePath()
   const shown = workspaces.filter(item => !item.trusted && !item.dismissed && item.waiting.length > 0)
   if (shown.length === 0 && error === undefined) return null
   const decide = async (workspace: string, method: 'trustWorkspace' | 'dismissTrust'): Promise<void> => {
@@ -173,7 +176,7 @@ export function TrustBanners({ t, workspaces, reload }: { t: TFn; workspaces: re
       {shown.map(item => (
         <section key={item.workspace} className="hf-section hf-card" role="region" aria-label={t('trustTitle')}>
           <h2 className="hf-section-title">{t('trustTitle')}</h2>
-          <p className="hf-lead" style={{ margin: '2px 0 6px' }}>{fill(t('trustLead'), { folder: item.workspace })}</p>
+          <p className="hf-lead" style={{ margin: '2px 0 6px' }}>{fill(t('trustLead'), { folder: folderOf(item.workspace) })}</p>
           <ul className="hf-muted" style={{ margin: '0 0 10px', paddingLeft: 18 }}>
             {item.waiting.map(part => <li key={part.componentId}>{kindLabel(part.kind, t)} {part.name} — {t('trustWaiting')}</li>)}
           </ul>
@@ -232,6 +235,7 @@ export function MigratedScreen({ t, items, signInWaiting, reload }: { t: TFn; it
   return (
     <div>
       <p className="hf-lead" style={{ marginTop: 0 }}>{t('migratedLead')}</p>
+      {hasSessionStartPart(items) ? <p className="hf-muted" style={{ margin: '-8px 0 12px' }}>{t('startsInNewSessions')}</p> : null}
       {error !== undefined ? <Notice kind="error">{error}</Notice> : null}
       {notice !== undefined ? <Notice>{notice}</Notice> : null}
       <div style={{ height: 8 }} />

@@ -48,6 +48,7 @@ import {
 import { messageOf } from '../../shared/util.js'
 import { partOf } from '../../workbench/overview.js'
 import { copyTree, treeDigest } from './archive.js'
+import { codePartsOf, type CodePart } from './code-parts.js'
 import { dependenciesOf, RemoteFetcher, type FetchContext, type FetchDeps, type FetchLimits, type NpmDependencies } from './fetch.js'
 
 /** How an install was reached, to fetch it again for an update. */
@@ -154,8 +155,8 @@ export interface Confirmation {
   /** An npm plugin's dependencies: how many it declares, installed from `registry` once confirmed. */
   readonly dependencies?: number
   readonly parts: readonly ConfirmedPart[]
-  /** Part kinds that run code or reach the network with the person's permissions. */
-  readonly runsCode: readonly string[]
+  /** The parts that would run code with the person's permissions, and whether each runs in DSH once installed. */
+  readonly codeParts: readonly CodePart[]
   readonly works: number
   readonly total: number
   readonly warnings: readonly string[]
@@ -231,7 +232,6 @@ export interface RemoteHost {
 const PENDING_MS = 30 * 60_000
 /** The revision of a copy of a folder on this computer, which has no history to name one. */
 const LOCAL_REVISION = 'local'
-const CODE_KINDS = new Set(['hooks', 'mcp', 'code', 'settings'])
 /** Entry fields that are the marketplace's, not the plugin manifest's. */
 const ENTRY_ONLY = new Set(['source', 'strict', 'category', 'tags', 'policy', 'relevance', 'metadata', 'headers', 'headersHelper', 'defaultEnabled', 'engines'])
 /** Component fields an entry adds to a `plugin.json` (Claude Code's strict mode). */
@@ -577,7 +577,7 @@ export class RemotePlugins {
           const reasons = gaps.has(component.id) ? partOf(component, allGaps, undefined, undefined).reasons : []
           return { kind: component.kind, name: component.name, ...(gaps.has(component.id) ? { gap: gaps.get(component.id)! } : {}), ...(reasons.length > 0 ? { reasons } : {}), ...(change !== undefined ? { change } : {}) }
         }),
-        runsCode: [...new Set(plugin.components.filter(component => CODE_KINDS.has(component.kind)).map(component => component.kind))],
+        codeParts: codePartsOf(plugin, allGaps),
         works: plugin.components.filter(component => !gaps.has(component.id)).length,
         total: plugin.components.length,
         warnings: [...(candidate.warnings ?? []), ...plugin.warnings.map(warning => warning.message)],

@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { call } from './typert.js'
+import { useText } from './paths.js'
 import { fill, harnessName, isGap, itemName, kindLabel, messageOf, Notice, Reasons, StateLabel, type Item, type Part, type TFn } from './shared.js'
 
 interface Gap {
@@ -36,7 +37,7 @@ const POLL_MS = 5_000
 
 const keyOf = (pluginId: string, componentId: string): string => `${pluginId}/${componentId}`
 
-function TaskPanel({ gap, t, language, onClose }: { gap: Gap; t: TFn; language: string | undefined; onClose: () => void }): JSX.Element {
+export function TaskPanel({ gap, t, language, onClose }: { gap: Gap; t: TFn; language: string | undefined; onClose: () => void }): JSX.Element {
   const [task, setTask] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
 
@@ -55,7 +56,7 @@ function TaskPanel({ gap, t, language, onClose }: { gap: Gap; t: TFn; language: 
       {task !== undefined ? <div className="hf-brief">{task}</div> : null}
       {error !== undefined ? <Notice kind="error">{error}</Notice> : null}
       <div className="hf-form" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
-        <button className="hf-btn" onClick={onClose}>{t('close')}</button>
+        <button className="hf-btn" aria-label={t('closeTaskLabel')} onClick={onClose}>{t('close')}</button>
       </div>
     </div>
   )
@@ -137,6 +138,7 @@ export function GapsScreen({ t, items, openSession, language, reload }: {
   /** Read the overview again (a part an adapter now covers moves to "Covered"). */
   reload?: () => void
 }): JSX.Element {
+  const shown = useText()
   const gaps: Gap[] = items.flatMap(item => item.parts.filter(isGap).map(part => ({ item, part })))
   const covered: Gap[] = items.flatMap(item => item.parts.filter(part => part.adapter !== undefined).map(part => ({ item, part })))
   const [porting, setPorting] = useState<Porting>('unknown')
@@ -184,7 +186,7 @@ export function GapsScreen({ t, items, openSession, language, reload }: {
   return (
     <div>
       <p className="hf-lead" style={{ marginTop: 0 }}>{t('gapsLead')}</p>
-      {typeof porting === 'object' ? <p className="hf-muted" style={{ margin: '-8px 0 16px' }}>{t('fillUnavailable')} <span className="hf-code">{porting.unavailable}</span></p> : null}
+      {typeof porting === 'object' ? <p className="hf-muted" style={{ margin: '-8px 0 16px' }}>{t('fillUnavailable')} <span className="hf-code">{shown(porting.unavailable)}</span></p> : null}
       {gaps.length === 0
         ? <div className="hf-empty">{t('gapsEmpty')}</div>
         : (

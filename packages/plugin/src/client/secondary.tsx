@@ -4,8 +4,9 @@
  * the Host reports it) and diagnostics.
  * @module @kirkchinese/harness-forge/client
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useContext, useEffect, useState } from 'react'
 import { call, CallError } from './typert.js'
+import { displayText, HomeContext, usePath, useText } from './paths.js'
 import { fill, harnessName, messageOf, mountLabel, Notice, ROW_TITLE, type Source, type TFn } from './shared.js'
 import { ChatImportOffer, ChatImportProvided, useSessionImport } from './chat-import.js'
 
@@ -104,6 +105,7 @@ export function SessionsScreen({ t, openSession }: { t: TFn; openSession: (id: s
 
 /** Harness Forge's own import, while dsh-chat-import is not there. */
 function ForgeSessions({ t, openSession }: { t: TFn; openSession: (id: string) => void }): JSX.Element {
+  const shown = usePath()
   const [source, setSource] = useState<Source>('claude-code')
   const [sessions, setSessions] = useState<SessionView[] | undefined>(undefined)
   const [next, setNext] = useState<number | undefined>(undefined)
@@ -197,7 +199,7 @@ function ForgeSessions({ t, openSession }: { t: TFn; openSession: (id: string) =
                       <span className="hf-item-main">
                         <span className="hf-item-title">{title}</span>
                         <span className="hf-item-desc">
-                          {(session.updatedAt ?? session.createdAt) !== undefined ? `${new Date((session.updatedAt ?? session.createdAt)!).toLocaleString()} · ` : ''}{session.archived === true ? `${t('sessionArchived')} · ` : ''}{session.cwd ?? session.path}
+                          {(session.updatedAt ?? session.createdAt) !== undefined ? `${new Date((session.updatedAt ?? session.createdAt)!).toLocaleString()} · ` : ''}{session.archived === true ? `${t('sessionArchived')} · ` : ''}{shown(session.cwd ?? session.path)}
                         </span>
                         {sizeText !== undefined && id === undefined ? <span className="hf-item-desc">{sizeText}</span> : null}
                         {maybe !== undefined ? <span className="hf-item-desc">{t('sessionMaybeImported')}</span> : null}
@@ -241,6 +243,7 @@ interface ContextStatus {
 }
 
 function ContextSection({ t }: { t: TFn }): JSX.Element | null {
+  const shown = usePath()
   const [status, setStatus] = useState<ContextStatus | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   useEffect(() => {
@@ -265,13 +268,13 @@ function ContextSection({ t }: { t: TFn }): JSX.Element | null {
               : (
                 <div className="hf-card">
                   <div style={{ marginBottom: 6 }}>{t('contextActive')}</div>
-                  {status.files.map(file => <div key={file.path} className="hf-code">{file.path}</div>)}
+                  {status.files.map(file => <div key={file.path} className="hf-code">{shown(file.path)}</div>)}
                 </div>
               )}
       {hostFiles.length > 0 ? (
         <div className="hf-card" style={{ marginTop: status?.files.length === 0 ? 0 : 8 }}>
           <div style={{ marginBottom: 6 }}>{t('contextHost')}</div>
-          {hostFiles.map(file => <div key={file.path} className="hf-code">{file.path}</div>)}
+          {hostFiles.map(file => <div key={file.path} className="hf-code">{shown(file.path)}</div>)}
         </div>
       ) : null}
     </section>
@@ -292,6 +295,7 @@ const TRUST_SOURCE: Readonly<Record<string, string>> = { 'claude-code': 'Claude 
 
 /** The workspaces trusted here or dismissed with "Not now", each reversible. */
 function TrustSection({ t, onChanged }: { t: TFn; onChanged: () => void }): JSX.Element {
+  const shown = usePath()
   const [records, setRecords] = useState<readonly TrustRecord[] | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -346,7 +350,7 @@ function TrustSection({ t, onChanged }: { t: TFn; onChanged: () => void }): JSX.
               <li key={record.workspace} className="hf-item">
                 <div className="hf-item-head">
                   <span className="hf-item-main">
-                    <span className="hf-item-title hf-code">{record.workspace}</span>
+                    <span className="hf-item-title hf-code">{shown(record.workspace)}</span>
                     <span className="hf-item-desc">
                       {record.trusted ? t('trustStateTrusted') : record.dismissed ? t('trustStateDismissed') : t('trustStateUndecided')}
                       {others.length > 0 ? ` · ${fill(t('trustAlsoBy'), { list: others.join(', ') })}` : ''}
@@ -366,6 +370,8 @@ function TrustSection({ t, onChanged }: { t: TFn; onChanged: () => void }): JSX.
 }
 
 export function SettingsScreen({ t, onSaved }: { t: TFn; onSaved: () => void }): JSX.Element {
+  const shown = usePath()
+  const shownText = useText()
   const [roots, setRoots] = useState('')
   const [autoDiscover, setAutoDiscover] = useState(true)
   const [missing, setMissing] = useState<readonly string[]>([])
@@ -411,8 +417,8 @@ export function SettingsScreen({ t, onSaved }: { t: TFn; onSaved: () => void }):
         <h2 className="hf-section-title">{t('discoveryRoots')}</h2>
         <p className="hf-lead" style={{ margin: '2px 0 8px' }}>{t('discoveryRootsHint')}</p>
         <textarea className="hf-textarea" value={roots} aria-label={t('discoveryRoots')} onChange={event => { setRoots(event.target.value) }} />
-        {missing.length > 0 ? <div className="hf-muted" style={{ marginTop: 6 }}>{fill(t('missingRoots'), { list: missing.join(', ') })}</div> : null}
-        {skipped.map(message => <div key={message} className="hf-muted" style={{ marginTop: 6 }}>{fill(t('discoverySkipped'), { message })}</div>)}
+        {missing.length > 0 ? <div className="hf-muted" style={{ marginTop: 6 }}>{fill(t('missingRoots'), { list: missing.map(shown).join(', ') })}</div> : null}
+        {skipped.map(message => <div key={message} className="hf-muted" style={{ marginTop: 6 }}>{fill(t('discoverySkipped'), { message: shownText(message) })}</div>)}
         <label className="hf-form" style={{ marginTop: 12, fontSize: 13 }}>
           <button className="hf-switch" role="switch" aria-checked={autoDiscover} aria-label={t('autoDiscover')} onClick={() => { setAutoDiscover(value => !value) }} />
           {t('autoDiscover')}
@@ -443,7 +449,18 @@ interface Diagnostics {
 /** Product names; not translated. */
 const PRODUCT = { forge: 'Harness Forge', dsh: 'DSH', node: 'Node.js' } as const
 
+/** A value with the home folder shown as `~` in every string it holds, for the technical details. */
+function withHomeShown(value: unknown, home: string | undefined): unknown {
+  if (typeof value === 'string') return displayText(value, home)
+  if (Array.isArray(value)) return value.map(item => withHomeShown(item, home))
+  if (typeof value === 'object' && value !== null) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withHomeShown(item, home)]))
+  return value
+}
+
 export function DiagnosticsScreen({ t }: { t: TFn }): JSX.Element {
+  const home = useContext(HomeContext)
+  const shown = usePath()
+  const shownText = useText()
   const [value, setValue] = useState<Diagnostics | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -481,7 +498,7 @@ export function DiagnosticsScreen({ t }: { t: TFn }): JSX.Element {
                 <div className="hf-card" style={{ marginTop: 8 }}>
                   <div style={{ fontSize: 13, marginBottom: 6 }}>{fill(t('diagFaults'), { n: value.faults.length })}</div>
                   {value.faults.map((fault, index) => (
-                    <div key={index} className="hf-reason"><strong>{rowName(fault.row)}</strong> <span className="hf-code">{fault.message}</span></div>
+                    <div key={index} className="hf-reason"><strong>{rowName(fault.row)}</strong> <span className="hf-code">{shownText(fault.message)}</span></div>
                   ))}
                 </div>
               )}
@@ -491,7 +508,7 @@ export function DiagnosticsScreen({ t }: { t: TFn }): JSX.Element {
                 {value.failedMounts.map((mount, index) => (
                   <div key={index} className="hf-reason">
                     <strong>{mount.plugin ?? mount.pluginId}</strong> · {mountLabel(mount, t)}
-                    {mount.error.length > 0 ? <div className="hf-code">{mount.error}</div> : null}
+                    {mount.error.length > 0 ? <div className="hf-code">{shownText(mount.error)}</div> : null}
                   </div>
                 ))}
               </div>
@@ -499,9 +516,9 @@ export function DiagnosticsScreen({ t }: { t: TFn }): JSX.Element {
           </section>
           <section className="hf-section">
             <dl className="hf-facts">
-              <dt>{t('diagBash')}</dt><dd>{value.hookShell.bash ?? t('diagMissing')}</dd>
-              <dt>{t('diagPowershell')}</dt><dd>{value.hookShell.powershell}</dd>
-              {value.bun !== undefined ? <><dt>{t('diagBun')}</dt><dd>{value.bun ?? t('diagBunMissing')}</dd></> : null}
+              <dt>{t('diagBash')}</dt><dd>{value.hookShell.bash === null ? t('diagMissing') : shown(value.hookShell.bash)}</dd>
+              <dt>{t('diagPowershell')}</dt><dd>{shown(value.hookShell.powershell)}</dd>
+              {value.bun !== undefined ? <><dt>{t('diagBun')}</dt><dd>{value.bun === null ? t('diagBunMissing') : shown(value.bun)}</dd></> : null}
             </dl>
           </section>
           {value.versions !== undefined ? (
@@ -516,7 +533,7 @@ export function DiagnosticsScreen({ t }: { t: TFn }): JSX.Element {
           ) : null}
           <details className="hf-details">
             <summary>{t('diagDetails')}</summary>
-            <div className="hf-brief">{JSON.stringify(value, null, 2)}</div>
+            <div className="hf-brief">{JSON.stringify(withHomeShown(value, home), null, 2)}</div>
           </details>
         </>
       )}

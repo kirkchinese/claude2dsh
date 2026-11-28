@@ -19,7 +19,22 @@ export interface PortBriefInput {
   readonly files: readonly string[]
   /** The original's license when the manifest does not declare it (a detected LICENSE file). */
   readonly license?: string
+  /** Where the DSH that asks keeps its data, as DSH resolved it; absent when the caller does not know. */
+  readonly runtime?: PortRuntime
 }
+
+/** The DSH home and profile of the session that asks for a port: facts for the creator, never for the adapter's source. */
+export interface PortRuntime {
+  /** The effective DSH home: `$DSH_HOME`, else `~/.dsh`, resolved. */
+  readonly dshHome: string
+  /** Whether `$DSH_HOME` set it. */
+  readonly dshHomeFromEnv: boolean
+  /** The profile DSH runs (`profileContext`); absent when DSH was started without one. */
+  readonly profile?: { readonly name: string; readonly dir: string }
+}
+
+/** The DSH home when `$DSH_HOME` is not set, as the user would type it. */
+export const DEFAULT_DSH_HOME = '~/.dsh'
 
 /** Longest manifest excerpt quoted in a brief, in characters. */
 const MANIFEST_LIMIT = 4_000
@@ -148,6 +163,35 @@ const bullet = (line: string): string => `- ${line}`
 const code = (path: string): string => `\`${path}\``
 
 /**
+ * Where this DSH keeps its data, and how the adapter finds the same at run
+ * time (dsh-doc `references/plugin-development.md` and the `profileContext`
+ * and shell environment DSH provides). The resolved values are for the
+ * creator's checks only: the adapter's source must resolve them itself.
+ */
+export function dataLocationLines(runtime: PortRuntime | undefined): string[] {
+  const facts = runtime === undefined
+    ? [bullet(`DSH home: \`$DSH_HOME\` (default \`${DEFAULT_DSH_HOME}\`); the profile is the one DSH runs. Find both as below.`)]
+    : [
+        bullet(`DSH home: ${code(runtime.dshHome)} (${runtime.dshHomeFromEnv ? 'from `$DSH_HOME`' : `the default \`${DEFAULT_DSH_HOME}\`; \`$DSH_HOME\` is not set`})`),
+        bullet(runtime.profile === undefined
+          ? 'Current profile: none (DSH was started without a profile)'
+          : `Current profile: \`${runtime.profile.name}\`, directory ${code(runtime.profile.dir)}`),
+      ]
+  return [
+    ...facts,
+    bullet('These values are this session\'s, for your checks. The adapter finds them at run time: a Host plugin reads the profile from `ctx.get(\'profileContext\')` (`name`, `dir`; present only when DSH runs a profile) and the home from `process.env.DSH_HOME`, else `~/.dsh` under `os.homedir()`; a shell command reads `$DSH_PROFILE`, `$DSH_PROFILE_DIR` and `$DSH_HOME`. A Client plugin gets session data from its slot context and Host projections, not from files.'),
+  ]
+}
+
+/** The rules every adapter keeps when it touches session, profile or harness data. */
+export const DATA_RULES: readonly string[] = [
+  'Use DSH\'s runtime services and the context the adapter receives for session and profile data wherever DSH offers them (a Host projection with `wire.view`, a Host service, the slot\'s session, `profileContext`), not the files behind them.',
+  `When a file path is truly needed, resolve it at run time from \`$DSH_HOME\` (default \`${DEFAULT_DSH_HOME}\`) and the profile DSH runs, never a hard-coded home path such as \`~/.dsh\` or \`/home/<user>/.dsh\`.`,
+  'Never read or iterate other profiles: no listing of `profiles/`, no guessing a profile by name; only the profile DSH runs.',
+  'Never read another harness\'s or DSH\'s private files beyond what the part needs: no other sessions, credentials, settings or logs it does not show.',
+]
+
+/**
  * Write the brief for one part, as Markdown. It names the original's files
  * by absolute path so the adapter reuses them where it can.
  */
@@ -207,6 +251,16 @@ export function portBrief(input: PortBriefInput): string {
     '',
     ...extensionPointsFor(component, gaps).map(bullet),
     '',
+    '## Where DSH keeps its data',
+    '',
+    ...dataLocationLines(input.runtime),
+    '',
+    '## Data access rules',
+    '',
+    'Firm rules; an adapter that breaks one is not done:',
+    '',
+    ...DATA_RULES.map(bullet),
+    '',
     '## Questions for the user',
     '',
     bullet(`Where the adapter's source lives. Default: \`${defaultAdapterDir(packageName)}\`.`),
@@ -219,7 +273,8 @@ export function portBrief(input: PortBriefInput): string {
     bullet('The adapter loads without errors (check `plugin_manager` `list_bundles` and `cordis_inspect_query`) and disabling it in the Plugin Manager removes everything it registered.'),
     bullet(`Its \`package.json\` declares \`"harnessForge": { "ports": [{ "plugin": ${JSON.stringify(plugin.name)}, "component": ${JSON.stringify(component.name)} }] }\`, so Harness Forge shows this part as covered by the adapter.`),
     bullet('Its README says what it restores, how it finds the original plugin, and every remaining difference from the original.'),
-    bullet(`\`harness_verify_port\` with \`${JSON.stringify({ pluginId: plugin.id, componentId: component.id })}\` answers \`"covered": true\`.`),
+    bullet(`\`harness_verify_port\` with \`${JSON.stringify({ pluginId: plugin.id, componentId: component.id })}\` answers \`"covered": true\`; its \`paths\` check finds no hard-coded DSH home and no scan of \`profiles/\` in the adapter's source.`),
+    bullet('It keeps the data access rules above: run it with `$DSH_HOME` pointing elsewhere and it still reads only the running profile\'s data.'),
     '',
     '## Constraints',
     '',

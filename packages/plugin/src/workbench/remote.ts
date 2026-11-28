@@ -13,6 +13,7 @@
  * transform.
  * @module @kirkchinese/harness-forge
  */
+import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import { assess, dialects, type ForeignPlugin, type SourceId } from '@kirkchinese/harness-forge-core'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -177,15 +178,15 @@ export class HarnessRemoteService extends TypertRemoteService {
   }
 
   /**
-   * The overview, plus the workspaces of open sessions with their trust and the project parts that wait for it, and
-   * how many records are still being applied. It starts following the harnesses' changes without waiting for it:
+   * The overview, plus the home folder (the page shows paths under it as `~/…`), the workspaces of open sessions with
+   * their trust and the project parts that wait for it, and how many records are still being applied. It starts following the harnesses' changes without waiting for it:
    * `applying` says it is under way, and the next overview shows the result.
    */
   overview(): Promise<unknown> {
     return this.guard('overview', async () => {
       void this.forge.follow()
       const applying = this.forge.applying()
-      return { ...await this.workbench.overview(), workspaces: await this.forge.projects.workspaces(), ...(applying !== undefined ? { applying } : {}) }
+      return { ...await this.workbench.overview(), home: homedir(), workspaces: await this.forge.projects.workspaces(), ...(applying !== undefined ? { applying } : {}) }
     })
   }
 
@@ -308,7 +309,7 @@ export class HarnessRemoteService extends TypertRemoteService {
 
   /**
    * Fetch one plugin (a marketplace's `entry`, or the pasted `input` itself) and say what it contains, to confirm:
-   * `{ token, name, source, page?, revision, parts, runsCode, … }`. Nothing is installed yet.
+   * `{ token, name, source, page?, revision, parts, codeParts, … }`. Nothing is installed yet.
    */
   remotePrepare(request: Record<string, unknown>): Promise<unknown> {
     return this.guard('remotePrepare', () => this.forge.remote.prepare(required(request, 'input', 'remotePrepare'), text(request, 'entry') || undefined))

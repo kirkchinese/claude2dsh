@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { assess, scanPlugin } from '@kirkchinese/harness-forge-core'
-import { CREATOR_PRESET, briefFor, briefTitle, partFiles, startCreatorSession } from '../src/porting/port-gap.js'
+import { CREATOR_PRESET, briefFor, briefTitle, partFiles, portRuntime, startCreatorSession } from '../src/porting/port-gap.js'
 import { startPorter } from '../src/porting/row.js'
 import { HarnessRemoteService } from '../src/workbench/remote.js'
 import { PortSessions } from '../src/porting/port-sessions.js'
@@ -106,6 +106,26 @@ describe('porting a gap', () => {
     await expect(startCreatorSession(host([{ id: 'default' }]).ctx, 'b')).rejects.toThrow(/creation mode \(agent preset "cordis"\) is not in this DSH profile/u)
     await expect(startCreatorSession(host([{ id: CREATOR_PRESET, broken: { message: 'x' } }]).ctx, 'b')).rejects.toThrow(/is unavailable in this DSH profile/u)
     await expect(startCreatorSession({ get: () => undefined } as never, 'b')).rejects.toThrow(/composes no session controller/u)
+  })
+
+  it('tells the creator the profile and DSH home of this session, as DSH resolves them', async () => {
+    vi.stubEnv('DSH_HOME', '/srv/dsh-home')
+    try {
+      const profileContext = { name: 'work', dir: '/srv/dsh-home/profiles/work' }
+      expect(portRuntime(host(undefined, { profileContext }).ctx)).toEqual({ dshHome: '/srv/dsh-home', dshHomeFromEnv: true, profile: { name: 'work', dir: '/srv/dsh-home/profiles/work' } })
+      const { ctx, calls } = host(undefined, { profileContext })
+      const apis = new Map<string, unknown>()
+      startPorter(ctx, { statePath: join(root, 'state', 'state.json'), provide: (name: string, api: unknown) => { apis.set(name, api); return () => undefined } } as never)
+      const porter = apis.get('porter') as { brief(...args: unknown[]): string; port(...args: unknown[]): Promise<unknown> }
+      expect(porter.brief(plugin, gaps, component.id)).toContain('Current profile: `work`, directory `/srv/dsh-home/profiles/work`')
+      await porter.port(plugin, gaps, component.id, { cwd: '/work' })
+      const sent = (calls.prompt[0] as { content: Array<{ text: string }> }).content[0]!.text
+      expect(sent).toContain('DSH home: `/srv/dsh-home` (from `$DSH_HOME`)')
+    } finally { vi.unstubAllEnvs() }
+    vi.stubEnv('DSH_HOME', '')
+    try {
+      expect(portRuntime({ get: () => undefined } as never)).toEqual({ dshHome: join(homedir(), '.dsh'), dshHomeFromEnv: false })
+    } finally { vi.unstubAllEnvs() }
   })
 
   it('serves harnessCompat.portBrief and portGap through the porter row', async () => {

@@ -80,8 +80,33 @@ describe('the porting brief', () => {
   })
 
   it('asks the creator to verify with harness_verify_port and to author where the user agreed', () => {
-    expect(brief).toContain(`\`harness_verify_port\` with \`{"pluginId":"${plugin.id}","componentId":"${component.id}"}\` answers \`"covered": true\`.`)
+    expect(brief).toContain(`\`harness_verify_port\` with \`{"pluginId":"${plugin.id}","componentId":"${component.id}"}\` answers \`"covered": true\`;`)
     expect(brief).toContain('Author it in the directory the user agreed to (default `~/dsh-adapters/dsh-adapter-claude-hud-statusline`)')
+  })
+
+  it('names the profile and the DSH home this session runs in, as facts the adapter must not hard-code', () => {
+    const located = portBrief({ plugin, component, gaps, files: [], runtime: { dshHome: '/srv/dsh-home', dshHomeFromEnv: true, profile: { name: 'work', dir: '/srv/dsh-home/profiles/work' } } })
+    expect(located).toContain('## Where DSH keeps its data')
+    expect(located).toContain('DSH home: `/srv/dsh-home` (from `$DSH_HOME`)')
+    expect(located).toContain('Current profile: `work`, directory `/srv/dsh-home/profiles/work`')
+    expect(located).toContain("`ctx.get('profileContext')`")
+    expect(located).toContain('`$DSH_PROFILE_DIR`')
+    const defaults = portBrief({ plugin, component, gaps, files: [], runtime: { dshHome: '/home/u/.dsh', dshHomeFromEnv: false } })
+    expect(defaults).toContain('DSH home: `/home/u/.dsh` (the default `~/.dsh`; `$DSH_HOME` is not set)')
+    expect(defaults).toContain('Current profile: none (DSH was started without a profile)')
+    // Without runtime facts the brief still says how to find them.
+    expect(brief).toContain('## Where DSH keeps its data')
+    expect(brief).toContain('`$DSH_HOME` (default `~/.dsh`)')
+  })
+
+  it('sets firm rules for session and profile data, and checks them', () => {
+    expect(brief).toContain('## Data access rules')
+    expect(brief).toContain("Use DSH's runtime services and the context the adapter receives for session and profile data wherever DSH offers them")
+    expect(brief).toContain('resolve it at run time from `$DSH_HOME` (default `~/.dsh`) and the profile DSH runs')
+    expect(brief).toContain('never a hard-coded home path such as `~/.dsh` or `/home/<user>/.dsh`')
+    expect(brief).toContain('Never read or iterate other profiles')
+    expect(brief).toContain("Never read another harness's or DSH's private files beyond what the part needs")
+    expect(brief).toContain('its `paths` check finds no hard-coded DSH home and no scan of `profiles/`')
   })
 
   it('falls back to a detected license, and says when there is none', () => {

@@ -7,6 +7,8 @@
  */
 import { useEffect, useState } from 'react'
 import { call } from './typert.js'
+import { codeNotice, type CodePart } from './code-notice.js'
+import { usePath } from './paths.js'
 import { Chevron, fill, harnessName, itemName, kindLabel, messageOf, Notice, Reasons, StateLabel, VerdictBar, type Harness, type Item, type Key, type Part, type TFn } from './shared.js'
 
 interface MarketEntry {
@@ -45,7 +47,8 @@ interface Confirmation {
   readonly registry?: string
   readonly dependencies?: number
   readonly parts: ReadonlyArray<{ readonly kind: string; readonly name: string; readonly gap?: string; readonly reasons?: Part['reasons']; readonly change?: 'new' | 'changed' }>
-  readonly runsCode: readonly string[]
+  /** The parts that would run code, and whether each runs in DSH once installed. */
+  readonly codeParts: readonly CodePart[]
   readonly works: number
   readonly total: number
   readonly pluginId: string
@@ -100,6 +103,7 @@ function holdNote(item: Item, t: TFn): string | undefined {
 /** One plugin or the person's settings, with its parts behind an expander. */
 function ItemRow({ item, t, busy, onMigrate }: { item: Item; t: TFn; busy: boolean; onMigrate: (item: Item) => void }): JSX.Element {
   const [open, setOpen] = useState(false)
+  const shown = usePath()
   return (
     <li className="hf-item" data-open={open}>
       <div className="hf-item-head">
@@ -112,7 +116,7 @@ function ItemRow({ item, t, busy, onMigrate }: { item: Item; t: TFn; busy: boole
               {item.enabled === false ? <span className="hf-tag">{fill(t('disabledInTag'), { harness: harnessName(item.source) })}</span> : null}
               {item.enabledUnknown !== undefined ? <span className="hf-tag">{fill(t('enabledUnknownTag'), { harness: harnessName(item.source) })}</span> : null}
             </span>
-            <span className="hf-item-desc">{item.version !== undefined ? `${item.version} · ` : ''}{item.root}</span>
+            <span className="hf-item-desc">{item.version !== undefined ? `${item.version} · ` : ''}{shown(item.root)}</span>
             {holdNote(item, t) !== undefined ? <span className="hf-reason">{holdNote(item, t)}</span> : null}
           </span>
         </button>
@@ -145,6 +149,7 @@ const SHOWN = 60
 /** What a plugin contains and where it comes from, to confirm before it is installed. */
 function ConfirmInstall({ t, plan, busy, onConfirm, onCancel }: { t: TFn; plan: Confirmation; busy: boolean; onConfirm: () => void; onCancel: () => void }): JSX.Element {
   const title = fill(t(plan.update !== undefined ? 'confirmUpdateTitle' : 'confirmTitle'), { name: plan.name })
+  const warning = codeNotice(plan.codeParts, t)
   return (
     <div className="hf-card" role="dialog" aria-label={title} style={{ marginTop: 12 }}>
       <div className="hf-section-title" style={{ marginBottom: 8 }}>{title}</div>
@@ -174,9 +179,8 @@ function ConfirmInstall({ t, plan, busy, onConfirm, onCancel }: { t: TFn; plan: 
         </dd>
       </dl>
       {plan.dependencies !== undefined && plan.dependencies > 0 && plan.registry !== undefined ? <div className="hf-muted" style={{ marginBottom: 8 }}>{fill(t('confirmDependencies'), { n: plan.dependencies, registry: plan.registry })}</div> : null}
-      <Notice kind={plan.runsCode.length > 0 ? 'error' : 'ok'}>
-        {t('confirmWarn')}
-        {plan.runsCode.length > 0 ? `\n${fill(t('confirmCode'), { kinds: plan.runsCode.map(kind => kindLabel(kind, t)).join(', ') })}` : ''}
+      <Notice kind={warning.kind}>
+        {warning.lines.join('\n')}
         {plan.alreadyInstalled ? `\n${t('confirmReinstall')}` : ''}
       </Notice>
       <div className="hf-form" style={{ marginTop: 12 }}>
@@ -189,6 +193,7 @@ function ConfirmInstall({ t, plan, busy, onConfirm, onCancel }: { t: TFn; plan: 
 
 /** Get plugins: paste a marketplace or plugin, or open a default marketplace; confirm, install; check for updates. */
 function GetPlugins({ t, onInstalled }: { t: TFn; onInstalled: () => void }): JSX.Element {
+  const shown = usePath()
   const [input, setInput] = useState('')
   const [sources, setSources] = useState<Sources | undefined>(undefined)
   const [view, setView] = useState<SourceView | undefined>(undefined)
@@ -327,7 +332,7 @@ function GetPlugins({ t, onInstalled }: { t: TFn; onInstalled: () => void }): JS
               <div className="hf-item-title">{view.name}<span className="hf-tag">{view.kind === 'plugin' ? t('marketPlugin') : harnessName(view.harness)}</span></div>
               <div className="hf-muted">
                 {view.owner !== undefined ? `${view.owner} · ` : ''}
-                {view.page !== undefined ? <a href={view.page} target="_blank" rel="noreferrer">{view.source}</a> : view.source}
+                {view.page !== undefined ? <a href={view.page} target="_blank" rel="noreferrer">{shown(view.source)}</a> : shown(view.source)}
                 {view.revision !== undefined ? <> · <span className="hf-code">{view.revision}</span></> : null}
               </div>
             </div>
@@ -385,7 +390,7 @@ function GetPlugins({ t, onInstalled }: { t: TFn; onInstalled: () => void }): JS
                       <span className="hf-item-desc" title={install.source}>
                         {install.localMarketplace !== undefined
                           ? fill(t('remoteLocalMarketplace'), { name: install.localMarketplace })
-                          : install.page !== undefined ? <a href={install.page} target="_blank" rel="noreferrer">{install.source}</a> : install.source}
+                          : install.page !== undefined ? <a href={install.page} target="_blank" rel="noreferrer">{shown(install.source)}</a> : shown(install.source)}
                       </span>
                       {status?.error !== undefined ? <span className="hf-reason">{status.error}</span> : null}
                     </span>

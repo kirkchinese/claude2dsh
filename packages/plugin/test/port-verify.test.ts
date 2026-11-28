@@ -58,6 +58,13 @@ describe('the port prompt', () => {
     expect(prompt).toContain('ask the user to look and confirm')
   })
 
+  it('binds the build to the brief\'s data access rules', () => {
+    expect(prompt).toContain('Follow the brief\'s "Data access rules" without exception')
+    expect(prompt).toContain('take session and profile data from DSH\'s runtime services and the context the adapter receives')
+    expect(prompt).toContain('resolve any DSH path at run time from `$DSH_HOME` (default `~/.dsh`) and the running profile')
+    expect(prompt).toContain('never read or iterate other profiles')
+  })
+
   it('names the user\'s language, and ends with the brief', () => {
     expect(prompt).toContain('Talk to the user in Chinese (简体中文), the language of their DSH interface')
     expect(portPrompt({ plugin, component, brief: 'b' })).toContain('Talk to the user in the language they write in.')
@@ -158,6 +165,49 @@ describe('harness_verify_port', () => {
     expect(failed.covered).toBe(false)
     expect(failed.checks[2]).toEqual({ check: 'loaded', ok: false, detail: 'row "hud" failed to start: boom; row "gone" has no running entry' })
     expect(stateOf(d.sessions.get(plugin.id, component.id)!)).toBe('in-progress')
+  })
+
+  /** An adapter package on disk with the given source files. */
+  function adapterAt(files: Record<string, string>): AdapterCoverage {
+    const dir = temp()
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(dir, path, '..'), { recursive: true })
+      writeFileSync(join(dir, path), text)
+    }
+    return { ...adapter, dir }
+  }
+
+  it('fails an adapter whose source hard-codes the DSH home or scans the profiles', async () => {
+    const bad = adapterAt({
+      'package.json': '{"name":"dsh-adapter-claude-hud-statusline"}',
+      'index.js': "import { readdirSync } from 'node:fs'\nconst root = '~/.dsh'\nfor (const name of readdirSync(join(root, 'profiles'))) use(name)\n",
+      'src/client.tsx': "const sessions = '/home/misaka/.dsh/sessions'\n",
+      'node_modules/dep/index.js': "const ignored = '~/.dsh'\n",
+    })
+    const result = await verifyPort(deps([bad], manager({})), plugin.id, component.id)
+    expect(result.covered).toBe(false)
+    const paths = result.checks.find(item => item.check === 'paths')!
+    expect(paths.ok).toBe(false)
+    expect(paths.detail).toContain('index.js:2 hard-codes the DSH home (~/.dsh)')
+    expect(paths.detail).toContain('index.js:3 lists the profiles directory')
+    expect(paths.detail).toContain('src/client.tsx:1 hard-codes the DSH home (/home/misaka/.dsh)')
+    expect(paths.detail).not.toContain('node_modules')
+  })
+
+  it('accepts an adapter that resolves the DSH home and its own profile at run time', async () => {
+    const good = adapterAt({
+      'index.js': [
+        "// Defaults to ~/.dsh when $DSH_HOME is unset; never lists /home/<user>/.dsh/profiles/.",
+        "const home = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')",
+        "const profile = ctx.get('profileContext')?.dir ?? join(home, 'profiles', process.env.DSH_PROFILE)",
+        "const files = readdirSync(join(profile, 'cache'))",
+        "const docs = 'https://example.com/profiles/'",
+      ].join('\n'),
+      'README.md': 'Reads `~/.dsh` unless DSH_HOME is set.\n',
+    })
+    const result = await verifyPort(deps([good], manager({})), plugin.id, component.id)
+    expect(result.checks.find(item => item.check === 'paths')).toMatchObject({ ok: true })
+    expect(result.covered).toBe(true)
   })
 
   it('names an unknown part', async () => {

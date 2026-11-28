@@ -61,6 +61,8 @@ export interface OverviewPart {
   readonly adapter?: string
   /** Another part supplies this settings entry; only that part counts toward the overview. */
   readonly providedBy?: { readonly name: string; readonly adapter?: string }
+  /** It acts when a session starts (see {@link actsAtSessionStart}): a session already open keeps what it started with. */
+  readonly atStart?: true
 }
 
 export interface OverviewItem {
@@ -175,8 +177,27 @@ function portable(gap: Gap): boolean {
   return gap.kind === 'ui-surface' || gap.kind === 'unsupported-component' || gap.kind === 'unsupported-event' || gap.kind === 'unsupported-handler'
 }
 
+/** The hook event DSH raises once as a session starts. */
+const SESSION_START_EVENT = 'SessionStart'
+
+/**
+ * Whether a part acts only when a session starts: a SessionStart hook runs once as the session begins, so a session
+ * already open does not get it. Everything else takes effect at once: skills, commands, agents and MCP tools are
+ * looked up when they are used, the other hooks run at their events, and system-prompt sections (output styles,
+ * Codex's global instructions, instruction files) are read again at every step, because DSH assembles the system
+ * prompt once per step (dsh-system-prompt: "The agent loop calls `assemble(context)` once per proposed step").
+ */
+export function actsAtSessionStart(component: ForeignComponent): boolean {
+  return component.kind === 'hooks' && component.events.includes(SESSION_START_EVENT)
+}
+
 /** The state of one part, from what happened when it was set up and run (or, before migration, from its gaps). */
 export function partOf(component: ForeignComponent, gaps: readonly Gap[], outcome: ComponentOutcome | undefined, adapter: string | undefined, off = false): OverviewPart {
+  const part = stateOfPart(component, gaps, outcome, adapter, off)
+  return actsAtSessionStart(component) ? { ...part, atStart: true } : part
+}
+
+function stateOfPart(component: ForeignComponent, gaps: readonly Gap[], outcome: ComponentOutcome | undefined, adapter: string | undefined, off: boolean): OverviewPart {
   const own = gaps.filter(gap => gap.componentId === component.id && gap.kind !== 'license' && gap.kind !== 'runtime-failure')
   const base = { id: component.id, kind: component.kind, name: component.name }
   if (off) return { ...base, state: 'off', checked: false, reasons: [] }

@@ -18,7 +18,8 @@ import zh from './locale/zh.json' with { type: 'json' }
 import contribution, { call, isWorkbenchOff, setMountedRemote, setMountedRemoteError } from './typert.js'
 import { CSS } from './styles.js'
 import { registerModsDock } from './mods.js'
-import { fill, isGap, messageOf, Notice, type Applying, type Harness, type Item, type Key, type TFn, type Workspace } from './shared.js'
+import { fill, hasSessionStartPart, isGap, messageOf, newlyMigrated, Notice, type Applying, type Harness, type Item, type Key, type TFn, type Workspace } from './shared.js'
+import { HomeContext } from './paths.js'
 import { DiscoverScreen } from './discover.js'
 import { MigratedScreen, TrustBanners } from './migrated.js'
 import { GapsScreen } from './gaps.js'
@@ -75,7 +76,11 @@ function readDismissed(): boolean {
   }
 }
 
-function MoreMenu({ t, onPick }: { t: TFn; onPick: (screen: Secondary) => void }): JSX.Element {
+/**
+ * "More" with a name of its own: DSH's sidebar has a "More" button too, and assistive technology and tests that
+ * go by the name must tell the two apart. The visible text stays short.
+ */
+export function MoreMenu({ t, onPick }: { t: TFn; onPick: (screen: Secondary) => void }): JSX.Element {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -91,7 +96,7 @@ function MoreMenu({ t, onPick }: { t: TFn; onPick: (screen: Secondary) => void }
   }, [open])
   return (
     <div ref={box} style={{ position: 'relative' }}>
-      <button className="hf-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => { setOpen(value => !value) }}>
+      <button className="hf-btn" aria-label={t('moreActions')} aria-haspopup="menu" aria-expanded={open} onClick={() => { setOpen(value => !value) }}>
         {t('more')}
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
@@ -106,6 +111,11 @@ function MoreMenu({ t, onPick }: { t: TFn; onPick: (screen: Secondary) => void }
   )
 }
 
+/** "Back" from a secondary screen, named for Harness Forge (DSH's own chrome has a "Back" too). */
+export function BackButton({ t, onClick }: { t: TFn; onClick: () => void }): JSX.Element {
+  return <button className="hf-btn hf-btn-link hf-back" aria-label={t('backLabel')} onClick={onClick}>← {t('back')}</button>
+}
+
 function HarnessPage({ t }: { t: TFn }): JSX.Element {
   const [screen, setScreen] = useState<Screen>('discover')
   const [harnesses, setHarnesses] = useState<readonly Harness[] | undefined>(undefined)
@@ -113,26 +123,33 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   const [workspaces, setWorkspaces] = useState<readonly Workspace[]>([])
   const [signInWaiting, setSignInWaiting] = useState<readonly string[]>([])
   const [error, setError] = useState<string | undefined>(undefined)
+  const [home, setHome] = useState<string | undefined>(undefined)
+  /** A migration just added parts that act at the start of a session: said once, until the person goes elsewhere. */
+  const [startNote, setStartNote] = useState(false)
   const [workbenchOff, setWorkbenchOff] = useState(false)
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState<Applying | undefined>(undefined)
   const [introDismissed, setIntroDismissed] = useState(readDismissed)
   const sessionImport = useSessionImport()
 
-  const load = useCallback(async (): Promise<void> => {
+  /** Read the overview; the plugins it lists, or nothing when it could not be read. */
+  const load = useCallback(async (): Promise<readonly Item[] | undefined> => {
     setLoading(true)
+    let listed: readonly Item[] | undefined
     try {
-      const overview = await call<{ harnesses: Harness[]; fetched?: Item[]; workspaces?: Workspace[]; applying?: Applying }>('overview')
+      const overview = await call<{ harnesses: Harness[]; fetched?: Item[]; home?: string; workspaces?: Workspace[]; applying?: Applying }>('overview')
+      setHome(overview.home)
       setHarnesses(overview.harnesses)
       setApplying(overview.applying)
       setFetched(overview.fetched ?? [])
       setWorkspaces(overview.workspaces ?? [])
       setError(undefined)
+      listed = [...overview.harnesses.flatMap(harness => harness.items), ...overview.fetched ?? []]
     } catch (cause: unknown) {
       // Nothing on the Host answers: every screen would fail the same way, so the page says why once.
       if (isWorkbenchOff(cause)) {
         setWorkbenchOff(true)
-        return
+        return undefined
       }
       setError(messageOf(cause))
     } finally {
@@ -140,9 +157,11 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
     }
     // Sign-ins come from the MCP row; while it is off there are none to show.
     call<{ waiting: string[] }>('signIns').then((value) => { setSignInWaiting(value.waiting) }, () => { setSignInWaiting([]) })
+    return listed
   }, [])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => { setStartNote(false) }, [screen])
 
   // While records are still being applied, the lists grow: ask again until every one is done.
   useEffect(() => {
@@ -163,6 +182,16 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   // Plugins installed from the network are migrated (and may have gaps) but were not found in a harness's folders.
   const items = [...(harnesses ?? []).flatMap(harness => harness.items), ...fetched]
   const migrated = items.filter(item => item.installed)
+
+  // After a migration (all, one, or from Get plugins) the plugins it added are known by what was migrated before.
+  const afterMigration = async (): Promise<void> => {
+    const before = new Set(migrated.map(item => item.id))
+    setStartNote(false)
+    const after = await load()
+    if (after !== undefined && hasSessionStartPart(newlyMigrated(before, after))) setStartNote(true)
+  }
+
+  const reload = async (): Promise<void> => { await load() }
   const gapCount = items.reduce((sum, item) => sum + item.parts.filter(isGap).length, 0)
   const counts: Record<Main, number> = { discover: 0, migrated: migrated.length, gaps: gapCount }
   const secondary = SECONDARY.find(([value]) => value === screen)
@@ -179,63 +208,66 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   }
 
   return (
-    <div className="hf-page">
-      <style>{CSS}</style>
-      <div className="hf-column">
-        <div className="hf-head">
-          <div style={{ minWidth: 0 }}>
-            <h1 className="hf-title">{t('title')}</h1>
-            <p className="hf-subtitle">{t('subtitle')}</p>
-          </div>
-          <div className="hf-actions">
-            {secondary === undefined ? <button className="hf-btn" disabled={loading} onClick={() => { void load() }}>{t('refresh')}</button> : null}
-            <MoreMenu t={t} onPick={setScreen} />
-          </div>
-        </div>
-
-        {!introDismissed && secondary === undefined ? (
-          <div className="hf-intro">
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p>{t('intro')}</p>
-              {sessionImport.status?.provider === 'harness-forge'
-                ? <div style={{ marginTop: 10 }}><ChatImportOffer t={t} status={sessionImport.status} reload={sessionImport.reload} /></div>
-                : null}
+    <HomeContext.Provider value={home}>
+      <div className="hf-page">
+        <style>{CSS}</style>
+        <div className="hf-column">
+          <div className="hf-head">
+            <div style={{ minWidth: 0 }}>
+              <h1 className="hf-title">{t('title')}</h1>
+              <p className="hf-subtitle">{t('subtitle')}</p>
             </div>
-            <button className="hf-btn" onClick={dismissIntro}>{t('introDismiss')}</button>
+            <div className="hf-actions">
+              {secondary === undefined ? <button className="hf-btn" disabled={loading} onClick={() => { void load() }}>{t('refresh')}</button> : null}
+              <MoreMenu t={t} onPick={setScreen} />
+            </div>
           </div>
-        ) : null}
 
-        {secondary !== undefined ? (
-          <>
-            <button className="hf-btn hf-btn-link hf-back" onClick={() => { setScreen('discover') }}>← {t('back')}</button>
-            <h2 className="hf-title" style={{ fontSize: 16, margin: '4px 0 12px' }}>{t(secondary[1])}</h2>
-          </>
-        ) : (
-          <div className="hf-tabs" role="tablist">
-            {MAIN.map(([value, label]) => (
-              <button key={value} role="tab" className="hf-tab" aria-selected={screen === value} onClick={() => { setScreen(value) }}>
-                {t(label)}
-                {counts[value] > 0 ? <span className="hf-count">{counts[value]}</span> : null}
-              </button>
-            ))}
-          </div>
-        )}
+          {!introDismissed && secondary === undefined ? (
+            <div className="hf-intro">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p>{t('intro')}</p>
+                {sessionImport.status?.provider === 'harness-forge'
+                  ? <div style={{ marginTop: 10 }}><ChatImportOffer t={t} status={sessionImport.status} reload={sessionImport.reload} /></div>
+                  : null}
+              </div>
+              <button className="hf-btn" onClick={dismissIntro}>{t('introDismiss')}</button>
+            </div>
+          ) : null}
 
-        {error !== undefined && secondary === undefined ? <Notice kind="error">{error}</Notice> : null}
-        {secondary === undefined && harnesses === undefined && error === undefined ? <div className="hf-empty">{t('loading')}</div> : null}
+          {secondary !== undefined ? (
+            <>
+              <BackButton t={t} onClick={() => { setScreen('discover') }} />
+              <h2 className="hf-title" style={{ fontSize: 16, margin: '4px 0 12px' }}>{t(secondary[1])}</h2>
+            </>
+          ) : (
+            <div className="hf-tabs" role="tablist">
+              {MAIN.map(([value, label]) => (
+                <button key={value} role="tab" className="hf-tab" aria-selected={screen === value} onClick={() => { setScreen(value) }}>
+                  {t(label)}
+                  {counts[value] > 0 ? <span className="hf-count">{counts[value]}</span> : null}
+                </button>
+              ))}
+            </div>
+          )}
 
-        {applying !== undefined && (screen === 'discover' || screen === 'migrated')
-          ? <Notice>{fill(t('applying'), { done: applying.done, total: applying.total })}</Notice>
-          : null}
-        {screen === 'discover' || screen === 'migrated' ? <TrustBanners t={t} workspaces={workspaces} reload={load} /> : null}
-        {harnesses !== undefined && screen === 'discover' ? <DiscoverScreen t={t} harnesses={harnesses} reload={load} /> : null}
-        {harnesses !== undefined && screen === 'migrated' ? <MigratedScreen t={t} items={migrated} signInWaiting={signInWaiting} reload={load} /> : null}
-        {harnesses !== undefined && screen === 'gaps' ? <GapsScreen t={t} items={items} openSession={openSession} language={activeLanguage()} reload={() => { void load() }} /> : null}
-        {screen === 'sessions' ? <SessionsScreen t={t} openSession={openSession} /> : null}
-        {screen === 'settings' ? <SettingsScreen t={t} onSaved={() => { void load() }} /> : null}
-        {screen === 'diagnostics' ? <DiagnosticsScreen t={t} /> : null}
+          {error !== undefined && secondary === undefined ? <Notice kind="error">{error}</Notice> : null}
+          {secondary === undefined && harnesses === undefined && error === undefined ? <div className="hf-empty">{t('loading')}</div> : null}
+
+          {applying !== undefined && (screen === 'discover' || screen === 'migrated')
+            ? <Notice>{fill(t('applying'), { done: applying.done, total: applying.total })}</Notice>
+            : null}
+          {startNote && screen === 'discover' ? <Notice>{t('startsInNewSessions')}</Notice> : null}
+          {screen === 'discover' || screen === 'migrated' ? <TrustBanners t={t} workspaces={workspaces} reload={reload} /> : null}
+          {harnesses !== undefined && screen === 'discover' ? <DiscoverScreen t={t} harnesses={harnesses} reload={afterMigration} /> : null}
+          {harnesses !== undefined && screen === 'migrated' ? <MigratedScreen t={t} items={migrated} signInWaiting={signInWaiting} reload={reload} /> : null}
+          {harnesses !== undefined && screen === 'gaps' ? <GapsScreen t={t} items={items} openSession={openSession} language={activeLanguage()} reload={() => { void load() }} /> : null}
+          {screen === 'sessions' ? <SessionsScreen t={t} openSession={openSession} /> : null}
+          {screen === 'settings' ? <SettingsScreen t={t} onSaved={() => { void load() }} /> : null}
+          {screen === 'diagnostics' ? <DiagnosticsScreen t={t} /> : null}
+        </div>
       </div>
-    </div>
+    </HomeContext.Provider>
   )
 }
 

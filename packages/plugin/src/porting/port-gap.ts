@@ -11,8 +11,9 @@ import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { ADAPTERS_DIR, absolutePath, detectLicense, portBrief, type ForeignComponent, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
+import { ADAPTERS_DIR, absolutePath, detectLicense, portBrief, type ForeignComponent, type ForeignPlugin, type Gap, type PortRuntime } from '@kirkchinese/harness-forge-core'
 import { dshService } from '../dsh/host.js'
+import { resolveDshHome } from '../forge/state.js'
 import { portPrompt } from './prompt.js'
 
 /** The preset of DSH's creation mode ("Let the agent create a plugin" in the Plugin Manager). */
@@ -95,17 +96,32 @@ export function partFiles(plugin: ForeignPlugin, component: ForeignComponent): s
   return out
 }
 
+/**
+ * The DSH home and profile this Harness Forge runs in, resolved as DSH does:
+ * `$DSH_HOME` (a blank value is unset), else `~/.dsh`; the profile from the
+ * `profileContext` service, which only a profile-launched DSH composes.
+ */
+export function portRuntime(ctx: Context, env: NodeJS.ProcessEnv = process.env): PortRuntime {
+  const profile = dshService(ctx, 'profileContext') as { readonly name?: unknown; readonly dir?: unknown } | undefined
+  const named = typeof profile?.name === 'string' && profile.name.length > 0 && typeof profile.dir === 'string' && profile.dir.length > 0
+  return {
+    dshHome: resolveDshHome(env),
+    dshHomeFromEnv: (env.DSH_HOME?.trim() ?? '').length > 0,
+    ...(named ? { profile: { name: profile.name as string, dir: profile.dir as string } } : {}),
+  }
+}
+
 /** The brief for one part of a plugin, or a failure naming what is missing. */
-export function briefFor(plugin: ForeignPlugin, gaps: readonly Gap[], componentId: string): string {
+export function briefFor(plugin: ForeignPlugin, gaps: readonly Gap[], componentId: string, runtime?: PortRuntime): string {
   const component = plugin.components.find(item => item.id === componentId)
   if (component === undefined) throw new Error(`${plugin.name} has no part ${componentId}`)
   const license = plugin.license ?? detectLicense(plugin.root)
-  return portBrief({ plugin, component, gaps, files: partFiles(plugin, component), ...(license !== undefined ? { license } : {}) })
+  return portBrief({ plugin, component, gaps, files: partFiles(plugin, component), ...(license !== undefined ? { license } : {}), ...(runtime !== undefined ? { runtime } : {}) })
 }
 
 /** The first message of a part's port session: the protocol, then the brief (see `prompt.ts`). */
-export function taskFor(plugin: ForeignPlugin, gaps: readonly Gap[], componentId: string, language?: string): string {
-  const brief = briefFor(plugin, gaps, componentId)
+export function taskFor(plugin: ForeignPlugin, gaps: readonly Gap[], componentId: string, language?: string, runtime?: PortRuntime): string {
+  const brief = briefFor(plugin, gaps, componentId, runtime)
   const component = plugin.components.find(item => item.id === componentId)!
   return portPrompt({ plugin, component, brief, ...(language !== undefined && language.length > 0 ? { language } : {}) })
 }
