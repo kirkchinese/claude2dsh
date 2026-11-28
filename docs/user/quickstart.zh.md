@@ -50,7 +50,7 @@ dsh plugin --profile web add @kirkchinese/harness-forge
 - `anthropic-agent-skills`（`anthropics/skills`）和 `knowledge-work-plugins`（`anthropics/knowledge-work-plugins`）：Anthropic 的专题插件市场
 - `openai-curated`（`openai/plugins`）：OpenAI 的 [Codex 插件](https://developers.openai.com/codex/plugins/build)
 
-在插件上点 **安装**，Harness Forge 会先获取插件并显示确认框，确认之前不会安装任何东西。确认框会列出插件的来源（带链接）、确切的提交或版本，以及每个部分是否能在 DSH 中使用。插件含有 hook、MCP 服务、设置或代码时，确认框还会提醒你，因为这些会以你的权限运行。确认后，插件会像其他插件一样出现在 **已迁移** 里。
+在插件上点 **安装**，Harness Forge 会先获取插件并显示确认框，确认之前不会安装任何东西。确认框会列出插件的来源（带链接）、确切的提交或版本，以及每个部分是否能在 DSH 中使用。确认框还会列出会以你的权限运行代码的部分（hook 及其事件、MCP 服务及其命令、命令或技能里的 shell 行、状态栏等脚本、代码插件），并说明每个部分安装后会在 DSH 中运行，还是一个缺口、在你制作适配器之前什么都不运行（适配器会运行它自己的代码）。确认后，插件会像其他插件一样出现在 **已迁移** 里。
 
 - **文件存放位置。** 下载的内容放在 Harness Forge 自己的目录 `<profile>/.harness-forge/data/remote/`，不会写入 `~/.claude`、`~/.codex`、OpenCode 的配置或 DSH 配置文件。每次安装都保留一份自己的副本，并固定在获取时的提交上。
 - **有没有 git。** 装了 git 时，Harness Forge 会做浅克隆；如果插件在子目录里，还只检出那个子目录。没有 git 时（Windows 上很常见），GitHub 仓库会通过 HTTPS 下载压缩包；其他 git 托管站点需要 git。

@@ -5,6 +5,7 @@
  */
 import type { ReactNode } from 'react'
 import type zh from './locale/zh.json'
+import { useText } from './paths.js'
 
 export type Key = keyof typeof zh
 export type TFn = (key: Key) => string
@@ -33,6 +34,8 @@ export interface Part {
   readonly portGap?: string
   readonly adapter?: string
   readonly providedBy?: { readonly name: string; readonly adapter?: string }
+  /** It acts when a session starts: a session already open keeps what it started with. */
+  readonly atStart?: true
 }
 
 export interface Item {
@@ -182,6 +185,24 @@ export function isGap(part: Part): boolean {
   return part.adapter === undefined && (part.state === 'partial' || part.state === 'needs-port' || part.state === 'unsupported' || part.state === 'failed')
 }
 
+/** The states a part that acts at the start of a session can be in and still start, or start once it is switched on. */
+const STARTABLE: ReadonlySet<PartState> = new Set(['works', 'partial', 'off'])
+
+/** Whether a part acts at the start of a session and could run (switched off counts: switching it on starts it). */
+export function startsWithSession(part: Part): boolean {
+  return part.atStart === true && STARTABLE.has(part.state)
+}
+
+/** Whether any of these plugins has a part that acts at the start of a session. */
+export function hasSessionStartPart(items: readonly Item[]): boolean {
+  return items.some(item => item.parts.some(startsWithSession))
+}
+
+/** The plugins that are migrated now but were not before (`before`: the ids of those that were). */
+export function newlyMigrated(before: ReadonlySet<string>, items: readonly Item[]): Item[] {
+  return items.filter(item => item.installed && !before.has(item.id))
+}
+
 /** Parts the person or a row switched off don't count toward a verdict. */
 function counted(item: Item): readonly Part[] {
   return item.parts.filter(part => part.state !== 'off' && part.state !== 'inactive' && part.state !== 'provided')
@@ -225,6 +246,7 @@ export function VerdictBar({ item, t }: { item: Item; t: TFn }): JSX.Element {
 
 /** A part's reasons in words, with the specifics in small monospace. */
 export function Reasons({ part, t }: { part: Pick<Part, 'reasons'> & Partial<Pick<Part, 'providedBy'>>; t: TFn }): JSX.Element | null {
+  const shown = useText()
   const provider = part.providedBy
   if (provider !== undefined) return (
     <div className="hf-reason">
@@ -238,7 +260,7 @@ export function Reasons({ part, t }: { part: Pick<Part, 'reasons'> & Partial<Pic
       {part.reasons.map((reason, index) => {
         const lead = REASON_LABEL[reason.code]
         // A row-off detail names the row, which the screens word themselves; a not-followed one the harness, worded here.
-        const detail = reason.code === 'row-off' || reason.code === 'not-followed' ? '' : reason.detail
+        const detail = reason.code === 'row-off' || reason.code === 'not-followed' ? '' : shown(reason.detail)
         return (
           <div key={index} className="hf-reason">
             {lead !== undefined ? <span>{reason.code === 'not-followed' ? fill(t(lead), { harness: harnessName(reason.detail) }) : t(lead)} </span> : null}
@@ -268,5 +290,6 @@ export function itemName(item: Item, t: TFn): string {
 }
 
 export function Notice({ kind = 'ok', children }: { kind?: 'ok' | 'error'; children: ReactNode }): JSX.Element {
-  return <div className="hf-notice" data-kind={kind} role={kind === 'error' ? 'alert' : 'status'}>{children}</div>
+  const shown = useText()
+  return <div className="hf-notice" data-kind={kind} role={kind === 'error' ? 'alert' : 'status'}>{typeof children === 'string' ? shown(children) : children}</div>
 }

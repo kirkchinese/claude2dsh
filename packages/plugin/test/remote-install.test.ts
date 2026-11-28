@@ -110,7 +110,7 @@ describe('plugins from the network', { timeout: 120_000 }, () => {
     expect((await forge.remote.sources()).added.map(source => source.input)).toEqual([market.url])
 
     const plan = await forge.remote.prepare(market.url, 'inside')
-    expect(plan).toMatchObject({ name: 'inside', version: '1.0.0', harness: 'claude-code', runsCode: [], alreadyInstalled: false })
+    expect(plan).toMatchObject({ name: 'inside', version: '1.0.0', harness: 'claude-code', codeParts: [], alreadyInstalled: false })
     expect(plan.parts.map(part => `${part.kind}:${part.name}`).sort()).toEqual(['skill:one', 'skill:two'])
     expect(forge.list()).toHaveLength(0)
     await forge.remote.install(plan.token)
@@ -150,7 +150,7 @@ describe('plugins from the network', { timeout: 120_000 }, () => {
 
     // A plugin in a repository of its own, over HTTPS: its hooks run code, which the confirmation says.
     const extPlan = await forge.remote.prepare(market.url, 'ext')
-    expect(extPlan.runsCode).toEqual(['hooks'])
+    expect(extPlan.codeParts).toEqual([expect.objectContaining({ kind: 'hooks', what: 'hooks', detail: 'PreToolUse', runs: true })])
     await forge.remote.install(extPlan.token)
 
     // An entry that is its own manifest: its skills come from the marketplace entry.

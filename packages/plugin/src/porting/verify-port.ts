@@ -3,13 +3,17 @@
  * part. It reads the adapter packages again, asks DSH's plugin manager whether
  * that package is enabled and its plugins started without a fault, and records
  * the answer for the Gaps screen ("Done — verified", or back to in progress).
+ * It also reads the adapter's source for a hard-coded DSH home or a listing of
+ * profiles (`adapter-paths.ts`), the brief's data access rules.
  * The creation-mode agent calls it before it reports a port done.
  * @module @kirkchinese/harness-forge/porting
  */
+import { existsSync } from 'node:fs'
 import { adapterPackageName, type ForeignPlugin } from '@kirkchinese/harness-forge-core'
 import { coveringAdapter, type AdapterCoverage } from '../workbench/overview.js'
 import { adapterReadiness, managerSnapshot, type PluginManagerLike, type ReadinessCheck } from '../workbench/adapter-coverage.js'
 import { PortSessions, type PortRecord } from './port-sessions.js'
+import { hardCodedPaths, pathsDetail } from './adapter-paths.js'
 import { dshService } from '../dsh/host.js'
 import type { HarnessForge } from '../forge/service.js'
 import type { Workbench } from '../workbench/workbench.js'
@@ -25,7 +29,12 @@ export interface VerifyDeps {
   readonly sessions: PortSessions
 }
 
-export type PortCheck = ReadinessCheck
+/** One check of the answer: the adapter's readiness, then its source's paths. */
+export interface PortCheck {
+  readonly check: ReadinessCheck['check'] | 'paths'
+  readonly ok: boolean
+  readonly detail: string
+}
 
 /** The tool's answer. */
 export interface PortVerification {
@@ -63,6 +72,11 @@ export async function verifyPort(deps: VerifyDeps, pluginId: string, componentId
     } else {
       // The decision the workbench overview counts an adapter by.
       checks.push(...adapterReadiness(name, await managerSnapshot(deps.pluginManager)))
+    }
+    // Only a package whose files are here can be read; an adapter DSH installed always has them.
+    if (dir !== undefined && existsSync(dir)) {
+      const findings = hardCodedPaths(dir)
+      checks.push(check('paths', findings.length === 0, pathsDetail(findings)))
     }
   }
   const covered = checks.every(item => item.ok)

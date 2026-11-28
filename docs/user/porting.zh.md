@@ -26,13 +26,14 @@ Harness Forge 自己不写适配器。它负责 **说明缺口**，然后交给 
 
 ## 如何检查
 
-`harness_verify_port({ pluginId, componentId })` 是 Harness Forge 注册在 DSH 全局工具表里的工具，所有智能体都能看到，包括创造模式的预设 `cordis`。它重新读取已安装的适配器包，报告三项检查：
+`harness_verify_port({ pluginId, componentId })` 是 Harness Forge 注册在 DSH 全局工具表里的工具，所有智能体都能看到，包括创造模式的预设 `cordis`。它重新读取已安装的适配器包，报告这些检查：
 
 - **declared**：有已安装的包在 `harnessForge.ports` 里声明了这个部分（或按它命名）；
 - **enabled**：DSH 的插件管理器把这个包列为已启用、没有加载错误的 bundle；
-- **loaded**：这个 bundle 的每个插件行都在运行，没有启动失败。
+- **loaded**：这个 bundle 的每个插件行都在运行，没有启动失败；
+- **paths**：适配器的 JavaScript 和 TypeScript 源码（注释和 `node_modules` 除外）没有把 DSH 主目录写死在代码里（`~/.dsh`、`/home/<用户>/.dsh`），也没有列出 `profiles` 目录。它只能发现常见的错误，不是全部：运行时从 `$DSH_HOME` 和当前 profile 拼出的路径可以通过。
 
-三项都通过才回答 `covered: true`，并把结果记下来供“缺口”页显示。你也可以在任何会话里自己调用它。
+全部通过才回答 `covered: true`，并把结果记下来供“缺口”页显示。你也可以在任何会话里自己调用它。
 
 ## 任务里有什么
 
@@ -41,8 +42,10 @@ Harness Forge 自己不写适配器。它负责 **说明缺口**，然后交给 
 - **原插件**：名称、版本、来源、磁盘上的根目录、许可证；这个部分的入口和所有文件（绝对路径）、Harness Forge 读到的内容、清单摘录；
 - **为什么 Harness Forge 运行不了它**：评估里这个部分的缺口；
 - **最接近的 DSH 扩展点**：例如界面类用 Web 插槽，hook 类用工具与智能体生命周期事件，代码类用注册工具的 Host 插件；要求智能体先用 dsh-doc 核实；
+- **DSH 的数据在哪里**：这个会话的 DSH 主目录（`$DSH_HOME`，默认 `~/.dsh`）和当前 profile 的名称与目录，供智能体自检，以及适配器在运行时如何找到它们（`profileContext`、`$DSH_PROFILE_DIR`、`$DSH_HOME`）；
+- **数据访问规则**：会话和 profile 的数据用 DSH 的运行时服务和适配器拿到的上下文获取；确实需要文件路径时，运行时从 `$DSH_HOME` 和正在运行的 profile 解析，绝不写死主目录路径；绝不读取或遍历其他 profile；不读取 DSH 或其他工具的私有文件，除非这个部分确实需要；
 - **要问你的问题**：源码放在哪里（含默认值），以及这个部分没定下来的选择；
-- **验收标准**：在 DSH 会话里能看到原插件的效果；适配器调用原插件自己的代码；加载无错误，停用后它注册的东西全部撤销；`package.json` 声明 `harnessForge.ports`；README 写明恢复了什么、还有哪些不同；`harness_verify_port` 报告该部分已补上；
+- **验收标准**：在 DSH 会话里能看到原插件的效果；适配器调用原插件自己的代码；加载无错误，停用后它注册的东西全部撤销；`package.json` 声明 `harnessForge.ports`；README 写明恢复了什么、还有哪些不同；`harness_verify_port` 报告该部分已补上（包括 `paths` 检查）；适配器遵守数据访问规则；
 - **约束**：包名 `dsh-adapter-<插件>-<部分>`，不带 scope，写在你同意的文件夹里；只作为本地插件装进当前 profile；发布可选，只在你要求时、发布到你自己的 scope；遵守原插件的许可证；适配器里不放任何令牌或会话数据。
 
 ## 适配器如何被识别

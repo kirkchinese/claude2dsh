@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Disposer, PorterApi } from '../forge/contract.js'
 import { FORGE_SERVICE, type HarnessForge } from '../forge/service.js'
-import { briefFor, briefTitle, startCreatorSession, taskFor } from './port-gap.js'
+import { briefFor, briefTitle, portRuntime, startCreatorSession, taskFor } from './port-gap.js'
 import { PortSessions } from './port-sessions.js'
 import { rowEffect } from '../forge/row.js'
 
@@ -24,11 +24,13 @@ export function apply(ctx: Context): void {
 export function startPorter(ctx: Context, forge: HarnessForge): Disposer {
   const sessions = new PortSessions(forge.statePath)
   const api: PorterApi = {
-    brief: (plugin, gaps, componentId) => briefFor(plugin, gaps, componentId),
-    task: (plugin, gaps, componentId, language) => taskFor(plugin, gaps, componentId, language),
+    // Read for each brief: the facts are the profile and home of the session that asks.
+    brief: (plugin, gaps, componentId) => briefFor(plugin, gaps, componentId, portRuntime(ctx)),
+    task: (plugin, gaps, componentId, language) => taskFor(plugin, gaps, componentId, language, portRuntime(ctx)),
     port: async (plugin, gaps, componentId, location, language) => {
-      const task = taskFor(plugin, gaps, componentId, language)
-      const started = await startCreatorSession(ctx, task, location, briefTitle(briefFor(plugin, gaps, componentId)))
+      const runtime = portRuntime(ctx)
+      const task = taskFor(plugin, gaps, componentId, language, runtime)
+      const started = await startCreatorSession(ctx, task, location, briefTitle(briefFor(plugin, gaps, componentId, runtime)))
       sessions.started(plugin.id, componentId, started.sessionId)
       return started
     },

@@ -26,13 +26,14 @@ To stop offering porting, switch off the **Porting** row in DSH's **Plugins** pa
 
 ## How the check works
 
-`harness_verify_port({ pluginId, componentId })` is a tool Harness Forge registers in DSH's global tool registry, so every agent sees it, the creation-mode preset `cordis` included. It reads the installed adapter packages again and reports three checks:
+`harness_verify_port({ pluginId, componentId })` is a tool Harness Forge registers in DSH's global tool registry, so every agent sees it, the creation-mode preset `cordis` included. It reads the installed adapter packages again and reports these checks:
 
 - **declared**: an installed package declares the part in `harnessForge.ports` (or is named for it);
 - **enabled**: DSH's plugin manager lists that package as a bundle that is switched on and has no load error;
-- **loaded**: every plugin row of the bundle is running, with no startup failure.
+- **loaded**: every plugin row of the bundle is running, with no startup failure;
+- **paths**: the adapter's JavaScript and TypeScript source (comments and `node_modules` aside) writes no DSH home into the code (`~/.dsh`, `/home/<user>/.dsh`) and lists no `profiles` directory. It finds the common mistake, not every one: a path built at run time from `$DSH_HOME` and the running profile passes.
 
-It answers `covered: true` only when all three pass, and records the result for the Gaps screen. You can call it yourself in any session.
+It answers `covered: true` only when all of them pass, and records the result for the Gaps screen. You can call it yourself in any session.
 
 ## What the task contains
 
@@ -41,8 +42,10 @@ The task starts with the working protocol above (ask once, build, check, report)
 - **The original**: name, version, source, root folder on disk, license; the part's entry points and every file of it (absolute paths), the part as Harness Forge read it, and a manifest excerpt.
 - **Why Harness Forge cannot run it**: the part's gaps from the assessment.
 - **The nearest DSH extension points**, for example Web slots for UI surfaces, tool and agent lifecycle events for hooks, Host plugins that register tools for code. The agent is asked to confirm them with dsh-doc.
+- **Where DSH keeps its data**: the DSH home of this session (`$DSH_HOME`, default `~/.dsh`) and the current profile's name and folder, for the agent's checks, with how the adapter finds them at run time (`profileContext`, `$DSH_PROFILE_DIR`, `$DSH_HOME`).
+- **Data access rules**: use DSH's runtime services and the context the adapter receives for session and profile data; when a path is truly needed, resolve it at run time from `$DSH_HOME` and the running profile, never a hard-coded home path; never read or list other profiles; read no private file of DSH or another harness beyond what the part needs.
 - **Questions for you**: where the source goes, with its default, and the choices this part leaves open.
-- **Acceptance criteria**: the original's behaviour happens in a DSH session; the adapter calls the original's own code; it loads without errors and disabling it removes everything it registered; its `package.json` declares `harnessForge.ports`; its README says what it restores and what still differs; `harness_verify_port` reports the part covered.
+- **Acceptance criteria**: the original's behaviour happens in a DSH session; the adapter calls the original's own code; it loads without errors and disabling it removes everything it registered; its `package.json` declares `harnessForge.ports`; its README says what it restores and what still differs; `harness_verify_port` reports the part covered, its `paths` check included; the adapter keeps the data access rules.
 - **Constraints**: package name `dsh-adapter-<plugin>-<part>`, unscoped, authored in the folder you agreed to; installed as a local plugin in the current profile only; publishing optional, only on request, under your own scope; respect the original's license; no tokens or session data in the adapter.
 
 ## How an adapter is recognized
