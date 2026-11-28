@@ -2,9 +2,9 @@
 
 All notable changes to Harness Forge are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.5.0 - 2026-11-29
 
-Everything since 0.4.0, the version on npm. Plugins can now come straight from the internet, several holes in hooks, permission rules and command shell lines are closed, Discover lists only what each harness really installed, and session import handles large and forked histories.
+Plugins can now come straight from the internet, several holes in hooks, permission rules and command shell lines are closed, Discover lists only what each harness really installed, and session import handles large and forked histories.
 
 ### Security
 
