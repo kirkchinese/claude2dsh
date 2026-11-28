@@ -172,8 +172,8 @@ function reasonOf(gap: Gap, component?: ForeignComponent): { code: ReasonCode; d
   }
 }
 
-/** Gaps an adapter written in DSH's creation mode can close. */
-function portable(gap: Gap): boolean {
+/** Gaps an adapter written in DSH's creation mode can close: the parts the overview says need an adapter. */
+export function portable(gap: Gap): boolean {
   return gap.kind === 'ui-surface' || gap.kind === 'unsupported-component' || gap.kind === 'unsupported-event' || gap.kind === 'unsupported-handler'
 }
 

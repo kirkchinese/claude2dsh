@@ -107,6 +107,12 @@ describe('the porting brief', () => {
     expect(brief).toContain('Never read or iterate other profiles')
     expect(brief).toContain("Never read another harness's or DSH's private files beyond what the part needs")
     expect(brief).toContain('its `paths` check finds no hard-coded DSH home and no scan of `profiles/`')
+    // The brief names what the check fails, by its rules, and the fallback it accepts.
+    expect(brief).toContain("the home is `process.env.DSH_HOME`, else `join(os.homedir(), '.dsh')`; the profile is `profileContext`, `$DSH_PROFILE_DIR`, or `$DSH_PROFILE`")
+    expect(brief).toContain("[dsh-home] a `.dsh` path segment, however built (`join(os.homedir(), '.dsh')`")
+    expect(brief).toContain('when no file of the adapter reads `DSH_HOME`')
+    expect(brief).toContain('[running-profile] a path in `profiles/` when no file uses `profileContext`, `DSH_PROFILE` or `DSH_PROFILE_DIR`')
+    expect(brief).toContain('[profiles-listing] `profiles/` itself, or a glob over it, passed to `readdir`, `opendir`, `glob` (any variant) or to a function of the same file that calls one')
   })
 
   it('falls back to a detected license, and says when there is none', () => {

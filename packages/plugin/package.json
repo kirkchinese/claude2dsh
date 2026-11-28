@@ -1,6 +1,6 @@
 {
   "name": "@kirkchinese/harness-forge",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Use Claude Code, Codex and OpenCode plugins, settings and sessions in DSH",
   "type": "module",
   "main": "./lib/index.js",
@@ -99,6 +99,8 @@
     "cordis.patch.yml",
     "README.md",
     "docs/DETAIL.zh.md",
+    "docs/hero.en.webp",
+    "docs/hero.zh.webp",
     "LICENSE"
   ],
   "dsh": {

@@ -2,6 +2,20 @@
 
 All notable changes to Harness Forge are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.5.1 - 2026-11-29
+
+Fixes from a live check of 0.5.0, and pictures of Harness Forge at work.
+
+### Changed
+
+- **Pictures of Harness Forge at work.** The README shows the Discover screen, **Get plugins**, a plugin migrated from Claude Code running in a DSH session, and a status line drawn by an adapter that **Fill with AI** wrote, in English and Chinese. Harness Forge's page in DSH's **Plugins** shows the Discover screen in your language.
+- **A clearer install confirmation.** Only code that runs once the plugin is installed is shown in the warning colour. The note about adapters appears only when an adapter could fill one of the plugin's gaps, and gap reasons the parts list already shows are not repeated. A source on this computer is shown as `~/…`, like every other screen, and so are the tooltips and messages in **Get plugins**.
+- **The SessionStart note names the plugin.** In **Migrated**, a plugin whose SessionStart hook is on says that this hook runs only when a new session starts, and the notice after a migration or install names the plugins it concerns. The general "takes effect in new sessions" line is gone.
+
+### Fixed
+
+- **Fill with AI's path check catches paths built from parts.** In 0.5.0, the `paths` check of `harness_verify_port` missed an adapter that built `path.join(os.homedir(), '.dsh', 'profiles')` and listed it through a helper of its own. It now fails a `.dsh` path in an adapter that never reads `$DSH_HOME`, a `profiles/` path in one that never takes the running profile from `profileContext`, `$DSH_PROFILE` or `$DSH_PROFILE_DIR`, and any listing of `profiles/`, naming the file, line and rule.
+
 ## 0.5.0 - 2026-11-29
 
 Plugins can now come straight from the internet, several holes in hooks, permission rules and command shell lines are closed, Discover lists only what each harness really installed, and session import handles large and forked histories.

@@ -103,9 +103,47 @@ export function SessionsScreen({ t, openSession }: { t: TFn; openSession: (id: s
   )
 }
 
+/** One session to import: its title, when it was used, its working directory (or file), and what can be done with it. */
+export function SessionRow({ t, session, state, busy, onOpen, onImport }: {
+  t: TFn
+  session: SessionView
+  state: SessionRowState
+  busy: string | undefined
+  onOpen: (id: string) => void
+  /** `targetId`: import it as a new session under that id. */
+  onImport: (targetId?: string) => void
+}): JSX.Element {
+  const shown = usePath()
+  const { title, openId: id, maybeId: maybe, importing, tooLarge: sizeText } = state
+  const used = session.updatedAt ?? session.createdAt
+  return (
+    <li className="hf-item">
+      <div className="hf-item-head">
+        <span className="hf-item-main">
+          <span className="hf-item-title">{title}</span>
+          <span className="hf-item-desc">
+            {used !== undefined ? `${new Date(used).toLocaleString()} · ` : ''}{session.archived === true ? `${t('sessionArchived')} · ` : ''}{shown(session.cwd ?? session.path)}
+          </span>
+          {sizeText !== undefined && id === undefined ? <span className="hf-item-desc">{sizeText}</span> : null}
+          {maybe !== undefined ? <span className="hf-item-desc">{t('sessionMaybeImported')}</span> : null}
+        </span>
+        {id !== undefined
+          ? <button className="hf-btn" onClick={() => { onOpen(id) }}>{t('openSession')}</button>
+          : maybe !== undefined
+            ? (
+              <span className="hf-form">
+                <button className="hf-btn" onClick={() => { onOpen(maybe) }}>{t('sessionOpenExisting')}</button>
+                <button className="hf-btn" disabled={busy !== undefined || sizeText !== undefined} title={sizeText} onClick={() => { onImport(session.newId) }}>{importing ? t('sessionImporting') : t('sessionImportAsNew')}</button>
+              </span>
+            )
+            : <button className="hf-btn" disabled={busy !== undefined || sizeText !== undefined} title={sizeText} onClick={() => { onImport() }}>{importing ? t('sessionImporting') : t('sessionImport')}</button>}
+      </div>
+    </li>
+  )
+}
+
 /** Harness Forge's own import, while dsh-chat-import is not there. */
 function ForgeSessions({ t, openSession }: { t: TFn; openSession: (id: string) => void }): JSX.Element {
-  const shown = usePath()
   const [source, setSource] = useState<Source>('claude-code')
   const [sessions, setSessions] = useState<SessionView[] | undefined>(undefined)
   const [next, setNext] = useState<number | undefined>(undefined)
@@ -191,32 +229,9 @@ function ForgeSessions({ t, openSession }: { t: TFn; openSession: (id: string) =
           ? <div className="hf-empty">{t('sessionsEmpty')}</div>
           : (
             <ul className="hf-list">
-              {sessions.map((session) => {
-                const { key, title, openId: id, maybeId: maybe, importing, tooLarge: sizeText } = sessionRowState(t, session, imported, busy)
-                return (
-                  <li key={key} className="hf-item">
-                    <div className="hf-item-head">
-                      <span className="hf-item-main">
-                        <span className="hf-item-title">{title}</span>
-                        <span className="hf-item-desc">
-                          {(session.updatedAt ?? session.createdAt) !== undefined ? `${new Date((session.updatedAt ?? session.createdAt)!).toLocaleString()} · ` : ''}{session.archived === true ? `${t('sessionArchived')} · ` : ''}{shown(session.cwd ?? session.path)}
-                        </span>
-                        {sizeText !== undefined && id === undefined ? <span className="hf-item-desc">{sizeText}</span> : null}
-                        {maybe !== undefined ? <span className="hf-item-desc">{t('sessionMaybeImported')}</span> : null}
-                      </span>
-                      {id !== undefined
-                        ? <button className="hf-btn" onClick={() => { void openOne(id) }}>{t('openSession')}</button>
-                        : maybe !== undefined
-                          ? (
-                            <span className="hf-form">
-                              <button className="hf-btn" onClick={() => { void openOne(maybe) }}>{t('sessionOpenExisting')}</button>
-                              <button className="hf-btn" disabled={busy !== undefined || sizeText !== undefined} title={sizeText} onClick={() => { void importOne(session, session.newId) }}>{importing ? t('sessionImporting') : t('sessionImportAsNew')}</button>
-                            </span>
-                          )
-                          : <button className="hf-btn" disabled={busy !== undefined || sizeText !== undefined} title={sizeText} onClick={() => { void importOne(session) }}>{importing ? t('sessionImporting') : t('sessionImport')}</button>}
-                    </div>
-                  </li>
-                )
+              {sessions.map(session => {
+                const state = sessionRowState(t, session, imported, busy)
+                return <SessionRow key={state.key} t={t} session={session} state={state} busy={busy} onOpen={(id) => { void openOne(id) }} onImport={(targetId) => { void importOne(session, targetId) }} />
               })}
             </ul>
           )}

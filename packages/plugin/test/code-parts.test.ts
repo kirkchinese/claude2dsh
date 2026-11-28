@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { assess, scanPlugin } from '@kirkchinese/harness-forge-core'
-import { codePartsOf } from '../src/forge/remote/code-parts.js'
-import { codeNotice } from '../src/client/code-notice.js'
+import { partOf } from '../src/workbench/overview.js'
+import { adaptable, codePartsOf } from '../src/forge/remote/code-parts.js'
+import { codeNotice, type NoticeLine } from '../src/client/code-notice.js'
 import type { Key } from '../src/client/shared.js'
 import english from '../src/client/locale/en.json' with { type: 'json' }
 import chinese from '../src/client/locale/zh.json' with { type: 'json' }
@@ -28,8 +29,33 @@ const codeOf = (files: Record<string, string>) => {
   return codePartsOf(scanned, assess(scanned).gaps)
 }
 
+/** What the confirmation hands the warning: the code parts, the parts list with its reasons, and whether an adapter could fill a gap. */
+const planOf = (files: Record<string, string>) => {
+  const scanned = plugin(files)
+  const gaps = assess(scanned).gaps
+  return {
+    codeParts: codePartsOf(scanned, gaps),
+    parts: scanned.components.map((component) => {
+      const reasons = partOf(component, gaps, undefined, undefined).reasons
+      return { kind: component.kind, name: component.name, ...(reasons.length > 0 ? { reasons } : {}) }
+    }),
+    adaptable: adaptable(gaps),
+    total: scanned.components.length,
+  }
+}
+
 /** claude-hud's shape: its only code is the status line script, which DSH cannot show. */
 const hud = { '.claude-plugin/plugin.json': JSON.stringify({ name: 'claude-hud', license: 'MIT' }), 'install.mjs': "// points Claude Code's statusLine at the HUD in ~/.claude/settings.json\nexport {}\n" }
+/** claude-hud as it ships: its `hud` skill has a shell line DSH runs, and its status line is a gap. */
+const realHud = { ...hud, 'skills/hud/SKILL.md': '---\nname: hud\ndescription: HUD setup\n---\n\nNode: !`node --version`\n' }
+/** hookify: four hook events, four commands, an agent and a skill, all of which work in DSH. */
+const hookify = {
+  '.claude-plugin/plugin.json': JSON.stringify({ name: 'hookify' }),
+  'hooks/hooks.json': JSON.stringify({ hooks: Object.fromEntries(['PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit'].map(event => [event, [{ hooks: [{ type: 'command', command: `python3 "\${CLAUDE_PLUGIN_ROOT}/hooks/${event}.py"` }] }]])) }),
+  ...Object.fromEntries(['help', 'list', 'hookify', 'configure'].map(name => [`commands/${name}.md`, `---\ndescription: ${name}\n---\n\nDo ${name}.\n`])),
+  'agents/conversation-analyzer.md': '---\nname: conversation-analyzer\ndescription: finds behaviours to prevent\ntools: ["Read", "Grep"]\n---\n\nAnalyze.\n',
+  'skills/writing-rules/SKILL.md': '---\nname: writing-rules\ndescription: writing rules\n---\n\nWrite rules.\n',
+}
 /** Hooks, an MCP server and a command with a shell line, all of which DSH runs. */
 const tools = {
   '.claude-plugin/plugin.json': JSON.stringify({ name: 'tools' }),
@@ -63,34 +89,69 @@ describe('the parts a confirmation says run code', () => {
 describe('the confirmation\'s code warning', () => {
   const en = (key: Key): string => (english as Record<string, string>)[key] ?? key
   const zh = (key: Key): string => (chinese as Record<string, string>)[key] ?? key
+  const texts = (lines: readonly NoticeLine[]): string[] => lines.map(line => line.text)
+  const warned = (lines: readonly NoticeLine[]): string[] => lines.filter(line => line.runs).map(line => line.text)
 
-  it('says nothing of claude-hud runs until an adapter is built, and that an adapter would run code', () => {
-    const notice = codeNotice(codeOf(hud), en)
-    expect(notice.kind).toBe('ok')
-    expect(notice.lines[0]).toBe('Nothing in this plugin runs code in DSH until you build an adapter for statusline.')
-    expect(notice.lines).toContain('statusline (Interface) — script install.mjs: a gap, runs nothing in DSH. DSH has no place to show this; an adapter has to draw it.')
-    expect(notice.lines.join('\n')).toContain('An adapter you build later runs its own code with your permissions.')
-    expect(notice.lines.join('\n')).not.toContain('A plugin runs with your permissions')
-    const chineseNotice = codeNotice(codeOf(hud), zh).lines.join('\n')
-    expect(chineseNotice).toContain('在你为 statusline 制作适配器之前，这个插件在 DSH 中不运行任何代码。')
-    expect(chineseNotice).toContain('DSH 里没有地方显示它，需要一个适配器来绘制。')
+  it('says claude-hud\'s skill runs a shell line, in the warning colour, and its status line is a gap, in the normal colour', () => {
+    const plan = planOf(realHud)
+    const lines = codeNotice(plan, en)
+    expect(warned(lines)).toEqual([
+      'These parts run code with your permissions once installed: hud.',
+      'hud (Skill) — shell lines node --version: runs in DSH once installed.',
+    ])
+    // The parts list above already gives the status line's reason: the warning does not repeat it.
+    expect(texts(lines)).toContain('statusline (Interface) — script install.mjs: a gap, runs nothing in DSH.')
+    expect(texts(lines).join('\n')).not.toContain('an adapter has to draw it')
+    // The status line is a gap an adapter can fill.
+    expect(texts(lines)).toContain(english.confirmCodeAdapter)
+    expect(lines.find(line => line.text === english.confirmCodeAdapter)?.runs).toBe(false)
+    expect(lines.at(-1)).toEqual({ text: english.confirmTrust, runs: false })
+    expect(texts(codeNotice(plan, zh))[0]).toBe('这些部分安装后会以你的权限运行代码：hud。')
+  })
+
+  it('gives the reason when no parts list shows it', () => {
+    const lines = codeNotice({ codeParts: codeOf(hud), adaptable: true }, en)
+    expect(texts(lines)).toContain('statusline (Interface) — script install.mjs: a gap, runs nothing in DSH. DSH has no place to show this; an adapter has to draw it.')
+    expect(texts(lines)[0]).toBe('Nothing in this plugin runs code in DSH until you build an adapter for statusline.')
+    expect(warned(lines)).toEqual([])
+  })
+
+  it('says hookify\'s hooks run, and nothing of adapters: all 7 of its parts work', () => {
+    const plan = planOf(hookify)
+    expect(plan.total).toBe(7)
+    expect(plan.adaptable).toBe(false)
+    const lines = codeNotice(plan, en)
+    expect(warned(lines)).toEqual([
+      'These parts run code with your permissions once installed: hooks.',
+      'hooks (Hooks) — hooks on PostToolUse, PreToolUse, Stop, UserPromptSubmit: runs in DSH once installed.',
+    ])
+    expect(texts(lines)).not.toContain(english.confirmCodeAdapter)
+    expect(texts(lines).join('\n')).not.toContain('a gap')
+    expect(lines.at(-1)).toEqual({ text: english.confirmTrust, runs: false })
+  })
+
+  it('says a skills-only plugin runs no code, in the normal colour and without the adapter sentence', () => {
+    const plan = planOf(skills)
+    expect(plan.adaptable).toBe(false)
+    expect(codeNotice(plan, en)).toEqual([
+      { text: 'Nothing in this plugin runs code; it adds only text the agent reads.', runs: false },
+      { text: 'Install plugins only from a source you trust.', runs: false },
+    ])
+  })
+
+  it('does not promise an adapter for a gap no adapter can fill', () => {
+    const gap = { kind: 'mcp', name: 'remote', what: 'mcp' as const, detail: 'ws://example', runs: false }
+    const lines = texts(codeNotice({ codeParts: [gap], adaptable: false }, en))
+    expect(lines[0]).toBe('None of the parts that hold code run in DSH: remote.')
+    expect(lines).not.toContain(english.confirmCodeAdapter)
   })
 
   it('names what runs once installed', () => {
-    const notice = codeNotice(codeOf(tools), en)
-    expect(notice.kind).toBe('error')
-    expect(notice.lines[0]).toMatch(/^These parts run code with your permissions once installed: /u)
-    expect(notice.lines[0]).toContain('hooks')
-    expect(notice.lines[0]).toContain('db')
-    expect(notice.lines[0]).toContain('status')
-    expect(notice.lines).toContain('hooks (Hooks) — hooks on PreToolUse, SessionStart: runs in DSH once installed.')
-    expect(notice.lines).toContain('db (MCP server) — command node server.js --port 0: runs in DSH once installed.')
-    expect(notice.lines).toContain('status (Command) — shell lines git status --short: runs in DSH once installed.')
-    expect(codeNotice(codeOf(tools), zh).lines[0]).toMatch(/^这些部分安装后会以你的权限运行代码：/u)
-  })
-
-  it('says a skills-only plugin runs no code', () => {
-    const notice = codeNotice([], en)
-    expect(notice).toEqual({ kind: 'ok', lines: ['Nothing in this plugin runs code; it adds only text the agent reads.', 'Install plugins only from a source you trust.'] })
+    const lines = codeNotice({ codeParts: codeOf(tools), adaptable: false }, en)
+    expect(texts(lines)[0]).toMatch(/^These parts run code with your permissions once installed: /u)
+    expect(warned(lines)).toContain('hooks (Hooks) — hooks on PreToolUse, SessionStart: runs in DSH once installed.')
+    expect(warned(lines)).toContain('db (MCP server) — command node server.js --port 0: runs in DSH once installed.')
+    expect(warned(lines)).toContain('status (Command) — shell lines git status --short: runs in DSH once installed.')
+    expect(texts(codeNotice({ codeParts: codeOf(tools), adaptable: false }, zh))[0]).toMatch(/^这些部分安装后会以你的权限运行代码：/u)
   })
 })

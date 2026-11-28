@@ -183,10 +183,17 @@ export function dataLocationLines(runtime: PortRuntime | undefined): string[] {
   ]
 }
 
+/**
+ * What the \`paths\` check of \`harness_verify_port\` fails, in the words of
+ * its rules (plugin \`porting/adapter-paths.ts\`), so the creator knows the
+ * test before writing the code.
+ */
+export const PATHS_CHECK = "it reads the adapter's JavaScript and TypeScript outside `node_modules`, comments skipped, and fails: [dsh-home] a `.dsh` path segment, however built (`join(os.homedir(), '.dsh')`, `path.resolve(home, DSH)` with `const DSH = '.dsh'`, `` `${homedir()}/.dsh` ``, `'~/.dsh'`), when no file of the adapter reads `DSH_HOME`, and any one user's home such as `/home/<user>/.dsh`; [running-profile] a path in `profiles/` when no file uses `profileContext`, `DSH_PROFILE` or `DSH_PROFILE_DIR`; [profiles-listing] `profiles/` itself, or a glob over it, passed to `readdir`, `opendir`, `glob` (any variant) or to a function of the same file that calls one"
+
 /** The rules every adapter keeps when it touches session, profile or harness data. */
 export const DATA_RULES: readonly string[] = [
   'Use DSH\'s runtime services and the context the adapter receives for session and profile data wherever DSH offers them (a Host projection with `wire.view`, a Host service, the slot\'s session, `profileContext`), not the files behind them.',
-  `When a file path is truly needed, resolve it at run time from \`$DSH_HOME\` (default \`${DEFAULT_DSH_HOME}\`) and the profile DSH runs, never a hard-coded home path such as \`~/.dsh\` or \`/home/<user>/.dsh\`.`,
+  `When a file path is truly needed, resolve it at run time from \`$DSH_HOME\` (default \`${DEFAULT_DSH_HOME}\`) and the profile DSH runs, never a hard-coded home path such as \`~/.dsh\` or \`/home/<user>/.dsh\`: the home is \`process.env.DSH_HOME\`, else \`join(os.homedir(), '.dsh')\`; the profile is \`profileContext\`, \`$DSH_PROFILE_DIR\`, or \`$DSH_PROFILE\` under \`profiles/\` of that home.`,
   'Never read or iterate other profiles: no listing of `profiles/`, no guessing a profile by name; only the profile DSH runs.',
   'Never read another harness\'s or DSH\'s private files beyond what the part needs: no other sessions, credentials, settings or logs it does not show.',
 ]
@@ -273,7 +280,7 @@ export function portBrief(input: PortBriefInput): string {
     bullet('The adapter loads without errors (check `plugin_manager` `list_bundles` and `cordis_inspect_query`) and disabling it in the Plugin Manager removes everything it registered.'),
     bullet(`Its \`package.json\` declares \`"harnessForge": { "ports": [{ "plugin": ${JSON.stringify(plugin.name)}, "component": ${JSON.stringify(component.name)} }] }\`, so Harness Forge shows this part as covered by the adapter.`),
     bullet('Its README says what it restores, how it finds the original plugin, and every remaining difference from the original.'),
-    bullet(`\`harness_verify_port\` with \`${JSON.stringify({ pluginId: plugin.id, componentId: component.id })}\` answers \`"covered": true\`; its \`paths\` check finds no hard-coded DSH home and no scan of \`profiles/\` in the adapter's source.`),
+    bullet(`\`harness_verify_port\` with \`${JSON.stringify({ pluginId: plugin.id, componentId: component.id })}\` answers \`"covered": true\`; its \`paths\` check finds no hard-coded DSH home and no scan of \`profiles/\` in the adapter's source (${PATHS_CHECK}).`),
     bullet('It keeps the data access rules above: run it with `$DSH_HOME` pointing elsewhere and it still reads only the running profile\'s data.'),
     '',
     '## Constraints',

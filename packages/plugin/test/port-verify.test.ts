@@ -188,9 +188,9 @@ describe('harness_verify_port', () => {
     expect(result.covered).toBe(false)
     const paths = result.checks.find(item => item.check === 'paths')!
     expect(paths.ok).toBe(false)
-    expect(paths.detail).toContain('index.js:2 hard-codes the DSH home (~/.dsh)')
-    expect(paths.detail).toContain('index.js:3 lists the profiles directory')
-    expect(paths.detail).toContain('src/client.tsx:1 hard-codes the DSH home (/home/misaka/.dsh)')
+    expect(paths.detail).toContain("index.js:2 [dsh-home] builds the DSH home from the home directory ('~/.dsh')")
+    expect(paths.detail).toContain('index.js:3 [profiles-listing] lists the profiles directory (readdirSync)')
+    expect(paths.detail).toContain("src/client.tsx:1 [dsh-home] hard-codes one user's DSH home (/home/misaka/.dsh)")
     expect(paths.detail).not.toContain('node_modules')
   })
 

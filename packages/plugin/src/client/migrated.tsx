@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { call } from './typert.js'
 import { usePath } from './paths.js'
-import { Chevron, fill, harnessName, hasSessionStartPart, isGap, itemName, kindLabel, messageOf, Notice, Reasons, ROW_TITLE, StateLabel, type Item, type Key, type Part, type TFn, type Workspace } from './shared.js'
+import { Chevron, fill, harnessName, isGap, itemName, kindLabel, messageOf, Notice, Reasons, ROW_TITLE, sessionStartNote, StateLabel, type Item, type Key, type Part, type TFn, type Workspace } from './shared.js'
 
 function PartRow({ item, part, t, onToggle, busy }: { item: Item; part: Part; t: TFn; onToggle: (item: Item, part: Part, enabled: boolean) => void; busy: boolean }): JSX.Element {
   const on = part.state !== 'off'
@@ -83,6 +83,7 @@ function PluginRow({ item, t, onToggle, onRemove, onKeep, busy }: {
   const shown = usePath()
   const attention = item.parts.filter(part => isGap(part) || part.state === 'inactive').length
   const updated = item.updated
+  const startNote = sessionStartNote([item], t)
   return (
     <li className="hf-item" data-open={open}>
       <div className="hf-item-head">
@@ -91,6 +92,7 @@ function PluginRow({ item, t, onToggle, onRemove, onKeep, busy }: {
           <span className="hf-item-main">
             <span className="hf-item-title">{itemName(item, t)}<span className="hf-tag">{harnessName(item.source)}</span></span>
             <span className="hf-item-desc">{item.version !== undefined ? `${item.version} · ` : ''}{shown(item.root)}</span>
+            {startNote !== undefined ? <span className="hf-item-desc">{startNote}</span> : null}
             {updated !== undefined ? <span className="hf-item-desc">{fill(t('updatedBy'), { harness: harnessName(updated.harness), from: updated.from ?? '?', to: updated.to ?? '?' })}</span> : null}
           </span>
         </button>
@@ -235,7 +237,6 @@ export function MigratedScreen({ t, items, signInWaiting, reload }: { t: TFn; it
   return (
     <div>
       <p className="hf-lead" style={{ marginTop: 0 }}>{t('migratedLead')}</p>
-      {hasSessionStartPart(items) ? <p className="hf-muted" style={{ margin: '-8px 0 12px' }}>{t('startsInNewSessions')}</p> : null}
       {error !== undefined ? <Notice kind="error">{error}</Notice> : null}
       {notice !== undefined ? <Notice>{notice}</Notice> : null}
       <div style={{ height: 8 }} />

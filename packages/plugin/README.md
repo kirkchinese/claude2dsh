@@ -1,5 +1,7 @@
 # Harness Forge
 
+![Harness Forge in DSH: Discover & migrate lists the Claude Code and Codex plugins found on this computer, each marked as working](docs/hero.en.webp)
+
 Use your Claude Code, Codex and OpenCode plugins and settings in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): skills, slash commands, subagents, hooks, MCP servers (stdio, HTTP, SSE, OAuth), Claude Code mods and OpenCode code plugins, your `~/.claude` and `~/.codex` setup, instruction files DSH does not read itself, and session history you can continue. It converts at run time and leaves the original installation untouched.
 
 In DSH: **Plugins › Add plugin** and enter `@kirkchinese/harness-forge`. From a terminal, for the main profile that `dsh web` runs:

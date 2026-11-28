@@ -48,7 +48,7 @@ import {
 import { messageOf } from '../../shared/util.js'
 import { partOf } from '../../workbench/overview.js'
 import { copyTree, treeDigest } from './archive.js'
-import { codePartsOf, type CodePart } from './code-parts.js'
+import { adaptable, codePartsOf, type CodePart } from './code-parts.js'
 import { dependenciesOf, RemoteFetcher, type FetchContext, type FetchDeps, type FetchLimits, type NpmDependencies } from './fetch.js'
 
 /** How an install was reached, to fetch it again for an update. */
@@ -157,6 +157,8 @@ export interface Confirmation {
   readonly parts: readonly ConfirmedPart[]
   /** The parts that would run code with the person's permissions, and whether each runs in DSH once installed. */
   readonly codeParts: readonly CodePart[]
+  /** It has a gap an adapter could fill: the warning says an adapter would run code of its own. */
+  readonly adaptable: boolean
   readonly works: number
   readonly total: number
   readonly warnings: readonly string[]
@@ -578,6 +580,7 @@ export class RemotePlugins {
           return { kind: component.kind, name: component.name, ...(gaps.has(component.id) ? { gap: gaps.get(component.id)! } : {}), ...(reasons.length > 0 ? { reasons } : {}), ...(change !== undefined ? { change } : {}) }
         }),
         codeParts: codePartsOf(plugin, allGaps),
+        adaptable: adaptable(allGaps),
         works: plugin.components.filter(component => !gaps.has(component.id)).length,
         total: plugin.components.length,
         warnings: [...(candidate.warnings ?? []), ...plugin.warnings.map(warning => warning.message)],

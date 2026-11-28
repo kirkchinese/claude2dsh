@@ -5,19 +5,20 @@ import type { ForeignComponent } from '@kirkchinese/harness-forge-core'
 import { HarnessRemoteService } from '../src/workbench/remote.js'
 import { partOf } from '../src/workbench/overview.js'
 import { HomeContext } from '../src/client/paths.js'
-import { DiscoverScreen } from '../src/client/discover.js'
+import { ConfirmInstall, DiscoverScreen } from '../src/client/discover.js'
 import { GapsScreen, TaskPanel } from '../src/client/gaps.js'
 import { MigratedScreen, TrustBanners } from '../src/client/migrated.js'
 import { BackButton, MoreMenu } from '../src/client/index.js'
-import { fill, newlyMigrated, type Harness, type Item, type Key, type Part, type TFn } from '../src/client/shared.js'
+import { SessionRow, sessionRowState } from '../src/client/secondary.js'
+import { newlyMigrated, sessionStartNote, type Harness, type Item, type Key, type Part, type TFn } from '../src/client/shared.js'
 import english from '../src/client/locale/en.json' with { type: 'json' }
 import chinese from '../src/client/locale/zh.json' with { type: 'json' }
 
 const HOME = '/home/user'
 /** What DSH's own chrome calls its buttons, which a Harness Forge button must not be named the same as. */
 const DSH_CHROME_NAMES = ['More', '更多', 'Back', '返回', 'Close', '关闭']
-const SESSION_NOTE = 'Takes effect in new sessions; sessions already open keep what they started with.'
-const SESSION_NOTE_ZH = '新会话中生效；已打开的会话保持开始时的状态。'
+const ROW_NOTE = "superpowers' SessionStart hook runs only when a new session starts; its other parts already work."
+const ROW_NOTE_ZH = 'superpowers 的 SessionStart hook 只在新会话开始时运行；其余部分已经生效。'
 
 const tIn = (strings: Record<string, string>): TFn => (key: Key) => strings[key] ?? key
 const t = tIn(english)
@@ -99,7 +100,7 @@ describe('button names that are DSH\'s own', () => {
   })
 
   it('has the new names in both languages', () => {
-    for (const key of ['moreActions', 'backLabel', 'closeTaskLabel', 'startsInNewSessions'] as const) {
+    for (const key of ['moreActions', 'backLabel', 'closeTaskLabel', 'startsHookOne', 'startsHookOneAlone', 'startsHookMany'] as const) {
       expect(english[key].length, key).toBeGreaterThan(0)
       expect(chinese[key].length, key).toBeGreaterThan(0)
     }
@@ -108,24 +109,52 @@ describe('button names that are DSH\'s own', () => {
 
 describe('what acts at the start of a session', () => {
   const startHook = part({ kind: 'hooks', name: 'hooks', atStart: true })
+  const skill = part({ kind: 'skill', name: 'brainstorming' })
+  const superpowers = item({ id: 'claude-code:superpowers', name: 'superpowers', installed: true, parts: [startHook, skill] })
+  /** Migrated's markup, its apostrophes as the text has them. */
+  const migrated = (items: Item[], strings: Record<string, string> = english): string => render(createElement(MigratedScreen, { t: tIn(strings), items, signInWaiting: [], reload: noop })).replaceAll('&#x27;', "'")
 
-  it('says so on Migrated when a part there acts at the start of a session, once', () => {
-    const markup = render(createElement(MigratedScreen, { t, items: [item({ installed: true, parts: [startHook] }), item({ id: 'claude-code:other', installed: true, parts: [startHook] })], signInWaiting: [], reload: noop }))
-    expect(markup.split(SESSION_NOTE).length - 1).toBe(1)
-    expect(render(createElement(MigratedScreen, { t: tIn(chinese), items: [item({ installed: true, parts: [startHook] })], signInWaiting: [], reload: noop }))).toContain(SESSION_NOTE_ZH)
+  it('says it on the row of the plugin whose SessionStart hook is active, naming the plugin', () => {
+    expect(migrated([superpowers])).toContain(ROW_NOTE)
+    expect(migrated([superpowers], chinese)).toContain(ROW_NOTE_ZH)
+    const other = item({ id: 'claude-code:other', name: 'other', installed: true, parts: [startHook, skill] })
+    const markup = migrated([superpowers, other])
+    expect(markup).toContain(ROW_NOTE)
+    expect(markup).toContain("other's SessionStart hook runs only when a new session starts")
   })
 
-  it('stays silent on Migrated for parts that take effect at once', () => {
+  it('has no line at the top of the page any more', () => {
+    expect(english).not.toHaveProperty('startsInNewSessions')
+    expect(chinese).not.toHaveProperty('startsInNewSessions')
+    expect(migrated([superpowers])).not.toContain('Takes effect in new sessions')
+  })
+
+  it('stays silent when the hook part, or its row, is off, or it cannot run', () => {
+    for (const state of ['off', 'inactive', 'unsupported', 'failed'] as const) {
+      const hook = part({ kind: 'hooks', name: 'hooks', atStart: true, state, ...(state === 'inactive' ? { reasons: [{ code: 'row-off' as const, detail: 'hooks' }] } : {}) })
+      expect(migrated([item({ name: 'superpowers', installed: true, parts: [hook, skill] })]), state).not.toContain('SessionStart hook')
+    }
+  })
+
+  it('stays silent for parts that take effect at once', () => {
     const live = [part({ kind: 'skill', name: 's' }), part({ kind: 'command', name: 'c' }), part({ kind: 'mcp', name: 'm' }), part({ kind: 'agent', name: 'a' }), part({ kind: 'hooks', name: 'h' })]
-    expect(render(createElement(MigratedScreen, { t, items: [item({ installed: true, parts: live })], signInWaiting: [], reload: noop }))).not.toContain(SESSION_NOTE)
-    expect(render(createElement(MigratedScreen, { t, items: [], signInWaiting: [], reload: noop }))).not.toContain(SESSION_NOTE)
+    expect(migrated([item({ installed: true, parts: live })])).not.toContain('SessionStart hook')
   })
 
-  it('counts a part that is switched off, which switching on would start, but not one that cannot run', () => {
-    const off = part({ kind: 'hooks', name: 'h', atStart: true, state: 'off' })
-    const broken = part({ kind: 'hooks', name: 'h', atStart: true, state: 'unsupported' })
-    expect(render(createElement(MigratedScreen, { t, items: [item({ installed: true, parts: [off] })], signInWaiting: [], reload: noop }))).toContain(SESSION_NOTE)
-    expect(render(createElement(MigratedScreen, { t, items: [item({ installed: true, parts: [broken] })], signInWaiting: [], reload: noop }))).not.toContain(SESSION_NOTE)
+  it('does not say the other parts work when the hook is all there is that works', () => {
+    const alone = item({ name: 'starter', installed: true, parts: [startHook, part({ kind: 'ui', name: 'statusline', state: 'needs-port' })] })
+    expect(sessionStartNote([alone], t)).toBe("starter's SessionStart hook runs only when a new session starts.")
+    expect(sessionStartNote([alone], tIn(chinese))).toBe('starter 的 SessionStart hook 只在新会话开始时运行。')
+  })
+
+  it('names the plugins a migration added: the row sentence for one, one line listing several', () => {
+    expect(sessionStartNote([superpowers], t)).toBe(ROW_NOTE)
+    const other = item({ id: 'claude-code:other', name: 'other', installed: true, parts: [startHook, skill] })
+    const plain = item({ id: 'claude-code:plain', name: 'plain', installed: true })
+    expect(sessionStartNote([superpowers, plain, other], t)).toBe('The SessionStart hooks of superpowers, other run only when a new session starts; their other parts already work.')
+    expect(sessionStartNote([superpowers, other], tIn(chinese))).toBe('superpowers、other 的 SessionStart hook 只在新会话开始时运行；其余部分已经生效。')
+    expect(sessionStartNote([plain], t)).toBeUndefined()
+    expect(sessionStartNote([item({ name: 'x', installed: true, parts: [part({ kind: 'hooks', name: 'hooks', atStart: true, state: 'off' })] })], t)).toBeUndefined()
   })
 
   it('finds the plugins a migration added, by what was migrated before', () => {
@@ -138,13 +167,57 @@ describe('what acts at the start of a session', () => {
   })
 
   it('does not show the note on Gaps', () => {
-    expect(render(createElement(GapsScreen, { t, items: [item({ installed: true, parts: [startHook] })], openSession: () => undefined }))).not.toContain(SESSION_NOTE)
+    expect(render(createElement(GapsScreen, { t, items: [superpowers], openSession: () => undefined }))).not.toContain('SessionStart hook')
+  })
+})
+
+describe('the install confirmation', () => {
+  const plan = {
+    token: 'x',
+    name: 'claude-hud',
+    harness: 'claude-code',
+    source: `${HOME}/.claude/plugins/marketplaces/local/plugins/claude-hud`,
+    revision: 'local',
+    parts: [
+      { kind: 'skill', name: 'hud' },
+      { kind: 'ui', name: 'statusline', gap: `status line at ${HOME}/hud/install.mjs`, reasons: [{ code: 'no-equivalent-ui' as const, detail: '' }] },
+    ],
+    codeParts: [
+      { kind: 'skill', name: 'hud', what: 'shell' as const, detail: `node ${HOME}/hud/bin.js`, runs: true },
+      { kind: 'ui', name: 'statusline', what: 'script' as const, detail: 'install.mjs', runs: false, reasons: [{ code: 'no-equivalent-ui' as const, detail: '' }] },
+    ],
+    adaptable: true,
+    works: 1,
+    total: 2,
+    pluginId: 'claude-code:claude-hud',
+    alreadyInstalled: false,
+  }
+  const confirm = (value: typeof plan = plan): string => render(createElement(ConfirmInstall, { t, plan: value, busy: false, onConfirm: () => undefined, onCancel: () => undefined }))
+
+  it('shows a source on this computer, and any path in the warning, as ~/…', () => {
+    const markup = confirm()
+    expect(markup).toContain('~/.claude/plugins/marketplaces/local/plugins/claude-hud')
+    expect(markup).toContain('node ~/hud/bin.js')
+    expect(markup).not.toContain(HOME)
   })
 
-  it('says the note in both languages with the words the brief gave', () => {
-    expect(english.startsInNewSessions).toBe(SESSION_NOTE)
-    expect(chinese.startsInNewSessions).toBe(SESSION_NOTE_ZH)
-    expect(fill(english.startsInNewSessions, {})).toBe(SESSION_NOTE)
+  it('colours only what runs code', () => {
+    const markup = confirm()
+    const warned = [...markup.matchAll(/<div class="hf-notice-warn">([^<]*)<\/div>/gu)].map(match => match[1])
+    expect(warned).toEqual(['These parts run code with your permissions once installed: hud.', 'hud (Skill) — shell lines node ~/hud/bin.js: runs in DSH once installed.'])
+    expect(markup).not.toContain('data-kind="error"')
+    expect(markup).toContain(`<div>${english.confirmTrust}</div>`)
+    expect(markup).toContain('<div>statusline (Interface) — script install.mjs: a gap, runs nothing in DSH.</div>')
+  })
+})
+
+describe('Import sessions', () => {
+  it('shows a session\'s working directory as ~/…', () => {
+    const session = { source: 'claude-code', path: `${HOME}/.claude/projects/app/1.jsonl`, sourceId: '1', title: 'Fix it', cwd: `${HOME}/work/app` }
+    const markup = render(createElement(SessionRow, { t, session, state: sessionRowState(t, session, {}, undefined), busy: undefined, onOpen: () => undefined, onImport: () => undefined }))
+    expect(markup).toContain('~/work/app')
+    expect(markup).not.toContain(HOME)
+    expect(render(createElement(SessionRow, { t, session, state: sessionRowState(t, session, {}, undefined), busy: undefined, onOpen: () => undefined, onImport: () => undefined }), null)).toContain(`${HOME}/work/app`)
   })
 })
 

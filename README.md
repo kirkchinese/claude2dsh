@@ -17,9 +17,7 @@
 
 <p align="center">English · <a href="README.zh.md">中文</a></p>
 
-![A DSH session loading the brainstorming skill of the superpowers plugin, migrated from Claude Code](docs/assets/demo.gif)
-
-*A real DSH session: the superpowers plugin was migrated from Claude Code, and the model loads its brainstorming skill on its own.*
+![Harness Forge in DSH: Discover & migrate lists the Claude Code and Codex plugins found on this computer, each marked as working](packages/plugin/docs/hero.en.webp)
 
 ## Why
 
@@ -31,6 +29,8 @@ Most plugin authors write for one harness. Harness Forge is a [DeepSeek Harness]
 - **Any harness that uses the common formats**: `SKILL.md` skills, MCP JSON, `AGENTS.md`. Add a folder of skills (with an optional `.mcp.json`) to the plugin folders and it is read as one plugin; Gemini CLI's `~/.gemini/skills` is listed by default. DSH already loads `~/.agents/skills` itself.
 
 It converts at run time through DSH's public extension points. Your original installation stays as it is, and Harness Forge never changes your DSH profile's configuration. Parts DSH has no equivalent for are listed with the reason, and **Fill with AI** can write an adapter for them.
+
+![Get plugins: Anthropic's and OpenAI's marketplaces ready to open, a marketplace already on this computer, and plugins to install](docs/assets/get-plugins.en.webp)
 
 ## Install
 
@@ -53,7 +53,9 @@ then start DSH again. For another profile, put its name in place of `web`; the d
    No Claude Code here? Under **Get plugins**, open a marketplace such as `anthropics/claude-plugins-official`, or paste `owner/repo` or an npm package, and install from the internet.
 3. **Work.** Start a session. Skills are in the skill catalog, commands are in the `/` menu, agents can take delegated tasks, and hooks fire on their events.
 
-![The Discover & migrate screen: Claude Code and Codex plugins found on this computer, each marked works or partly works](docs/assets/discover.en.jpg)
+![A DSH session with superpowers migrated from Claude Code: its SessionStart hook injects the startup prompt and the model loads the brainstorming skill](docs/assets/superpowers.en.webp)
+
+*A real DSH session: superpowers, migrated from Claude Code. Its SessionStart hook injects the startup prompt, and the model loads the brainstorming skill on its own.*
 
 More in the [quick start](docs/user/quickstart.md).
 
@@ -89,6 +91,8 @@ Details in [compatibility](docs/user/compatibility.md).
 ## Fill with AI
 
 Next to a gap an adapter could fill, **Fill with AI** writes a task brief for that part: the original's files, why it cannot run, the nearest DSH extension points and how to check the result. It then opens a session in DSH's own creation mode (agent preset `cordis`) with that brief. The agent there builds a local DSH plugin named `dsh-adapter-<plugin>-<part>` that calls the original plugin's code, installs it in your profile and checks it. Publishing it is up to you, under your own npm scope. See [porting](docs/user/porting.md).
+
+![claude-hud's status line under DSH's composer, drawn by an adapter that Fill with AI wrote](docs/assets/statusline.en.webp)
 
 ## Rows
 

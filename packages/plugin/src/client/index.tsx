@@ -18,7 +18,7 @@ import zh from './locale/zh.json' with { type: 'json' }
 import contribution, { call, isWorkbenchOff, setMountedRemote, setMountedRemoteError } from './typert.js'
 import { CSS } from './styles.js'
 import { registerModsDock } from './mods.js'
-import { fill, hasSessionStartPart, isGap, messageOf, newlyMigrated, Notice, type Applying, type Harness, type Item, type Key, type TFn, type Workspace } from './shared.js'
+import { fill, isGap, messageOf, newlyMigrated, Notice, sessionStartNote, type Applying, type Harness, type Item, type Key, type TFn, type Workspace } from './shared.js'
 import { HomeContext } from './paths.js'
 import { DiscoverScreen } from './discover.js'
 import { MigratedScreen, TrustBanners } from './migrated.js'
@@ -124,8 +124,8 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   const [signInWaiting, setSignInWaiting] = useState<readonly string[]>([])
   const [error, setError] = useState<string | undefined>(undefined)
   const [home, setHome] = useState<string | undefined>(undefined)
-  /** A migration just added parts that act at the start of a session: said once, until the person goes elsewhere. */
-  const [startNote, setStartNote] = useState(false)
+  /** A migration just added plugins whose SessionStart hooks wait for a new session: said once, until the person goes elsewhere. */
+  const [startNote, setStartNote] = useState<string | undefined>(undefined)
   const [workbenchOff, setWorkbenchOff] = useState(false)
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState<Applying | undefined>(undefined)
@@ -161,7 +161,7 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   }, [])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => { setStartNote(false) }, [screen])
+  useEffect(() => { setStartNote(undefined) }, [screen])
 
   // While records are still being applied, the lists grow: ask again until every one is done.
   useEffect(() => {
@@ -186,9 +186,9 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   // After a migration (all, one, or from Get plugins) the plugins it added are known by what was migrated before.
   const afterMigration = async (): Promise<void> => {
     const before = new Set(migrated.map(item => item.id))
-    setStartNote(false)
+    setStartNote(undefined)
     const after = await load()
-    if (after !== undefined && hasSessionStartPart(newlyMigrated(before, after))) setStartNote(true)
+    if (after !== undefined) setStartNote(sessionStartNote(newlyMigrated(before, after), t))
   }
 
   const reload = async (): Promise<void> => { await load() }
@@ -257,7 +257,7 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
           {applying !== undefined && (screen === 'discover' || screen === 'migrated')
             ? <Notice>{fill(t('applying'), { done: applying.done, total: applying.total })}</Notice>
             : null}
-          {startNote && screen === 'discover' ? <Notice>{t('startsInNewSessions')}</Notice> : null}
+          {startNote !== undefined && screen === 'discover' ? <Notice>{startNote}</Notice> : null}
           {screen === 'discover' || screen === 'migrated' ? <TrustBanners t={t} workspaces={workspaces} reload={reload} /> : null}
           {harnesses !== undefined && screen === 'discover' ? <DiscoverScreen t={t} harnesses={harnesses} reload={afterMigration} /> : null}
           {harnesses !== undefined && screen === 'migrated' ? <MigratedScreen t={t} items={migrated} signInWaiting={signInWaiting} reload={reload} /> : null}

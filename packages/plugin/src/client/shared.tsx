@@ -185,17 +185,40 @@ export function isGap(part: Part): boolean {
   return part.adapter === undefined && (part.state === 'partial' || part.state === 'needs-port' || part.state === 'unsupported' || part.state === 'failed')
 }
 
-/** The states a part that acts at the start of a session can be in and still start, or start once it is switched on. */
-const STARTABLE: ReadonlySet<PartState> = new Set(['works', 'partial', 'off'])
+/** The states in which a part runs: off, a row that is off, or a gap runs nothing. */
+const RUNNING: ReadonlySet<PartState> = new Set(['works', 'partial'])
+/** A name whose possessive takes a bare apostrophe in English (superpowers'). */
+const ENDS_IN_S = /s$/iu
 
-/** Whether a part acts at the start of a session and could run (switched off counts: switching it on starts it). */
-export function startsWithSession(part: Part): boolean {
-  return part.atStart === true && STARTABLE.has(part.state)
+/** Whether a part acts at the start of a session and runs now. */
+function startsWithSession(part: Part): boolean {
+  return part.atStart === true && RUNNING.has(part.state)
 }
 
-/** Whether any of these plugins has a part that acts at the start of a session. */
-export function hasSessionStartPart(items: readonly Item[]): boolean {
-  return items.some(item => item.parts.some(startsWithSession))
+/** The plugins with a running part that acts at the start of a session. */
+function startingWithSession(items: readonly Item[]): Item[] {
+  return items.filter(item => item.parts.some(startsWithSession))
+}
+
+/** Whether a plugin's parts other than those acting at the start of a session already run. */
+function othersRun(item: Item): boolean {
+  return item.parts.some(part => !startsWithSession(part) && RUNNING.has(part.state))
+}
+
+/**
+ * That these plugins' SessionStart hooks run only when a new session starts, naming them: the sentence for one,
+ * one line listing several. Nothing when none of them has one that runs.
+ */
+export function sessionStartNote(items: readonly Item[], t: TFn): string | undefined {
+  const starting = startingWithSession(items)
+  if (starting.length === 0) return undefined
+  const others = starting.every(othersRun)
+  if (starting.length === 1) {
+    const name = itemName(starting[0]!, t)
+    const owner = fill(t(ENDS_IN_S.test(name) ? 'possessiveEndingS' : 'possessive'), { name })
+    return fill(t(others ? 'startsHookOne' : 'startsHookOneAlone'), { owner })
+  }
+  return fill(t(others ? 'startsHookMany' : 'startsHookManyAlone'), { names: starting.map(item => itemName(item, t)).join(t('listSeparator')) })
 }
 
 /** The plugins that are migrated now but were not before (`before`: the ids of those that were). */

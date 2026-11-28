@@ -17,9 +17,7 @@
 
 <p align="center"><a href="README.md">English</a> · 中文</p>
 
-![DSH 会话加载从 Claude Code 迁移来的 superpowers 插件的 brainstorming 技能](docs/assets/demo.gif)
-
-*真实的 DSH 会话：superpowers 插件从 Claude Code 迁移过来，模型自己加载了它的 brainstorming 技能。*
+![DSH 里的 Harness Forge：“发现与迁移”列出这台电脑上找到的 Claude Code 和 Codex 插件，逐个标出可用](packages/plugin/docs/hero.zh.webp)
 
 ## 为什么
 
@@ -31,6 +29,8 @@
 - **任何使用通用格式的工具**：`SKILL.md` 技能、MCP JSON、`AGENTS.md`。把一个技能文件夹（可附带 `.mcp.json`）加进插件文件夹，它就作为一个插件读取；默认已列出 Gemini CLI 的 `~/.gemini/skills`。`~/.agents/skills` 由 DSH 自己加载。
 
 转换在运行时通过 DSH 的公开扩展点完成。原来的安装保持原样，Harness Forge 也从不修改你 DSH profile 的配置。DSH 没有对应功能的部分会列出原因，并可以用 **用 AI 补上** 写一个适配器。
+
+![获取插件：Anthropic 和 OpenAI 的插件市场可以直接打开，还有这台电脑上已有的插件市场和可安装的插件](docs/assets/get-plugins.zh.webp)
 
 ## 安装
 
@@ -53,7 +53,9 @@ dsh plugin --profile web add @kirkchinese/harness-forge
    这台电脑上没有 Claude Code？在 **获取插件** 里打开 `anthropics/claude-plugins-official` 等插件市场，或粘贴 `owner/repo`、npm 包名，直接从网络安装。
 3. **使用。** 新开一个会话。技能在技能目录里，命令在 `/` 菜单里，智能体可以接受委派，hook 在对应事件上触发。
 
-![“发现与迁移”页面：这台电脑上找到的 Claude Code 和 Codex 插件，每个标出可用或部分可用](docs/assets/discover.zh.jpg)
+![从 Claude Code 迁移来的 superpowers 在 DSH 会话里：SessionStart hook 注入开场提示，模型加载 brainstorming 技能](docs/assets/superpowers.zh.webp)
+
+*真实的 DSH 会话：superpowers 从 Claude Code 迁移过来。它的 SessionStart hook 注入了开场提示，模型自己加载了 brainstorming 技能。*
 
 详见 [快速开始](docs/user/quickstart.zh.md)。
 
@@ -89,6 +91,8 @@ dsh plugin --profile web add @kirkchinese/harness-forge
 ## 用 AI 补上
 
 能由适配器补上的缺口旁边有 **用 AI 补上**。它为这个部分写一份任务说明：原插件的文件、为什么无法运行、最接近的 DSH 扩展点、怎么验收；然后带着说明在 DSH 自己的创造模式（智能体预设 `cordis`）里开一个会话。那里的智能体编写一个名为 `dsh-adapter-<插件>-<部分>` 的本地 DSH 插件，调用原插件自己的代码，装进你的 profile 并检查效果。是否发布由你决定，发布在你自己的 npm scope 下。见 [移植](docs/user/porting.zh.md)。
+
+![claude-hud 的状态行显示在 DSH 输入框下方，由“用 AI 补上”写出的适配器绘制](docs/assets/statusline.zh.webp)
 
 ## 插件行
 

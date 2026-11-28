@@ -1,5 +1,7 @@
 # Harness Forge
 
+![DSH 里的 Harness Forge：“发现与迁移”列出这台电脑上找到的 Claude Code 和 Codex 插件，逐个标出可用](hero.zh.webp)
+
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）里使用你的 Claude Code、Codex 和 OpenCode 插件与设置：技能、斜杠命令、子代理、hook、MCP 服务（stdio、HTTP、SSE、OAuth）、Claude Code mods 和 OpenCode 代码插件，你的 `~/.claude` 和 `~/.codex` 设置，DSH 自己不读的指令文件，以及可以接着聊的历史会话。转换在运行时完成，原来的安装保持原样。
 
 在 DSH 里：打开 **插件 › 添加插件**，输入 `@kirkchinese/harness-forge`。也可以在终端里装到 `dsh web` 使用的主 profile：

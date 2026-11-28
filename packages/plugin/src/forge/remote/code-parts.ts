@@ -9,7 +9,7 @@
  */
 import { relative } from 'node:path'
 import { absolutePath, readText, type ForeignComponent, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
-import { partOf, type OverviewPart } from '../../workbench/overview.js'
+import { partOf, portable, type OverviewPart } from '../../workbench/overview.js'
 
 /** What runs: the Client words each in the person's language. */
 export type CodeRunner = 'hooks' | 'mcp' | 'shell' | 'script' | 'code' | 'environment' | 'agent'
@@ -93,4 +93,9 @@ export function codePartsOf(plugin: ForeignPlugin, gaps: readonly Gap[]): CodePa
     const runs = RUNNING_STATES.has(part.state)
     return [{ kind: component.kind, name: component.name, what: runner.what, detail: clip(runner.detail), runs, ...(!runs && part.reasons.length > 0 ? { reasons: part.reasons } : {}) }]
   })
+}
+
+/** Whether the plugin has a gap an adapter could fill, as the overview's "needs an adapter" tells it. */
+export function adaptable(gaps: readonly Gap[]): boolean {
+  return gaps.some(portable)
 }

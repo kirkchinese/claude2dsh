@@ -77,6 +77,7 @@ export const CSS = `
 .hf-card { font-size: 13px; line-height: 20px; padding: 14px 16px; border-radius: var(--dsw-radius-xl, 12px); background: var(--dsw-alias-settings-card-fill, var(--dsw-alias-bg-layer-2)); border: 0.5px solid var(--dsw-alias-settings-card-stroke, transparent); }
 .hf-notice { margin: 16px 0 0; padding: 9px 12px; border-radius: var(--dsw-radius-md, 8px); font-size: 13px; line-height: 20px; white-space: pre-wrap; background: var(--dsw-alias-settings-card-fill, var(--dsw-alias-bg-layer-2)); }
 .hf-notice[data-kind='error'] { color: var(--dsw-alias-state-error-primary); }
+.hf-notice-warn { color: var(--dsw-alias-state-error-primary); }
 .hf-notice-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .hf-empty { padding: 20px 0; font-size: 13px; color: var(--dsw-alias-label-tertiary); }
 .hf-facts { display: grid; grid-template-columns: minmax(160px, 240px) 1fr; margin: 0; }

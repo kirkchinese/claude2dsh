@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 import { auditProductionGraph, PLATFORM_BOUND, staleImporters } from './pack-graph.ts'
 
 // The workspace root has no dependencies of its own; the testkit (never packed) provides the YAML reader.
@@ -74,6 +74,12 @@ try {
       const text = run('tar', ['-xzOf', path, `package/${document}`]).replace(/```[\s\S]*?```/gu, '').replace(/`[^`\n]*`/gu, '')
       const html = /<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?>/u.exec(text)
       if (html !== null) problems.push(`${name}: ${document} contains raw HTML (${html[0]}), which Plugin Manager omits`)
+      // Plugin Manager loads a document's relative images from beside it, so each one has to ship.
+      for (const [, target] of text.matchAll(/!\[[^\]]*\]\(([^)\s]+)/gu)) {
+        if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/iu.test(target)) continue
+        const image = posix.normalize(posix.join(posix.dirname(document), target))
+        if (!files.has(image)) problems.push(`${name}: ${document} shows ${target}, which is not in the tarball`)
+      }
     }
     console.log(`${name}@${manifest.version}: ${files.size} files, ${new Set(targets).size} export targets checked, detail documents: ${[...documents].join(', ') || 'none'}`)
   }
