@@ -1,14 +1,16 @@
 /**
  * The Claude Code dialect: `.claude-plugin/plugin.json` plugins (or the bare
  * plugin layout), the user's `~/.claude`, project `.claude/` directories, the
- * plugins and marketplaces Claude Code records, and its transcripts.
+ * plugins Claude Code has installed and the marketplaces it added, and its
+ * transcripts.
  * @module @kirkchinese/harness-forge-core
  */
 import { join, resolve } from 'node:path'
+import { cachePath } from '../codex/plugins.js'
 import { hasLayoutDirectory, scanPlugin } from '../../manifest.js'
-import { isDirectory, isFile, readJsonObject } from '../../paths.js'
-import type { Dialect, HarnessPluginEntry } from '../types.js'
-import { installedClaudePlugins, scanClaudeProjectAssets, scanClaudeUserAssets } from './user-assets.js'
+import { isFile, readJsonObject } from '../../paths.js'
+import type { Dialect, HarnessMarketplace } from '../types.js'
+import { installedClaudePlugins, isGlobalClaudeInstall, scanClaudeProjectAssets, scanClaudeUserAssets } from './user-assets.js'
 import { claudeCodeAdapter } from './sessions/adapter.js'
 
 export const claudeCodeDialect: Dialect = {
@@ -31,46 +33,45 @@ export const claudeCodeDialect: Dialect = {
     emptyMessage: 'holds no Claude Code skills, agents, commands, settings or MCP servers',
   },
   harnessPlugins: {
-    root: home => join(home, '.claude', 'plugins'),
-    list: home => claudeHarnessPlugins(home),
+    roots: home => [join(home, '.claude', 'plugins')],
+    // A project- or local-scope install only loads in its project's sessions, so it is not one of the person's
+    // plugins everywhere: discovery and "Migrate all" leave it out (see docs/user/compatibility.md).
+    list: (home) => {
+      const installed = installedClaudePlugins(home)
+      return {
+        entries: installed.plugins.filter(isGlobalClaudeInstall).map(plugin => ({ root: plugin.root, key: plugin.key, enabled: plugin.enabled, marketplace: plugin.marketplace })),
+        unresolved: installed.unresolved.filter(isGlobalClaudeInstall).map(({ key, message }) => ({ key, message })),
+        unread: installed.unread,
+      }
+    },
+    marketplaces: home => claudeMarketplaces(home),
+    identify: (home, root, name) => claudeInstallKey(home, root, name),
   },
   projectAssets: (cwd, home) => scanClaudeProjectAssets(cwd, home),
   sessions: claudeCodeAdapter,
 }
 
-/**
- * Claude Code's plugin directory read the way Claude Code reads it: the
- * installed plugins of `installed_plugins.json` (one version each) and the
- * plugins its added marketplaces offer, instead of every cached version.
- */
-function claudeHarnessPlugins(home: string): HarnessPluginEntry[] {
-  const out: HarnessPluginEntry[] = []
-  const installed = installedClaudePlugins(home)
-  const installedKeys = new Set(installed.map(plugin => plugin.key))
-  for (const plugin of installed) out.push({ root: plugin.root, origin: 'installed', enabled: plugin.enabled, marketplace: plugin.marketplace })
-  for (const offer of claudeMarketplaceOffers(home)) {
-    if (installedKeys.has(`${offer.name}@${offer.marketplace}`)) continue
-    out.push({ root: offer.root, origin: 'marketplace', marketplace: offer.marketplace })
+/** The marketplaces Claude Code has added (`known_marketplaces.json`) whose local copy lists plugins. */
+function claudeMarketplaces(home: string): HarnessMarketplace[] {
+  const known = readJsonObject(join(home, '.claude', 'plugins', 'known_marketplaces.json')) ?? {}
+  const out: HarnessMarketplace[] = []
+  for (const [name, entry] of Object.entries(known)) {
+    const location = typeof entry === 'object' && entry !== null ? (entry as { installLocation?: unknown }).installLocation : undefined
+    if (typeof location !== 'string' || !isFile(join(location, '.claude-plugin', 'marketplace.json'))) continue
+    out.push({ name, root: resolve(location) })
   }
   return out
 }
 
-/** Plugins listed by the marketplaces Claude Code has added, with a local copy. */
-function claudeMarketplaceOffers(home: string): Array<{ name: string; marketplace: string; root: string }> {
-  const known = readJsonObject(join(home, '.claude', 'plugins', 'known_marketplaces.json')) ?? {}
-  const out: Array<{ name: string; marketplace: string; root: string }> = []
-  for (const [marketplace, entry] of Object.entries(known)) {
-    const location = typeof entry === 'object' && entry !== null ? (entry as { installLocation?: unknown }).installLocation : undefined
-    if (typeof location !== 'string' || !isDirectory(location)) continue
-    const manifest = readJsonObject(join(location, '.claude-plugin', 'marketplace.json'))
-    const listed = Array.isArray(manifest?.['plugins']) ? manifest['plugins'] : []
-    for (const item of listed) {
-      if (typeof item !== 'object' || item === null) continue
-      const { name, source } = item as { name?: unknown; source?: unknown }
-      if (typeof name !== 'string' || typeof source !== 'string') continue
-      const root = resolve(location, source)
-      if (isDirectory(root)) out.push({ name, marketplace, root })
-    }
-  }
-  return out
+/**
+ * The `<name>@<marketplace>` a folder of Claude Code's own layout stands for: a version in its install cache
+ * (`plugins/cache/<marketplace>/<name>/<version>`), or a plugin inside a marketplace's local copy
+ * (`plugins/marketplaces/<marketplace>/…`, what Harness Forge 0.4.0 also migrated as an offer).
+ */
+function claudeInstallKey(home: string, root: string, name: string): string | undefined {
+  const plugins = join(home, '.claude', 'plugins')
+  const cached = cachePath(join(plugins, 'cache'), root)
+  if (cached?.length === 3) return `${cached[1]!}@${cached[0]!}`
+  const offered = cachePath(join(plugins, 'marketplaces'), root)
+  return offered !== undefined && offered.length >= 2 ? `${name}@${offered[0]!}` : undefined
 }

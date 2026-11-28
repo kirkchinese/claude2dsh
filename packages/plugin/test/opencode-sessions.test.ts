@@ -60,7 +60,7 @@ function fixtureV2(): string {
 describe('OpenCode session migration', () => {
   it('reads sessions/messages/parts into normalized turns', async () => {
     const path = fixture()
-    const sessions = await discoverOpenCodeSessions(path)
+    const { sessions } = await discoverOpenCodeSessions(path)
     expect(sessions).toHaveLength(1)
     expect(sessions[0]?.source).toBe('opencode')
     const parsed = await readOpenCodeSession(path, 'ses_fixture', 'opencode-target')
@@ -98,7 +98,7 @@ describe('OpenCode session migration', () => {
 
   it('reads the new OpenCode v2 session/message tables', async () => {
     const path = fixtureV2()
-    const sessions = await discoverOpenCodeSessions(path)
+    const { sessions } = await discoverOpenCodeSessions(path)
     expect(sessions[0]?.sourceId).toBe('ses_v2')
     const parsed = await readOpenCodeSession(path, 'ses_v2', 'opencode-v2-target')
     expect(parsed.session.turns[0]?.prompt).toBe('Hello v2')

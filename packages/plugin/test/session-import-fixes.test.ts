@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { join, sep } from 'node:path'
 import { zstdCompressSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
@@ -8,10 +8,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import { synthesizeDshSession, type NormalizedSession } from '@kirkchinese/harness-forge-core'
 import { codexSessionId, discoverCodexSessions, importCodexSession, readCodexSession } from '../src/sessions/codex.js'
 import { importOpenCodeSession, openCodeSessionId } from '../src/sessions/opencode.js'
-import { persistImported } from '../src/sessions/persist.js'
+import { isSharedFolder, persistImported } from '../src/sessions/persist.js'
+import { claudeIdentity } from '../src/sessions/claude.js'
 import { startSessions } from '../src/sessions/row.js'
 import { CHAT_IMPORT_PACKAGE, installChatImport, sessionImportStatus, YIELD_MESSAGE } from '../src/sessions/chat-import.js'
-import { decodeZstd, zstdFrames } from '../src/sessions/zstd.js'
+import * as zstd from '../src/sessions/zstd.js'
+import { zstdChunks } from '../src/sessions/zstd.js'
 import type { SessionsApi } from '../src/forge/contract.js'
 
 const temporary: string[] = []
@@ -35,20 +37,20 @@ interface FakeHost {
 }
 
 /** A DSH with the services an import uses; `services` adds to or replaces them. */
-function fakeHost(options: { stored?: readonly string[]; controller?: boolean; services?: Record<string, unknown> } = {}): FakeHost {
+function fakeHost(options: { stored?: ReadonlyArray<string | { readonly id: string; readonly createdAt?: number }>; controller?: boolean; services?: Record<string, unknown> } = {}): FakeHost {
   const created: Array<Record<string, unknown>> = []
   const appended: unknown[][] = []
   const attached: Array<[string, string]> = []
   const resolved: string[] = []
   const resumed: string[] = []
   const live = new Set<string>()
-  const stored = new Set(options.stored ?? [])
+  const stored = new Map((options.stored ?? []).map(entry => (typeof entry === 'string' ? [entry, { id: entry }] : [entry.id, entry])))
   const services: Record<string, unknown> = {
     sessionPersistence: {
-      async list() { return [...stored].map(id => ({ header: { id }, revision: 1, sizeBytes: 1 })) },
+      async list() { return [...stored.values()].map(header => ({ header, revision: 1, sizeBytes: 1 })) },
       async create(header: Record<string, unknown>) {
         created.push(header)
-        stored.add(header['id'] as string)
+        stored.set(header['id'] as string, header as { id: string })
         return {
           async append(events: unknown[]) { appended.push(events) },
           async flush() {},
@@ -87,6 +89,11 @@ function session(cwd: string, id = 'claude-abc'): NormalizedSession {
   } as unknown as NormalizedSession
 }
 
+/** Persist a Claude Code session the way its import does; what the import reports of where it went. */
+async function persist(ctx: Context, normalized: NormalizedSession) {
+  return (await persistImported(ctx, normalized, claudeIdentity('abc'))).persisted
+}
+
 function codexRollout(dir: string, lines: readonly unknown[], name = 'rollout-2026-01-02T03-04-05-x.jsonl'): string {
   const path = join(dir, name)
   writeFileSync(path, lines.map(line => JSON.stringify(line)).join('\n'))
@@ -100,7 +107,7 @@ describe('imported sessions are registered with the running DSH', () => {
   it('groups the session under the workspace of its directory and makes it live through the session controller', async () => {
     const cwd = tempDir()
     const host = fakeHost()
-    const result = await persistImported(host.ctx, synthesizeDshSession(session(cwd)))
+    const result = await persist(host.ctx, session(cwd))
     expect(result).toEqual({ id: 'claude-abc', reused: false, live: true, workspace: cwd })
     expect(host.created[0]).toMatchObject({ id: 'claude-abc', cwd })
     expect(host.attached).toEqual([[cwd, 'claude-abc']])
@@ -111,22 +118,38 @@ describe('imported sessions are registered with the running DSH', () => {
 
   it('resumes the session through agents.resume where there is no session controller (headless)', async () => {
     const host = fakeHost({ controller: false })
-    const result = await persistImported(host.ctx, synthesizeDshSession(session(tempDir())))
+    const result = await persist(host.ctx, session(tempDir()))
     expect(result.live).toBe(true)
     expect(host.resumed).toEqual(['claude-abc'])
   })
 
   it('leaves a session whose directory is not on this computer ungrouped, and still imports it', async () => {
     const host = fakeHost()
-    const result = await persistImported(host.ctx, synthesizeDshSession(session('/no/such/dir-7f3a')))
+    const result = await persist(host.ctx, session('/no/such/dir-7f3a'))
     expect(result.workspace).toBeUndefined()
     expect(host.attached).toEqual([])
     expect(host.created).toHaveLength(1)
   })
 
+  it('leaves a session in the home folder or a system temp folder ungrouped, but not one in a folder inside it', async () => {
+    for (const shared of [homedir(), tmpdir(), `${tmpdir()}${sep}`, ...(process.platform === 'win32' ? [] : ['/tmp', '/var/tmp'])]) {
+      const host = fakeHost()
+      const result = await persist(host.ctx, session(shared))
+      expect(result.workspace, shared).toBeUndefined()
+      expect(host.attached).toEqual([])
+      expect(host.created).toHaveLength(1)
+    }
+    const project = tempDir()
+    expect((await persist(fakeHost().ctx, session(project))).workspace).toBe(project)
+    expect(isSharedFolder('/private/var/folders/ab/cd1234/T')).toBe(process.platform !== 'win32')
+    expect(isSharedFolder('/var/folders/ab/cd1234/T/')).toBe(process.platform !== 'win32')
+    expect(isSharedFolder('/private/tmp')).toBe(process.platform !== 'win32')
+    expect(isSharedFolder('/var/folders/ab/cd1234/T/project')).toBe(false)
+  })
+
   it('opens the session an earlier import wrote instead of failing with "already exists"', async () => {
     const host = fakeHost({ stored: ['claude-abc'] })
-    const result = await persistImported(host.ctx, synthesizeDshSession(session(tempDir())))
+    const result = await persist(host.ctx, session(tempDir()))
     expect(result).toMatchObject({ id: 'claude-abc', reused: true, live: true })
     expect(host.created).toEqual([])
     expect(host.resolved).toEqual(['claude-abc'])
@@ -179,7 +202,7 @@ describe('Codex import', () => {
     const text = [META, PROMPT, { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hi' }] } }].map(line => JSON.stringify(line)).join('\n')
     const half = text.length >> 1
     writeFileSync(join(day, 'rollout-2026-01-02T03-04-05-z.jsonl.zst'), Buffer.concat([zstdCompressSync(Buffer.from(text.slice(0, half))), zstdCompressSync(Buffer.from(text.slice(half)))]))
-    const found = await discoverCodexSessions(root)
+    const found = (await discoverCodexSessions(root)).sessions
     expect(found.map(item => item.sourceId)).toEqual(['sid-1'])
     const { session: parsed } = await readCodexSession(found[0]!.path)
     expect(parsed.turns[0]!.prompt).toBe('Run it')
@@ -190,7 +213,7 @@ describe('Codex import', () => {
     const root = tempDir()
     const path = codexRollout(root, [META, PROMPT])
     writeFileSync(`${path}.zst`, zstdCompressSync(Buffer.from(JSON.stringify(META))))
-    expect((await discoverCodexSessions(root)).map(item => item.path)).toEqual([path])
+    expect((await discoverCodexSessions(root)).sessions.map(item => item.path)).toEqual([path])
   })
 
   it('gives new imports a prefixed id and reuses one an earlier version stored under the Codex id', async () => {
@@ -199,7 +222,7 @@ describe('Codex import', () => {
     const fresh = fakeHost()
     expect((await importCodexSession(fresh.ctx, path)).id).toBe(codexSessionId('sid-1'))
     expect(codexSessionId('sid-1')).toBe('codex-sid-1')
-    const earlier = fakeHost({ stored: ['sid-1'] })
+    const earlier = fakeHost({ stored: [{ id: 'sid-1', createdAt: Date.parse(META.payload.timestamp) }] })
     expect(await importCodexSession(earlier.ctx, path)).toMatchObject({ id: 'sid-1', reused: true })
     expect(earlier.created).toEqual([])
   })
@@ -252,7 +275,7 @@ describe('yielding to dsh-chat-import', () => {
 
   it('imports itself while dsh-chat-import is not there', async () => {
     const host = fakeHost()
-    await expect(api(host).sessions(tempDir(), 'claude-code')).resolves.toEqual([])
+    await expect(api(host).sessions(tempDir(), 'claude-code')).resolves.toEqual({ sessions: [] })
     expect(sessionImportStatus(host.ctx)).toMatchObject({ provider: 'harness-forge', canInstall: false, command: 'dsh plugin --profile web add dsh-chat-import' })
   })
 
@@ -305,13 +328,27 @@ describe('yielding to dsh-chat-import', () => {
 })
 
 describe('zstd frames', () => {
-  it('finds every frame, skipping skippable ones, and rejects truncated data', () => {
+  async function decoded(path: string): Promise<string> {
+    const parts: Buffer[] = []
+    for await (const chunk of zstdChunks(path)) parts.push(Buffer.from(chunk))
+    return Buffer.concat(parts).toString('utf8')
+  }
+
+  it('decodes every frame of a stream, skipping skippable ones, and names a truncated file', async () => {
+    const dir = tempDir()
     const one = zstdCompressSync(Buffer.from('one\n'))
     const skippable = Buffer.from([0x50, 0x2a, 0x4d, 0x18, 2, 0, 0, 0, 9, 9])
     const two = zstdCompressSync(Buffer.from('two'.repeat(1000)))
     const data = Buffer.concat([one, skippable, two])
-    expect(zstdFrames(data)).toHaveLength(2)
-    expect(decodeZstd(data, 'x')).toBe(`one\n${'two'.repeat(1000)}`)
-    expect(() => decodeZstd(data.subarray(0, data.length - 3), 'x.zst')).toThrow(/x\.zst/u)
+    const whole = join(dir, 'x.zst')
+    writeFileSync(whole, data)
+    expect(await decoded(whole)).toBe(`one\n${'two'.repeat(1000)}`)
+    const truncated = join(dir, 'cut.zst')
+    writeFileSync(truncated, data.subarray(0, data.length - 3))
+    await expect(decoded(truncated)).rejects.toThrow(/cut\.zst: malformed or truncated zstd data/u)
+  })
+
+  it('has one frame walker, the streaming one the import reads with (no whole-buffer decoder beside it)', () => {
+    expect(Object.keys(zstd).sort()).toEqual(['decodeZstdHead', 'zstdAvailable', 'zstdChunks'])
   })
 })

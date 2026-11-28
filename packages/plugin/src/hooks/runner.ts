@@ -16,10 +16,13 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandHandler, HttpHandler, McpToolHandler, ModelHandler } from './config.js'
+import type { McpToolCall, McpToolVerdict } from '../forge/contract.js'
 import type { RawRun } from './output.js'
 import type { ForeignShell } from './shell.js'
 import type { HookDialect } from './vocabulary.js'
 import { dshService } from '../dsh/host.js'
+import { CATALOG_CALL_TOOL } from '../mcp/catalog.js'
+import { publicToolName } from '../mcp/policy.js'
 import { startActivation, type Activation } from '../dsh/subagents.js'
 import { messageOf } from '../shared/util.js'
 
@@ -69,7 +72,16 @@ export class HandlerRunner {
    * @param settingsEnv - the `env` of the harness settings in effect for the
    *   event's agent, under the hook-specific variables.
    */
-  constructor(private readonly ctx: Context, private readonly shell: ForeignShell, private readonly settingsEnv: (agent: unknown) => Readonly<Record<string, string>> = () => ({})) {}
+  /**
+   * @param toolPolicy - the MCP row's tool policy (`McpApi.toolPolicy`), which an `mcp_tool` hook's call obeys as a
+   *   model's call does; without the row no MCP tool is mounted, so nothing needs it.
+   */
+  constructor(
+    private readonly ctx: Context,
+    private readonly shell: ForeignShell,
+    private readonly settingsEnv: (agent: unknown) => Readonly<Record<string, string>> = () => ({}),
+    private readonly toolPolicy: (call: McpToolCall) => McpToolVerdict | undefined = () => undefined,
+  ) {}
 
   /** The environment every command handler of a source receives. */
   environment(places: HandlerPlaces, kind: 'bash' | 'powershell' | 'exec', agent?: unknown): Record<string, string | undefined> {
@@ -151,25 +163,43 @@ export class HandlerRunner {
   }
 
   /**
-   * Run an MCP tool handler.
-   * @param toolName - the DSH tool name of `server`/`tool`.
+   * Run an MCP tool handler: the tool the MCP row mounted directly
+   * (`mcp__<server>__<tool>`) or, for a server the capability catalog serves,
+   * the catalog's `capability_call` with the entry `mcp:<server>/<tool>`.
+   * Codex runs such a hook on an already-connected server only, so a server
+   * that is neither is reported as not connected.
+   * @param serverName - the server as registered (`McpApi.hookServer`); undefined when neither the hook's plugin nor
+   *   the user's configuration has a mounted server of the name it gives.
    */
-  async mcpTool(handler: McpToolHandler, request: HandlerRequest, toolName: string): Promise<HandlerOutcome> {
+  async mcpTool(handler: McpToolHandler, request: HandlerRequest, serverName: string | undefined): Promise<HandlerOutcome> {
+    if (serverName === undefined) {
+      return { stdout: '', stderr: '', durationMs: 0, failure: { kind: 'transport', message: `MCP server "${handler.server}" is not a connected server of this plugin or of the user's configuration` } }
+    }
     const started = performance.now()
     const elapsed = (): number => Math.round(performance.now() - started)
     const tools = dshService(this.ctx, 'tools') as {
       get(name: string): { execute(args: unknown, exec: unknown): Promise<unknown>; output: { render(args: unknown, value: unknown): Array<{ type: string; text?: string }> } } | undefined
     } | undefined
-    const definition = tools?.get(toolName)
-    if (definition === undefined) return { stdout: '', stderr: '', durationMs: 0, failure: { kind: 'transport', message: `MCP tool ${toolName} is not connected` } }
+    const direct = publicToolName(serverName, handler.tool)
+    const viaCatalog = tools?.get(direct) === undefined ? tools?.get(CATALOG_CALL_TOOL) : undefined
+    const toolName = viaCatalog === undefined ? direct : CATALOG_CALL_TOOL
+    const definition = viaCatalog ?? tools?.get(direct)
+    if (definition === undefined) return { stdout: '', stderr: '', durationMs: 0, failure: { kind: 'transport', message: `MCP tool ${direct} is not connected` } }
     const input = fillTemplate(handler.input ?? {}, request.payload)
+    const args = viaCatalog === undefined ? input : { id: `mcp:${serverName}/${handler.tool}`, arguments: input }
+    // The server's own filters hold for a hook as for the model: Codex runs hooks only on "policy-allowed tools", and a
+    // filtered tool is not registered there, so here it is not available. Codex invokes them "without model-tool
+    // approval" (openai/codex#39296; https://developers.openai.com/codex/hooks, "MCP tool hooks": they "don't request
+    // tool approval"), the hook itself having passed the trust review, so an approval mode does not stop it.
+    const verdict = this.toolPolicy({ name: toolName, arguments: args, agent: request.agent })
+    if (verdict?.kind === 'deny') return { stdout: '', stderr: '', durationMs: elapsed(), failure: { kind: 'transport', message: `MCP tool ${direct} is not available: ${verdict.reason}` } }
     const signal = request.timeoutMs === undefined ? request.signal : AbortSignal.any([request.signal, AbortSignal.timeout(request.timeoutMs)])
     try {
-      const value = await definition.execute(input, { name: toolName, arguments: input, callId: `hook-${Date.now().toString(36)}`, signal, agent: request.agent })
-      const text = definition.output.render(input, value).map(block => block.text ?? '').join('')
+      const value = await definition.execute(args, { name: toolName, arguments: args, callId: `hook-${Date.now().toString(36)}`, signal, agent: request.agent })
+      const text = definition.output.render(args, value).map(block => block.text ?? '').join('')
       const isError = typeof value === 'object' && value !== null && (value as { isError?: unknown }).isError === true
       return isError
-        ? { stdout: '', stderr: text, durationMs: elapsed(), failure: { kind: 'transport', message: `MCP tool ${toolName} returned an error: ${text.slice(0, 300)}` } }
+        ? { stdout: '', stderr: text, durationMs: elapsed(), failure: { kind: 'transport', message: `MCP tool ${direct} returned an error: ${text.slice(0, 300)}` } }
         : { exitCode: 0, stdout: text, stderr: '', durationMs: elapsed() }
     } catch (error: unknown) {
       if (request.signal.aborted) return { stdout: '', stderr: '', durationMs: elapsed(), failure: { kind: 'cancelled', message: 'cancelled' } }
@@ -268,11 +298,13 @@ function promptText(prompt: string, payload: Readonly<Record<string, unknown>>):
   return used ? text : `${text}\n\n${json}`
 }
 
-function parseVerdict(text: string): ModelVerdict {
-  const match = /\{[\s\S]*\}/u.exec(text)
-  if (match !== null) {
+/** The hook model's `{"ok": …}` answer: the text from its first `{` to its last `}`. */
+export function parseVerdict(text: string): ModelVerdict {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start !== -1 && end > start) {
     try {
-      const value = JSON.parse(match[0]) as Record<string, unknown>
+      const value = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>
       if (typeof value['ok'] === 'boolean') {
         return {
           ok: value['ok'],

@@ -6,8 +6,10 @@
  */
 import type { FSWatcher } from 'node:fs'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { McpToolCall, McpToolVerdict } from '../../forge/contract.js'
 import type { HookHandler, HookTable } from '../config.js'
 import type { Decoded } from '../output.js'
+import type { PermissionRuleSet } from '../permissions.js'
 import type { ModelVerdict } from '../runner.js'
 import type { ForeignShell } from '../shell.js'
 import type { HookDialect } from '../vocabulary.js'
@@ -59,7 +61,7 @@ export interface HookBrokerHost {
   /** Environment imported settings declare for a session, set for every hook process. */
   environment?(session?: { readonly id: string; readonly parentSession?: string }): Readonly<Record<string, string>>
   /** Imported Claude-syntax permission rules that gate a session's tool calls. */
-  permissionRules?(session?: { readonly id: string; readonly parentSession?: string }): { readonly allow: readonly string[]; readonly deny: readonly string[]; readonly ask: readonly string[] }
+  permissionRules?(session?: { readonly id: string; readonly parentSession?: string }): PermissionRuleSet
   /** True while the settings in effect say `disableAllHooks: true`. */
   hooksDisabled?(session?: { readonly id: string; readonly parentSession?: string }): boolean
   /** Load a new top-level session's project assets (its hooks among them) before SessionStart. */
@@ -73,6 +75,10 @@ export interface HookBrokerHost {
   check?(exec: unknown, verdict: ToolVerdict): Promise<ToolVerdict>
   /** Whether any mod hooks `tool.check` in the call's session. */
   checks?(exec: unknown): boolean
+  /** The registered server an `mcp_tool` hook of a plugin names (see `McpApi.hookServer`). */
+  mcpHookServer?(pluginId: string, server: string, sessionId?: string): string | undefined
+  /** The MCP row's tool policy for a call an `mcp_tool` hook makes (see `McpApi.toolPolicy`). */
+  mcpToolPolicy?(call: McpToolCall): McpToolVerdict | undefined
 }
 
 /** A permission verdict as Claude Code's `tool.check` carries it. */

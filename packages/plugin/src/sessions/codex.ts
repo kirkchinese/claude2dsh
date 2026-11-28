@@ -5,9 +5,9 @@
  * the shared session synthesizer emits DSH v4 events.
  * @module @kirkchinese/harness-forge
  */
-import { readdir } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   NormalizedContentBlock,
@@ -16,24 +16,15 @@ import type {
   NormalizedToolResult,
   NormalizedTurn,
 } from '@kirkchinese/harness-forge-core'
-import { synthesizeDshSession } from '@kirkchinese/harness-forge-core'
-import { decodeZstd, zstdAvailable } from './zstd.js'
-import { persistImported, type PersistedSession } from './persist.js'
+import { assertFileImportable, fileLines, limitBytes, MAX_LINE_BYTES, splitLines, type LineObserver, type TranscriptLine } from '@kirkchinese/harness-forge-core'
+import { zstdChunks } from './zstd.js'
+import { stringField, textOf, timestamp, usablePrompt } from './codex-text.js'
+import { codexHomeOf, codexIdentity, codexSessionId, CodexTitle, rolloutCreatedAt, rolloutThread, threadNames, type IndexedThread, type RolloutThread } from './codex-meta.js'
+import { importReport, persistImported, targetIdentity, type ImportIdentity, type ImportReport } from './persist.js'
+import { replyText, turnReader, turnText, type TurnReader, type TurnText } from './turns.js'
+import { codexThreads } from './codex-discover.js'
 
-export interface CodexSessionCandidate {
-  readonly path: string
-  readonly sourceId: string
-  readonly title?: string
-  readonly cwd?: string
-  readonly createdAt?: number
-}
-export interface CodexImportReport extends PersistedSession {
-  readonly sourcePath: string
-  readonly title?: string
-  readonly turns: number
-  readonly events: number
-  readonly stats: Record<string, number>
-}
+export type CodexImportReport = ImportReport
 interface CodexRecord {
   timestamp?: string
   type?: string
@@ -57,46 +48,81 @@ interface MutableTurn {
   steps: MutableStep[]
 }
 
+export { discoverCodexSessions, type CodexSessionCandidate } from './codex-discover.js'
+export { codexSessionId } from './codex-meta.js'
+
 /** Default Codex rollout directory. */
 export function defaultCodexSessionsRoot(home = homedir()): string {
   return join(home, '.codex', 'sessions')
 }
 
-/** Discover `rollout-*.jsonl` and compressed `rollout-*.jsonl.zst` (Codex 0.167+) files, newest first. */
-export async function discoverCodexSessions(root = defaultCodexSessionsRoot(), limit = 200): Promise<CodexSessionCandidate[]> {
-  const files = await listRollouts(root)
-  const out: CodexSessionCandidate[] = []
-  for (const path of files) {
-    const meta = await readMeta(path)
-    if (meta === undefined) continue
-    out.push(meta)
-    if (out.length >= limit) break
-  }
-  out.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-  return out
+/** One Codex rollout in the shared normalized model, with the thread it holds. */
+export interface CodexRollout {
+  /** The session, under the id this version gives the thread (or `targetId`). */
+  readonly session: NormalizedSession
+  readonly title?: string
+  readonly thread: RolloutThread
+}
+
+/** What a rollout says besides its turns, known once it is read to the end. */
+interface RolloutEnd {
+  readonly meta: Record<string, unknown> | undefined
+  readonly firstTimestamp: unknown
+  readonly title: CodexTitle | undefined
 }
 
 /** Parse one Codex rollout into the shared normalized model. */
-export async function readCodexSession(path: string, targetId?: string): Promise<{ session: NormalizedSession; title?: string; legacyId: string }> {
-  const records = await readRecords(path)
-  const meta = records.find(record => record.type === 'session_meta')?.payload
-  if (meta === undefined) throw new Error(`Codex rollout has no session_meta: ${path}`)
-  const sourceId = stringField(meta['session_id']) ?? stringField(meta['id'])
-  if (sourceId === undefined) throw new Error(`Codex rollout has no session id: ${path}`)
-  const id = targetId ?? codexSessionId(sourceId)
-  const createdAt = timestamp(meta['timestamp']) ?? timestamp(records[0]?.timestamp) ?? 0
-  const cwd = stringField(meta['cwd'])
+export async function readCodexSession(path: string, targetId?: string): Promise<CodexRollout> {
   const turns: MutableTurn[] = []
+  const parts = rolloutTurns(path)
+  let next = await parts.next()
+  for (; next.done !== true; next = await parts.next()) turns.push(next.value)
+  const { meta, firstTimestamp, title } = next.value
+  if (meta === undefined) throw new Error(`Codex rollout has no session_meta: ${path}`)
+  const thread = rolloutThread(meta)
+  if (thread === undefined) throw new Error(`Codex rollout has no session id: ${path}`)
+  const id = targetId ?? codexSessionId(thread.id)
+  const createdAt = rolloutCreatedAt(meta, firstTimestamp)
+  const cwd = stringField(meta['cwd'])
+  const named = title?.title
+  return {
+    session: {
+      id,
+      source: { tool: 'codex', path, sessionId: id },
+      createdAt,
+      ...(cwd !== undefined ? { cwd } : {}),
+      ...(named !== undefined ? { title: named } : {}),
+      turns: turns as unknown as readonly NormalizedTurn[],
+    },
+    ...(named !== undefined ? { title: named } : {}),
+    thread,
+  }
+}
+
+/**
+ * The turns of a rollout, each as soon as the next one starts (what is said in a turn is then complete; a tool
+ * result may still reach one of its steps), and then what else the rollout says. Read only as far as it is asked.
+ */
+async function* rolloutTurns(path: string): AsyncGenerator<MutableTurn, RolloutEnd> {
+  /** Turns the record just read completed, to hand out before the next one is read. */
+  const closed: MutableTurn[] = []
+  let count = 0
+  let meta: Record<string, unknown> | undefined
+  let firstTimestamp: unknown
+  let seen = false
+  /** The first thing the person said, when no `user_message` event carries it (used only if no turn starts). */
+  let fallback: string | undefined
   let turn: MutableTurn | undefined
   let step: MutableStep | undefined
   const pending = new Map<string, PendingCall>()
-  let title: string | undefined
+  let title: CodexTitle | undefined
+  const names = threadNames(codexHomeOf(path))
 
   const startTurn = (prompt: string, at?: number): void => {
-    turn = { number: turns.length + 1, prompt, ...(at !== undefined ? { timestamp: at } : {}), steps: [] }
-    turns.push(turn)
+    if (turn !== undefined) closed.push(turn)
+    count += 1
+    turn = { number: count, prompt, ...(at !== undefined ? { timestamp: at } : {}), steps: [] }
     step = undefined
-    if (title === undefined && prompt.trim().length > 0) title = prompt.trim().slice(0, 80)
   }
   const ensureTurn = (): MutableTurn => {
     if (turn === undefined) startTurn('')
@@ -116,9 +142,26 @@ export async function readCodexSession(path: string, targetId?: string): Promise
     return ensureStep(at)
   }
 
-  for (const record of records) {
+  // One record at a time: a rollout is not held, and what a continued session cannot use (reasoning blobs, image
+  // data, token counts) is read past and gone as soon as its line is.
+  for await (const record of readRecords(path)) {
+    yield* closed.splice(0)
+    if (!seen) {
+      seen = true
+      firstTimestamp = record.timestamp
+    }
     const payload = record.payload
     if (payload === undefined) continue
+    if (record.type === 'session_meta' && meta === undefined) {
+      meta = payload
+      const thread = rolloutThread(payload)
+      title = new CodexTitle(thread === undefined ? undefined : (await names).get(thread.id))
+    }
+    title?.observe(record as Record<string, unknown>)
+    if (fallback === undefined && record.type === 'response_item' && payload['type'] === 'message' && payload['role'] === 'user') {
+      const text = textOf(payload['content'])
+      if (text.trim().length > 0 && !text.trimStart().startsWith('<')) fallback = text
+    }
     const at = timestamp(record.timestamp) ?? timestamp(payload['timestamp'])
     if (record.type === 'event_msg' && payload['type'] === 'user_message') {
       const prompt = stringField(payload['message'])
@@ -171,37 +214,17 @@ export async function readCodexSession(path: string, targetId?: string): Promise
       pending.delete(callId)
     }
   }
-  if (turns.length === 0) {
-    const fallback = records
-      .filter(record => record.type === 'response_item' && record.payload?.['type'] === 'message' && record.payload['role'] === 'user')
-      .map(record => textOf(record.payload?.['content']))
-      .find(text => text.trim().length > 0 && !text.trimStart().startsWith('<'))
-    if (fallback !== undefined) startTurn(fallback)
-  }
-  return {
-    session: {
-      id,
-      source: { tool: 'codex', path, sessionId: id },
-      createdAt,
-      ...(cwd !== undefined ? { cwd } : {}),
-      ...(title !== undefined ? { title } : {}),
-      turns: turns as unknown as readonly NormalizedTurn[],
-    },
-    ...(title !== undefined ? { title } : {}),
-    legacyId: sourceId,
-  }
+  if (count === 0 && fallback !== undefined) startTurn(fallback)
+  yield* closed.splice(0)
+  if (turn !== undefined) yield turn
+  return { meta, firstTimestamp, title }
 }
 
 /**
- * The DSH id of an imported Codex session. Prefixed, so it never equals the Codex id: a session under the source's
- * own id reads as native to other importers (dsh-chat-import hides those sources). Imports by earlier versions used
- * the bare id; they are still found and reused.
+ * Import one Codex rollout into DSH session persistence: into the session that already holds its thread, else a new
+ * one. A stored session that may or may not hold it (nothing tells) is not guessed at: the import is refused, and
+ * the list offers both. `targetId` imports into that session, the way "Import as new" does.
  */
-export function codexSessionId(sourceId: string): string {
-  return `codex-${sourceId}`
-}
-
-/** Import one Codex rollout into DSH session persistence. */
 export async function importCodexSession(
   ctx: Context,
   sourcePath: string,
@@ -209,81 +232,65 @@ export async function importCodexSession(
 ): Promise<CodexImportReport> {
   const parsed = await readCodexSession(sourcePath, options.targetId)
   if (parsed.session.turns.length === 0) throw new Error(`nothing to import from ${sourcePath}: no conversation in the rollout`)
-  const synthesized = synthesizeDshSession(parsed.session)
-  const events = synthesized.events
-  const persisted = await persistImported(ctx, synthesized, options.targetId === undefined ? [parsed.legacyId] : [])
-  return {
-    ...persisted,
-    sourcePath,
-    ...(parsed.title !== undefined ? { title: parsed.title } : {}),
-    turns: synthesized.stats.turns,
-    events: events.length,
-    stats: {
-      steps: synthesized.stats.steps,
-      messages: synthesized.stats.messages,
-      toolCalls: synthesized.stats.toolCalls,
-      toolResults: synthesized.stats.toolResults,
-      synthesizedToolResults: synthesized.stats.synthesizedToolResults,
-    },
-  }
+  const identity = options.targetId !== undefined
+    ? targetIdentity(options.targetId)
+    : rolloutIdentity(sourcePath, parsed.thread, parsed.session.createdAt, { session: parsed.session })
+  return importReport(sourcePath, parsed.title, await persistImported(ctx, parsed.session, identity))
 }
 
-async function listRollouts(root: string): Promise<string[]> {
-  const out: string[] = []
-  const walk = async (dir: string): Promise<void> => {
-    let entries
+/** What the list and the import know already, so neither reads it again. */
+export interface KnownRollout {
+  /** The threads under a sessions folder ({@link codexThreads}), shared by the rows of one list. */
+  readonly threads?: (root: string) => Promise<readonly IndexedThread[]>
+  /** The rollout, read. */
+  readonly session?: NormalizedSession
+}
+
+/** The identity of the thread a rollout holds: the one the list shows and the import uses. */
+export function rolloutIdentity(path: string, thread: RolloutThread, createdAt: number, known: KnownRollout = {}): ImportIdentity {
+  const home = codexHomeOf(path)
+  const root = home !== undefined ? join(home, 'sessions') : dirname(path)
+  const session = known.session
+  return codexIdentity(thread, createdAt, {
+    threads: () => (known.threads ?? codexThreads)(root),
+    turns: () => session !== undefined ? turnReader(sessionTurns(session.turns as unknown as readonly MutableTurn[])) : rolloutTurnReader(path),
+    turnsOf: rolloutTurnReader,
+  })
+}
+
+/** A reader of a rollout's turns: the rollout is read as far as the turns asked for. */
+function rolloutTurnReader(path: string): TurnReader {
+  return turnReader(sessionTurns(rolloutTurns(path)))
+}
+
+/** Turns as compared ({@link turnText}): the same for a rollout being read and one already read. */
+async function* sessionTurns(turns: AsyncIterable<MutableTurn> | Iterable<MutableTurn>): AsyncGenerator<TurnText> {
+  for await (const turn of turns) yield turnText(turn.prompt, turn.steps.flatMap(step => replyText(step.content)))
+}
+
+/**
+ * The lines of a rollout, plain or compressed, streamed: what the import reads. The size is checked before the file
+ * is read (a compressed one, as its decoded bytes stream by), so a rollout that is too large costs nothing.
+ * `observer` sees how much the line splitter holds at once.
+ */
+export async function* rolloutLines(path: string, observer?: LineObserver): AsyncGenerator<TranscriptLine> {
+  await assertFileImportable(path)
+  yield* path.endsWith('.zst')
+    ? splitLines(limitBytes(zstdChunks(path)), MAX_LINE_BYTES, observer)
+    : fileLines(path, observer !== undefined ? { observer } : {})
+}
+
+/** The records of a rollout, one at a time. */
+async function* readRecords(path: string): AsyncGenerator<CodexRecord> {
+  for await (const line of rolloutLines(path)) {
+    if (line.oversized || line.text.trim().length === 0) continue
     try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      const path = join(dir, entry.name)
-      if (entry.isDirectory()) await walk(path)
-      else if (entry.isFile() && /^rollout-.*\.jsonl(?:\.zst)?$/u.test(entry.name)) out.push(path)
-    }
-  }
-  await walk(root)
-  // A rollout Codex compressed while the plain file is still there is the same session once.
-  const plain = new Set(out.filter(path => !path.endsWith('.zst')))
-  return out.filter(path => !path.endsWith('.zst') || (zstdAvailable() && !plain.has(path.slice(0, -'.zst'.length))))
-}
-
-async function readMeta(path: string): Promise<CodexSessionCandidate | undefined> {
-  const records = await readRecords(path).catch(() => [])
-  const meta = records.find(record => record.type === 'session_meta')?.payload
-  if (meta === undefined) return undefined
-  const sourceId = stringField(meta['session_id']) ?? stringField(meta['id'])
-  if (sourceId === undefined) return undefined
-  const cwd = stringField(meta['cwd'])
-  const createdAt = timestamp(meta['timestamp']) ?? timestamp(records[0]?.timestamp)
-  const firstPrompt = records
-    .find(record => record.type === 'event_msg' && record.payload?.['type'] === 'user_message')
-    ?.payload?.['message']
-  const title = typeof firstPrompt === 'string' && firstPrompt.trim().length > 0 ? firstPrompt.trim().slice(0, 80) : undefined
-  return {
-    path,
-    sourceId,
-    ...(title !== undefined ? { title } : {}),
-    ...(cwd !== undefined ? { cwd } : {}),
-    ...(createdAt !== undefined ? { createdAt } : {}),
-  }
-}
-
-async function readRecords(path: string): Promise<CodexRecord[]> {
-  const { readFile } = await import('node:fs/promises')
-  const text = path.endsWith('.zst') ? decodeZstd(await readFile(path), path) : await readFile(path, 'utf8')
-  const records: CodexRecord[] = []
-  for (const line of text.split(/\r?\n/u)) {
-    if (line.trim().length === 0) continue
-    try {
-      const value: unknown = JSON.parse(line)
-      if (typeof value === 'object' && value !== null) records.push(value as CodexRecord)
+      const value: unknown = JSON.parse(line.text)
+      if (typeof value === 'object' && value !== null) yield value as CodexRecord
     } catch {
       // A partially written rollout line is ignored; the rest remains readable.
     }
   }
-  return records
 }
 
 /**
@@ -306,30 +313,7 @@ function outputText(value: unknown): string {
   return text
 }
 
-function usablePrompt(text: string): boolean {
-  const value = text.trim()
-  if (value.length === 0) return false
-  if (value.startsWith('<') || value.startsWith('# AGENTS.md')) return false
-  return !(
-    value.includes('<environment_context>')
-    || value.includes('<skills_instructions>')
-    || value.includes('<permissions instructions>')
-    || value.includes('<user_instructions>')
-  )
-}
 
-function textOf(value: unknown): string {  if (typeof value === 'string') return value
-  if (!Array.isArray(value)) return ''
-  return value
-    .map((item) => {
-      if (typeof item === 'string') return item
-      if (typeof item !== 'object' || item === null) return ''
-      const record = item as Record<string, unknown>
-      return typeof record['text'] === 'string' ? record['text'] : ''
-    })
-    .filter(Boolean)
-    .join('\n')
-}
 
 function parseJson(value: string | undefined): unknown {
   if (value === undefined) return undefined
@@ -340,14 +324,4 @@ function parseJson(value: string | undefined): unknown {
   }
 }
 
-function stringField(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined
-}
 
-function timestamp(value: unknown): number | undefined {
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return undefined
-}

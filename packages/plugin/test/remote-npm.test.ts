@@ -168,6 +168,19 @@ describe('npm packages', { timeout: 180_000 }, () => {
     expect(readdirSync(join(root, 'data', 'remote', 'staging'))).toEqual([])
   })
 
+  it('asks npm for an auditable lockfile whatever the person\'s npm configuration says', async () => {
+    const { forge } = forgeIn()
+    // A person's npmrc asking for version 1, which has no packages map to audit.
+    process.env['npm_config_lockfile_version'] = '1'
+    await forge.start()
+    const plan = await forge.remote.prepare('top')
+    await expect(forge.remote.install(plan.token)).rejects.toThrow(/dependency gitdep would come from git\+file:.*registry only/u)
+    for (const args of npmCalls) expect(args).toContain('--lockfile-version=3')
+    expect(npmCalls.map(args => args[0])).toEqual(['install'])
+    expect(forge.list()).toHaveLength(0)
+    expect(ran()).toEqual([])
+  })
+
   it('installs an exact version or a tag, not a range', async () => {
     const { forge } = forgeIn()
     await forge.start()

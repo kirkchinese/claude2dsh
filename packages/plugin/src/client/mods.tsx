@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { call, stream } from './typert.js'
+import type { TFn } from './shared.js'
 
 /** A node as the Host serialized it. */
 type ModNode = string | ModElement
@@ -403,9 +404,10 @@ interface ModsDockProps {
   readonly sessionId: string
   readonly useSurfaces: <T>(select: (snapshot: SurfaceSnapshot | undefined) => T) => T
   readonly store: SurfaceStore
+  readonly t: TFn
 }
 
-function ModsDock({ sessionId, useSurfaces, store }: ModsDockProps): ReactNode {
+function ModsDock({ sessionId, useSurfaces, store, t }: ModsDockProps): ReactNode {
   ensureStyles()
   const snapshot = useSurfaces(value => value)
   const [busy, setBusy] = useState<string | undefined>(undefined)
@@ -447,7 +449,7 @@ function ModsDock({ sessionId, useSurfaces, store }: ModsDockProps): ReactNode {
           <header className="hf-mods-pane-head">
             <span className="hf-mods-pane-title">{pane.title}</span>
             <span className="hf-mods-pane-plugin">{pane.plugin}</span>
-            <button type="button" className="hf-mods-icon" aria-label={folded.has(pane.id) ? 'expand' : 'collapse'} onClick={() => {
+            <button type="button" className="hf-mods-icon" aria-label={t(folded.has(pane.id) ? 'modExpand' : 'modCollapse')} onClick={() => {
               setFolded((current) => {
                 const next = new Set(current)
                 if (next.has(pane.id)) next.delete(pane.id)
@@ -455,7 +457,7 @@ function ModsDock({ sessionId, useSurfaces, store }: ModsDockProps): ReactNode {
                 return next
               })
             }}>{folded.has(pane.id) ? '▸' : '▾'}</button>
-            <button type="button" className="hf-mods-icon" aria-label="close" onClick={() => { close(pane.id) }}>×</button>
+            <button type="button" className="hf-mods-icon" aria-label={t('modClose')} onClick={() => { close(pane.id) }}>×</button>
           </header>
           {folded.has(pane.id) ? null : (
             <PaneBody onScroll={(by, offset, bodyRows, contentRows) => { moved('scroll', { pane: pane.id, by, offset, bodyRows, contentRows }) }}>
@@ -502,7 +504,7 @@ function PaneBody({ children, onScroll }: { children: ReactNode; onScroll: (by: 
 }
 
 /** Register the dock entry that draws a session's mods. */
-export function registerModsDock(ctx: ClientContext): void {
+export function registerModsDock(ctx: ClientContext, t: TFn): void {
   const stores = new Map<string, SurfaceStore>()
   ctx.effect(() => () => {
     for (const store of stores.values()) store.dispose()
@@ -525,5 +527,5 @@ export function registerModsDock(ctx: ClientContext): void {
       const store = storeOf(sessionId)
       return { sessionId, store, hooks: { surfaces: store } }
     },
-  }, ModsDock as never))
+  }, ((props: Omit<ModsDockProps, 't'>) => <ModsDock {...props} t={t} />) as never))
 }

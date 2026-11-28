@@ -199,7 +199,7 @@ export function startSkills(ctx: Context, forge: HarnessForge, config: Config): 
     mount: async ({ component, plugin, dataDir }) => {
       if (component.kind !== 'skill') throw new HarnessError('component-failed', `action expects a skill: ${component.id}`)
       const projectRoot = projectRootOf(plugin)
-      const releaseSkill = provider.addSkill(component.bodyPath, { pluginRoot: plugin.root, pluginName: plugin.name, dataDir, scope: templateScope(plugin), ...(projectRoot !== undefined ? { projectRoot } : {}) })
+      const releaseSkill = provider.addSkill(component.bodyPath, { pluginRoot: plugin.root, pluginName: plugin.name, ...(plugin.displayName !== undefined ? { pluginVariant: plugin.name.slice(plugin.displayName.length + 1) } : {}), dataDir, scope: templateScope(plugin), ...(projectRoot !== undefined ? { projectRoot } : {}) })
       bodies.set(component.bodyPath, component.id)
       const hooks = component.frontmatter.raw['hooks']
       const name = component.frontmatter.name

@@ -21,7 +21,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "prepack": "pnpm run build",
+    "prepack": "pnpm run clean && pnpm run build",
     "clean": "node --eval \"import('node:fs/promises').then(({ rm }) => rm('lib', { force: true, recursive: true }))\""
   },
   "dependencies": {

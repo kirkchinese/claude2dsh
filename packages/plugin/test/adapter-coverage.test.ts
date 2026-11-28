@@ -43,18 +43,20 @@ describe('adapter coverage', () => {
     expect(adapterCoverage(profile)).toEqual([{ name: 'dsh-adapter-demo-x', ports: [{ plugin: 'demo', component: 'x' }], dir: realpathSync(source) }])
   })
 
-  it('counts only adapters DSH lists as installed and enabled, as harness_verify_port does', async () => {
+  it('counts only adapters DSH lists as installed, enabled and loaded without a fault, as harness_verify_port does', async () => {
     // A failed install_bundle rolls the profile's package.json back but leaves its node_modules link behind.
     const profile = join(root, 'stray', 'web')
-    const names = ['dsh-adapter-demo-enabled', 'dsh-adapter-demo-stray', 'dsh-adapter-demo-off', 'dsh-adapter-demo-broken']
+    const names = ['dsh-adapter-demo-enabled', 'dsh-adapter-demo-stray', 'dsh-adapter-demo-off', 'dsh-adapter-demo-broken', 'dsh-adapter-demo-faulted']
     for (const name of names) pkg(join(profile, 'node_modules', name), { name, harnessForge: { ports: [{ plugin: 'demo', component: name.slice('dsh-adapter-demo-'.length) }] } })
     const manager: PluginManagerLike = {
       listBundles: async () => [
         { name: 'dsh-adapter-demo-enabled', enabled: true, rows: [] },
         { name: 'dsh-adapter-demo-off', enabled: false, rows: [] },
         { name: 'dsh-adapter-demo-broken', enabled: true, error: { code: 'operation-error' }, rows: [] },
+        // Enabled and listed, but its plugin row failed to start.
+        { name: 'dsh-adapter-demo-faulted', enabled: true, rows: [{ rowId: 'main', entryId: 'faulted#main' }] },
       ],
-      listPlugins: async () => [],
+      listPlugins: async () => [{ entryId: 'faulted#main', enabled: true, fiberPhase: 'failed', diagnostic: 'Error: boom' }],
     }
     const onDisk = adapterCoverage(profile)
     expect(onDisk.map(item => item.name).sort()).toEqual([...names].sort())

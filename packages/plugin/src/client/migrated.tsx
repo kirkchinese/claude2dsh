@@ -6,7 +6,7 @@
  */
 import { useState } from 'react'
 import { call } from './typert.js'
-import { Chevron, fill, harnessName, isGap, itemName, kindLabel, messageOf, Notice, Reasons, ROW_TITLE, StateLabel, type Item, type Part, type TFn, type Workspace } from './shared.js'
+import { Chevron, fill, harnessName, isGap, itemName, kindLabel, messageOf, Notice, Reasons, ROW_TITLE, StateLabel, type Item, type Key, type Part, type TFn, type Workspace } from './shared.js'
 
 function PartRow({ item, part, t, onToggle, busy }: { item: Item; part: Part; t: TFn; onToggle: (item: Item, part: Part, enabled: boolean) => void; busy: boolean }): JSX.Element {
   const on = part.state !== 'off'
@@ -19,7 +19,7 @@ function PartRow({ item, part, t, onToggle, busy }: { item: Item; part: Part; t:
         role="switch"
         aria-checked={on}
         aria-label={fill(t('switchLabel'), { name: part.name })}
-        disabled={busy}
+        disabled={busy || item.detached !== undefined}
         onClick={() => { onToggle(item, part, !on) }}
       />}
       <div className="hf-part-main">
@@ -27,7 +27,7 @@ function PartRow({ item, part, t, onToggle, busy }: { item: Item; part: Part; t:
         <span className="hf-part-name">{part.name}</span>
         {part.state === 'off'
           ? <div className="hf-reason">{t('partOffByYou')}</div>
-          : part.state === 'inactive'
+          : part.state === 'inactive' && row !== undefined
             ? (
               <>
                 <div className="hf-reason">{fill(t('partInactiveRow'), { row: rowTitle ?? '' })}</div>
@@ -41,16 +41,46 @@ function PartRow({ item, part, t, onToggle, busy }: { item: Item; part: Part; t:
   )
 }
 
-function PluginRow({ item, t, onToggle, onRemove, busy }: {
+/** Why a migrated plugin's harness no longer runs it, by `Item.detached.reason`. */
+const DETACHED_TEXT: Record<NonNullable<Item['detached']>['reason'], Key> = {
+  uninstalled: 'detachedUninstalled',
+  'switched-off': 'detachedSwitchedOff',
+  'never-installed': 'detachedNeverInstalled',
+  misread: 'detachedMisread',
+}
+
+/** What a plugin whose harness no longer runs it says, with what the person can do: keep it as their own, or remove it. */
+function Detached({ item, t, onKeep, onRemove, busy }: { item: Item; t: TFn; onKeep: (item: Item) => void; onRemove: () => void; busy: boolean }): JSX.Element | null {
+  const detached = item.detached
+  if (detached === undefined) return null
+  return (
+    <div style={{ padding: '0 8px 10px 34px' }}>
+      <div className="hf-notice hf-notice-row" style={{ marginTop: 0 }} role="status">
+        <span>
+          {fill(t(DETACHED_TEXT[detached.reason]), { harness: harnessName(detached.harness) })}
+          {' '}{fill(t(detached.folderGone ? 'detachedFolderGone' : 'detachedChoose'), { harness: harnessName(detached.harness) })}
+        </span>
+        <span style={{ display: 'flex', gap: 8 }}>
+          {detached.folderGone ? null : <button className="hf-btn" disabled={busy} onClick={() => { onKeep(item) }}>{t('keep')}</button>}
+          <button className="hf-btn hf-btn-danger" disabled={busy} onClick={onRemove}>{t('remove')}</button>
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function PluginRow({ item, t, onToggle, onRemove, onKeep, busy }: {
   item: Item
   t: TFn
   onToggle: (item: Item, part: Part, enabled: boolean) => void
   onRemove: (item: Item) => void
+  onKeep: (item: Item) => void
   busy: boolean
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const attention = item.parts.filter(part => isGap(part) || part.state === 'inactive').length
+  const updated = item.updated
   return (
     <li className="hf-item" data-open={open}>
       <div className="hf-item-head">
@@ -59,18 +89,20 @@ function PluginRow({ item, t, onToggle, onRemove, busy }: {
           <span className="hf-item-main">
             <span className="hf-item-title">{itemName(item, t)}<span className="hf-tag">{harnessName(item.source)}</span></span>
             <span className="hf-item-desc">{item.version !== undefined ? `${item.version} · ` : ''}{item.root}</span>
+            {updated !== undefined ? <span className="hf-item-desc">{fill(t('updatedBy'), { harness: harnessName(updated.harness), from: updated.from ?? '?', to: updated.to ?? '?' })}</span> : null}
           </span>
         </button>
         <span className="hf-verdict-label" style={{ flex: 'none' }}>
-          <span className="hf-dot" style={{ background: attention === 0 ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-warn-primary)' }} />
-          {attention === 0 ? t('ready') : fill(t('attention'), { n: attention })}
+          <span className="hf-dot" style={{ background: attention === 0 && item.detached === undefined ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-warn-primary)' }} />
+          {item.detached !== undefined ? t('detachedLabel') : attention === 0 ? t('ready') : fill(t('attention'), { n: attention })}
         </span>
         <button className="hf-btn hf-btn-danger" disabled={busy} onClick={() => { setConfirming(true) }}>{t('remove')}</button>
       </div>
+      <Detached item={item} t={t} onKeep={onKeep} onRemove={() => { setConfirming(true) }} busy={busy} />
       {confirming ? (
         <div style={{ padding: '0 8px 10px 34px' }}>
           <div className="hf-notice hf-notice-row" style={{ marginTop: 0 }}>
-            <span>{fill(t('removeConfirm'), { name: itemName(item, t) })}</span>
+            <span>{fill(t(item.fetched === true ? 'removeConfirmFetched' : 'removeConfirm'), { name: itemName(item, t) })}</span>
             <span style={{ display: 'flex', gap: 8 }}>
               <button className="hf-btn" onClick={() => { setConfirming(false) }}>{t('cancel')}</button>
               <button className="hf-btn hf-btn-danger" disabled={busy} onClick={() => { setConfirming(false); onRemove(item) }}>{t('remove')}</button>
@@ -183,6 +215,13 @@ export function MigratedScreen({ t, items, signInWaiting, reload }: { t: TFn; it
     })
   }
 
+  const keep = (item: Item): void => {
+    void run(async () => {
+      await call('keepPlugin', { id: item.id })
+      return fill(t('kept'), { name: itemName(item, t) })
+    })
+  }
+
   const remove = (item: Item): void => {
     void run(async () => {
       await call('removePlugin', { id: item.id })
@@ -201,7 +240,7 @@ export function MigratedScreen({ t, items, signInWaiting, reload }: { t: TFn; it
         ? <div className="hf-empty">{t('migratedEmpty')}</div>
         : (
           <ul className="hf-list">
-            {items.map(item => <PluginRow key={item.id} item={item} t={t} onToggle={toggle} onRemove={remove} busy={busy} />)}
+            {items.map(item => <PluginRow key={item.id} item={item} t={t} onToggle={toggle} onRemove={remove} onKeep={keep} busy={busy} />)}
           </ul>
         )}
     </div>

@@ -7,18 +7,20 @@
  * and MCP servers without a plugin prefix, and so does DSH.
  *
  * Installed plugins come from `~/.claude/plugins/installed_plugins.json`,
- * the list Claude Code itself loads, with the enabled state from settings.
+ * the list Claude Code itself loads, with the enabled state from settings
+ * resolved in Claude Code's precedence.
  * @module @kirkchinese/harness-forge-core
  */
+import { readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { scanPlugin } from '../../manifest.js'
 import { childId, shortHash } from '../../naming.js'
 import { fingerprintPlugin } from '../../fingerprint.js'
-import { isDirectory, isFile, isPlainObject, readJsonObject, stringArrayField, stringField } from '../../paths.js'
+import { isDirectory, isFile, isPlainObject, LEADS_TO_SHARE, leadsToShare, readJsonObject, readJsonRecord, stringArrayField, stringField } from '../../paths.js'
 import type { ForeignComponent, ForeignPlugin, HookComponent, McpComponent, PermissionRules, SettingsComponent } from '../../types.js'
 
-/** One plugin Claude Code has installed. */
+/** One plugin Claude Code has installed, in one scope. */
 export interface InstalledClaudePlugin {
   /** `name@marketplace`. */
   readonly key: string
@@ -26,48 +28,168 @@ export interface InstalledClaudePlugin {
   readonly marketplace: string
   readonly root: string
   readonly version?: string
+  /** `user`, or `project` / `local` for an install that only one project's sessions load. */
   readonly scope: string
-  /** False when settings disable it (`enabledPlugins[key] === false`). */
+  /** The project a `project` or `local` install belongs to. */
+  readonly projectPath?: string
+  /** Whether Claude Code loads it where it applies: `enabledPlugins` resolved as Claude Code resolves it. */
   readonly enabled: boolean
   readonly gitCommitSha?: string
 }
 
-/** The plugins Claude Code loads, newest entry per plugin, existing roots only. */
-export function installedClaudePlugins(home = homedir()): InstalledClaudePlugin[] {
-  const index = readJsonObject(join(home, '.claude', 'plugins', 'installed_plugins.json'))
-  const plugins = isPlainObject(index?.['plugins']) ? index['plugins'] : {}
-  const enabled = enabledPlugins(home)
-  const out: InstalledClaudePlugin[] = []
-  for (const [key, entries] of Object.entries(plugins)) {
-    if (!Array.isArray(entries)) continue
-    const records = entries.filter(isPlainObject)
-    const latest = records
-      .filter(record => typeof record['installPath'] === 'string' && isDirectory(String(record['installPath'])))
-      .sort((a, b) => String(b['lastUpdated'] ?? b['installedAt'] ?? '').localeCompare(String(a['lastUpdated'] ?? a['installedAt'] ?? '')))[0]
-    if (latest === undefined) continue
-    const [name = key, marketplace = ''] = key.split('@')
-    const version = stringField(latest, 'version')
-    const sha = stringField(latest, 'gitCommitSha')
-    out.push({
-      key,
-      name,
-      marketplace,
-      root: resolve(String(latest['installPath'])),
-      ...(version !== undefined ? { version } : {}),
-      scope: stringField(latest, 'scope') ?? 'user',
-      enabled: enabled[key] !== false,
-      ...(sha !== undefined ? { gitCommitSha: sha } : {}),
-    })
-  }
-  return out.sort((a, b) => a.key.localeCompare(b.key, 'en'))
+/**
+ * The install scopes that bind a plugin to one project: Claude Code installs with `--scope project` or
+ * `--scope local` record the project they were run in, and only that project's sessions load them
+ * (https://code.claude.com/docs/en/plugins/loading#find-where-a-plugin-is-enabled).
+ */
+const PROJECT_SCOPES: ReadonlySet<string> = new Set(['project', 'local'])
+
+/** Whether an install applies to every session (user scope), rather than to one project's. */
+export function isGlobalClaudeInstall(plugin: Pick<InstalledClaudePlugin, 'scope' | 'projectPath'>): boolean {
+  return !PROJECT_SCOPES.has(plugin.scope) && plugin.projectPath === undefined
 }
 
-/** `enabledPlugins` from user settings. */
-function enabledPlugins(home: string): Record<string, boolean> {
-  const settings = readJsonObject(join(home, '.claude', 'settings.json'))
+/** What Claude Code records as installed, and how much of that could be read. */
+export interface ClaudeInstalls {
+  readonly plugins: readonly InstalledClaudePlugin[]
+  /** Installs recorded with no install folder left on disk: still installed, not readable now. */
+  readonly unresolved: ReadonlyArray<Pick<InstalledClaudePlugin, 'key' | 'scope' | 'projectPath'> & { readonly message: string }>
+  /** What could not be read: `installed_plugins.json`, an entry of it, or a settings file that decides what is on. */
+  readonly unread: readonly string[]
+}
+
+/**
+ * The plugins Claude Code has installed, from `installed_plugins.json` (which records each install with its
+ * `scope`, `installPath` and `version`, https://code.claude.com/docs/en/plugins/loading#check-which-stage-a-plugin-reached):
+ * the newest existing install per plugin and scope (and project, for a project-bound scope). A user-scope
+ * install never gives way to a newer one of another project. A missing index records nothing; one that does not
+ * parse (Claude Code may be writing it) is `unread`, never "nothing installed".
+ * @param managedDir - the system directory of Claude Code's managed settings (see {@link claudeManagedSettingsDir}).
+ */
+export function installedClaudePlugins(home = homedir(), managedDir = claudeManagedSettingsDir()): ClaudeInstalls {
+  const unread: string[] = []
+  const settingsOf = (path: string): Record<string, boolean> => {
+    const read = readJsonRecord(path)
+    if (read.problem !== undefined) unread.push(read.problem)
+    return enabledPluginsOf(read.value)
+  }
+  const indexPath = join(home, '.claude', 'plugins', 'installed_plugins.json')
+  const index = readJsonRecord(indexPath)
+  if (index.problem !== undefined) unread.push(index.problem)
+  const listed = index.value?.['plugins']
+  if (listed !== undefined && !isPlainObject(listed)) unread.push(`${indexPath}: "plugins" is not an object`)
+  const plugins = isPlainObject(listed) ? listed : {}
+  const managed = managedEnabledPlugins(managedDir, unread)
+  const user = settingsOf(join(home, '.claude', 'settings.json'))
+  const out: InstalledClaudePlugin[] = []
+  const unresolved: Array<Pick<InstalledClaudePlugin, 'key' | 'scope' | 'projectPath'> & { message: string }> = []
+  for (const [key, entries] of Object.entries(plugins)) {
+    if (!Array.isArray(entries)) {
+      unread.push(`${indexPath}: the entry of ${key} is not a list`)
+      continue
+    }
+    const newest = new Map<string, Record<string, unknown>>()
+    const missing = new Map<string, { scope: string; projectPath?: string; path: string }>()
+    for (const record of entries) {
+      if (!isPlainObject(record) || typeof record['installPath'] !== 'string') {
+        unread.push(`${indexPath}: an install of ${key} has no install folder`)
+        continue
+      }
+      const scope = stringField(record, 'scope') ?? 'user'
+      const project = PROJECT_SCOPES.has(scope) ? stringField(record, 'projectPath') : undefined
+      const group = `${scope}\0${project === undefined ? '' : resolve(project)}`
+      if (!isDirectory(record['installPath'])) {
+        missing.set(group, { scope, ...(project !== undefined ? { projectPath: resolve(project) } : {}), path: record['installPath'] })
+        continue
+      }
+      const known = newest.get(group)
+      if (known === undefined || updatedAt(record).localeCompare(updatedAt(known)) > 0) newest.set(group, record)
+    }
+    for (const [group, gone] of missing) {
+      if (!newest.has(group)) unresolved.push({ key, scope: gone.scope, ...(gone.projectPath !== undefined ? { projectPath: gone.projectPath } : {}), message: `Claude Code records ${key} at ${gone.path}, which is not there` })
+    }
+    const [name = key, marketplace = ''] = key.split('@')
+    for (const record of newest.values()) {
+      const scope = stringField(record, 'scope') ?? 'user'
+      const projectPath = PROJECT_SCOPES.has(scope) ? stringField(record, 'projectPath') : undefined
+      // Lowest precedence first: user, then the project's `settings.json` and `settings.local.json`, then managed. A
+      // project's settings decide only that project's installs, which the global view leaves out: they cost no completeness.
+      const layers = [user, ...(projectPath === undefined ? [] : ['settings.json', 'settings.local.json'].map(file => enabledPluginsOf(readJsonObject(join(projectPath, '.claude', file))))), managed]
+      const version = stringField(record, 'version')
+      const sha = stringField(record, 'gitCommitSha')
+      out.push({
+        key,
+        name,
+        marketplace,
+        root: resolve(String(record['installPath'])),
+        ...(version !== undefined ? { version } : {}),
+        scope,
+        ...(projectPath !== undefined ? { projectPath: resolve(projectPath) } : {}),
+        enabled: resolveEnabled(key, layers),
+        ...(sha !== undefined ? { gitCommitSha: sha } : {}),
+      })
+    }
+  }
+  out.sort((a, b) => a.key.localeCompare(b.key, 'en') || a.scope.localeCompare(b.scope, 'en') || (a.projectPath ?? '').localeCompare(b.projectPath ?? '', 'en'))
+  return { plugins: out, unresolved, unread: [...new Set(unread)] }
+}
+
+function updatedAt(record: Record<string, unknown>): string {
+  return String(record['lastUpdated'] ?? record['installedAt'] ?? '')
+}
+
+/**
+ * Claude Code merges `enabledPlugins` key by key: the value from the highest-precedence source that mentions
+ * the plugin applies (https://code.claude.com/docs/en/plugins/loading#find-where-a-plugin-is-enabled). An
+ * installed plugin that no source mentions is on.
+ * @param layers - lowest precedence first.
+ */
+function resolveEnabled(key: string, layers: ReadonlyArray<Readonly<Record<string, boolean>>>): boolean {
+  let enabled = true
+  for (const layer of layers) if (key in layer) enabled = layer[key]!
+  return enabled
+}
+
+/** The `enabledPlugins` entries of one settings document. */
+function enabledPluginsOf(settings: Record<string, unknown> | undefined): Record<string, boolean> {
   const value = settings?.['enabledPlugins']
   if (!isPlainObject(value)) return {}
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'))
+}
+
+/**
+ * The system directory of Claude Code's file-based managed settings
+ * (https://code.claude.com/docs/en/managed-settings.md#where-each-mechanism-stores-the-policy). MDM profiles,
+ * the registry and server-managed settings are not files Harness Forge can read.
+ */
+export function claudeManagedSettingsDir(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'darwin') return '/Library/Application Support/ClaudeCode'
+  if (platform === 'win32') return 'C:\\Program Files\\ClaudeCode'
+  return '/etc/claude-code'
+}
+
+/**
+ * `enabledPlugins` of the managed settings files: `managed-settings.json`, then `managed-settings.d/*.json` in name
+ * order, later ones winning. What could not be read is added to `unread`.
+ */
+function managedEnabledPlugins(dir: string, unread: string[]): Record<string, boolean> {
+  let drop: string[] = []
+  const dropIns = join(dir, 'managed-settings.d')
+  // A drop-in folder on a link to a network share it is not on cannot be listed (see `leadsToShare`).
+  if (leadsToShare(dropIns)) unread.push(`${dropIns} could not be listed (${LEADS_TO_SHARE})`)
+  else try {
+    drop = readdirSync(dropIns).filter(file => file.endsWith('.json') && !file.startsWith('.')).sort()
+  } catch (error: unknown) {
+    // No drop-in directory is none to read; one that cannot be listed is not.
+    const code = (error as { code?: unknown }).code
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') unread.push(`${join(dir, 'managed-settings.d')} could not be listed (${error instanceof Error ? error.message : String(error)})`)
+  }
+  const files = [join(dir, 'managed-settings.json'), ...drop.map(file => join(dir, 'managed-settings.d', file))]
+  return Object.assign({}, ...files.map((file) => {
+    const read = readJsonRecord(file)
+    if (read.problem !== undefined) unread.push(read.problem)
+    return enabledPluginsOf(read.value)
+  })) as Record<string, boolean>
 }
 
 /**
@@ -83,7 +205,7 @@ export function scanClaudeUserAssets(home = homedir()): ForeignPlugin | undefine
   const components: ForeignComponent[] = base.components.filter(component => ['skill', 'command', 'agent', 'ui'].includes(component.kind))
   const settingsPath = join(root, 'settings.json')
   const settings = readJsonObject(settingsPath) ?? {}
-  const settingsComponent = claudeSettingsComponent(base.id, [settingsPath], [settings])
+  const settingsComponent = claudeSettingsComponent(base.id, [settingsPath], [settings], root)
   if (settingsComponent !== undefined) components.push(settingsComponent)
   const hooks = settingsHooksComponent(base.id, settingsPath, settings)
   if (hooks !== undefined) components.push(hooks)
@@ -161,7 +283,7 @@ export function scanClaudeProjectAssets(cwd: string, home = homedir()): ForeignP
     }
     const settingsFiles = ['settings.json', 'settings.local.json'].map(file => join(root, '.claude', file)).filter(isFile)
     const settingsValues = settingsFiles.map(file => readJsonObject(file) ?? {})
-    const settings = claudeSettingsComponent(pluginId, settingsFiles, settingsValues)
+    const settings = claudeSettingsComponent(pluginId, settingsFiles, settingsValues, root)
     if (settings !== undefined) components.push(settings)
     for (const [index, file] of settingsFiles.entries()) {
       const hooks = settingsHooksComponent(pluginId, file, settingsValues[index] ?? {}, index === 0 ? 'settings' : 'settings-local')
@@ -215,8 +337,11 @@ function samePath(left: string, right: string): boolean {
   return normalize(left) === normalize(right)
 }
 
-/** The permission rules and environment of one or more settings files, merged in order. */
-export function claudeSettingsComponent(pluginId: string, files: readonly string[], values: readonly Record<string, unknown>[]): SettingsComponent | undefined {
+/**
+ * The permission rules and environment of one or more settings files, merged in order.
+ * @param ruleRoot - where the files' `/path` file rules anchor (see `SettingsComponent.ruleRoot`).
+ */
+export function claudeSettingsComponent(pluginId: string, files: readonly string[], values: readonly Record<string, unknown>[], ruleRoot: string): SettingsComponent | undefined {
   const permissions: { allow: string[]; deny: string[]; ask: string[] } = { allow: [], deny: [], ask: [] }
   const env: Record<string, string> = {}
   let disableAllHooks: boolean | undefined
@@ -242,6 +367,7 @@ export function claudeSettingsComponent(pluginId: string, files: readonly string
     description: `${String(ruleCount)} permission rule(s), ${String(Object.keys(env).length)} environment variable(s)`,
     files: files.filter(isFile),
     permissions: merged,
+    ruleRoot,
     env,
     ...(disableAllHooks !== undefined ? { disableAllHooks } : {}),
     ...(outputStyle !== undefined ? { outputStyle } : {}),
@@ -300,6 +426,7 @@ export function mcpComponents(pluginId: string, servers: Record<string, unknown>
       id: childId(pluginId, 'mcp', name),
       kind: 'mcp',
       name,
+      declaredName: name,
       description: `${scope}-scope ${transport} MCP server`,
       transport,
       ...(command !== undefined ? { command } : {}),

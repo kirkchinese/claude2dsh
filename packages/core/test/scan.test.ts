@@ -24,6 +24,16 @@ afterEach(() => {
 })
 
 describe('scanPlugin', () => {
+  it('records the name a plugin declared for each MCP server beside the name it is registered under', () => {
+    for (const source of ['codex', 'claude-code'] as const) {
+      const root = tempRoot()
+      write(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { cua_repl: { command: 'node' }, 'cua-repl': { command: 'deno' }, Docs: { command: 'x' } } }))
+      const { plugin } = scanPlugin(root, { source })
+      const servers = plugin.components.filter(component => component.kind === 'mcp').map(component => [component.declaredName, component.name])
+      expect(servers, source).toEqual([['cua_repl', 'cua-repl'], ['cua-repl', expect.stringMatching(/^cua-repl-[0-9a-f]+$/u)], ['Docs', 'docs']])
+    }
+  })
+
   it('reads a portable Agent Plugins package', () => {
     const root = tempRoot()
     write(join(root, 'plugin.json'), JSON.stringify({

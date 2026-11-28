@@ -1,10 +1,11 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { synthesizeDshSession } from '../src/sessions/synthesize.js'
 import { readClaudeSession } from '../src/dialects/claude-code/sessions/parse.js'
+import { MAX_LINE_BYTES, SessionTooLargeError } from '../src/sessions/lines.js'
 
 test('normalizes Claude records using the current parent chain and merges stream chunks', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'c2dsh-parse-'))
@@ -226,6 +227,67 @@ test('maps string tool_result content into a text block', async () => {
     const result = parsed.session.turns[0]?.steps[0]?.toolResults[0]
     assert.equal(result?.content[0]?.type, 'text')
     assert.match(result?.content[0]?.text ?? '', /tool-results\/a\.txt/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('refuses a transcript above the size ceiling before reading it', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-parse-big-'))
+  const sessionId = 'cccccccc-aaaa-4ccc-8ddd-eeeeeeeeeeee'
+  const file = join(dir, `${sessionId}.jsonl`)
+  try {
+    await writeFile(file, JSON.stringify({ type: 'user', uuid: 'u1', parentUuid: null, sessionId, message: { role: 'user', content: 'hi' } }) + '\n')
+    await truncate(file, 300_000_000)
+    await assert.rejects(readClaudeSession({ ref: file, sourceId: sessionId }), (error: unknown) => {
+      assert.ok(error instanceof SessionTooLargeError)
+      assert.match(error.message, /too large to import \(300 MB; the limit is 100 MB\)/u)
+      return true
+    })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('skips a line too long to be anything but a blob, says so, and reads the rest of the chain', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-parse-longline-'))
+  const sessionId = 'dddddddd-aaaa-4ccc-8ddd-eeeeeeeeeeee'
+  const file = join(dir, `${sessionId}.jsonl`)
+  const base = { isSidechain: false, cwd: '/tmp/p', sessionId, timestamp: '2026-01-01T00:00:00.000Z' }
+  try {
+    await writeFile(file, [
+      JSON.stringify({ type: 'user', uuid: 'u1', parentUuid: null, ...base, message: { role: 'user', content: 'before' } }),
+      JSON.stringify({ type: 'attachment', uuid: 'x1', parentUuid: 'u1', ...base, blob: 'b'.repeat(MAX_LINE_BYTES + 10) }),
+      JSON.stringify({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', ...base, message: { role: 'assistant', model: 'm', content: [{ type: 'text', text: 'after' }] } }),
+    ].join('\n') + '\n')
+    const { session, stats } = await readClaudeSession({ ref: file, sourceId: sessionId })
+    assert.equal(session.turns[0]?.prompt, 'before')
+    assert.equal(session.turns[0]?.steps[0]?.content[0]?.type, 'text')
+    assert.equal(stats.malformed, 1)
+    assert.deepEqual(stats.reasons, ['line 2 is too long to read and was skipped'])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('picks the same main chain from a transcript with dead branches as a read of the whole file would', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-parse-chain-'))
+  const sessionId = 'eeeeeeee-aaaa-4ccc-8ddd-eeeeeeeeeeee'
+  const file = join(dir, `${sessionId}.jsonl`)
+  const base = { isSidechain: false, cwd: '/tmp/p', sessionId }
+  try {
+    await writeFile(file, [
+      { type: 'user', uuid: 'u1', parentUuid: null, ...base, timestamp: '2026-01-01T00:00:00.000Z', message: { role: 'user', content: 'first' } },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', ...base, timestamp: '2026-01-01T00:00:01.000Z', message: { role: 'assistant', model: 'm', content: [{ type: 'text', text: 'dead branch' }] } },
+      { type: 'assistant', uuid: 'a2', parentUuid: 'u1', ...base, timestamp: '2026-01-01T00:00:02.000Z', message: { role: 'assistant', model: 'm', content: [{ type: 'text', text: 'live branch' }] } },
+      { type: 'user', uuid: 'u2', parentUuid: 'a2', ...base, timestamp: '2026-01-01T00:00:03.000Z', message: { role: 'user', content: 'second' } },
+      { type: 'assistant', uuid: 's1', parentUuid: 'u2', ...base, isSidechain: true, timestamp: '2026-01-01T00:00:04.000Z', message: { role: 'assistant', model: 'm', content: [{ type: 'text', text: 'side' }] } },
+    ].map((record) => JSON.stringify(record)).join('\n'))
+    const { session, stats } = await readClaudeSession({ ref: file, sourceId: sessionId })
+    assert.deepEqual(session.turns.map((turn) => turn.prompt), ['first', 'second'])
+    assert.deepEqual(session.turns[0]?.steps.map((step) => step.content), [[{ type: 'text', text: 'live branch' }]])
+    assert.equal(stats.records, 5)
+    assert.equal(stats.skipped, 2)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

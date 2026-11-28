@@ -19,6 +19,15 @@ import type {
   Gap,
 } from './types.js'
 
+/**
+ * Parts of a harness's own configuration DSH runs as they are: Codex's
+ * global instructions (added to the main system prompt) and its `notify`
+ * program (run after each completed turn).
+ */
+function mappedOther(component: Extract<ForeignComponent, { kind: 'other' }>): boolean {
+  return component.originalKind === 'codex-notify' || (component.originalKind === 'codex-instructions' && component.path !== undefined)
+}
+
 /** Context cost heuristic used until a real schema/token probe runs. */
 export function estimateContextCost(plugin: ForeignPlugin): ContextCost {
   let skillChars = 0
@@ -27,7 +36,7 @@ export function estimateContextCost(plugin: ForeignPlugin): ContextCost {
     if (component.kind === 'skill') {
       skillChars += component.frontmatter.name.length + component.frontmatter.description.length + 8
     }
-    if (component.kind === 'mcp') mcpServers += 1
+    if (component.kind === 'mcp' && component.notStarted === undefined) mcpServers += 1
   }
   const residentTokens = Math.ceil(skillChars / 4) + mcpServers * 40
   return {
@@ -42,7 +51,18 @@ export function estimateContextCost(plugin: ForeignPlugin): ContextCost {
 export function collectGaps(plugin: ForeignPlugin): Gap[] {
   const gaps: Gap[] = []
   for (const component of plugin.components) {
-    if (component.kind === 'mcp' && component.transport === 'unknown') {
+    if (component.kind === 'mcp' && component.notStarted?.reason === 'unsupported') {
+      gaps.push({
+        id: `${component.id}:unsupported`,
+        componentId: component.id,
+        // What it needs lies outside DSH (a ChatGPT sign-in): an adapter written for DSH cannot supply it.
+        kind: 'external-requirement',
+        summary: `MCP server is not supported in DSH: it ${component.notStarted.detail}`,
+        detail: 'DSH does not start it; the plugin\'s other parts still work.',
+        suggestedAction: 'skip',
+      })
+    }
+    if (component.kind === 'mcp' && component.transport === 'unknown' && component.notStarted === undefined) {
       gaps.push({
         id: `${component.id}:transport`,
         componentId: component.id,
@@ -87,7 +107,7 @@ export function collectGaps(plugin: ForeignPlugin): Gap[] {
         })
       }
     }
-    if (component.kind === 'other') {
+    if (component.kind === 'other' && !mappedOther(component)) {
       gaps.push({
         id: `${component.id}:unsupported`,
         componentId: component.id,
@@ -143,7 +163,8 @@ export function collectGaps(plugin: ForeignPlugin): Gap[] {
 
 /** The capability ceiling the plugin declares. */
 export function targetLevels(plugin: ForeignPlugin): CompatibilityLevels {
-  const counts = countComponents(plugin.components)
+  // A server its own configuration switches off is not something the plugin asks for.
+  const counts = countComponents(plugin.components.filter(component => component.kind !== 'mcp' || component.notStarted?.reason !== 'disabled'))
   const assets: CompatibilityLevel = counts.command + counts.agent > 0
     ? 'L1b'
     : counts.skill + counts.mcp > 0 ? 'L1a' : 'L0'

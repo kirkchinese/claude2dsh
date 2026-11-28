@@ -29,7 +29,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { renderSkillContent } from '@deepseek-ai/dsh-skill'
-import { kebabCase, toolList, type McpComponent } from '@kirkchinese/harness-forge-core'
+import { kebabCase, leadsToShare, toolList, type McpComponent } from '@kirkchinese/harness-forge-core'
 import { appendNotice } from '../hooks/notice.js'
 import type { ForeignShell } from '../hooks/shell.js'
 import { resolveRoute, type RouteResolution } from '../shared/invocation.js'
@@ -104,7 +104,8 @@ export function memoryInstructions(dir: string): string {
   const path = join(dir, 'MEMORY.md')
   let excerpt = ''
   let cut = false
-  if (existsSync(path)) {
+  // A project's memory file on a link to a network share it is not on is left unread (see `leadsToShare`).
+  if (!leadsToShare(path) && existsSync(path)) {
     const text = readFileSync(path, 'utf8')
     const lines = text.split(/\r?\n/u)
     excerpt = lines.slice(0, MEMORY_LINES).join('\n')

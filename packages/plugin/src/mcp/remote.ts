@@ -9,7 +9,6 @@
  * `ctx.tools` accessor in a context that declared the dependency.
  * @module @kirkchinese/harness-forge
  */
-import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import type { Context } from '@deepseek-ai/cordis'
 import { Client, SSEClientTransport, StreamableHTTPClientTransport, UnauthorizedError } from '@modelcontextprotocol/client'
@@ -17,13 +16,10 @@ import type { Tool } from '@modelcontextprotocol/client'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
 import type { McpComponent } from '@kirkchinese/harness-forge-core'
 import type { McpAuthStore } from './auth.js'
+import { DEFAULT_TOOL_CALL_TIMEOUT_MS, mcpToolPolicy, publicToolName } from './policy.js'
 
 /** This package's version, as the MCP client names itself to a server. */
 const PACKAGE_VERSION = (createRequire(import.meta.url)('../../package.json') as { version: string }).version
-
-const MAX_PUBLIC_NAME_LENGTH = 64
-const HASH_LENGTH = 12
-const CALL_TIMEOUT_MS = 600_000
 
 /** Connection state reported to the service. */
 export type RemoteMcpState =
@@ -102,7 +98,9 @@ export class RemoteMcp {
     try {
       await client.connect(transport)
       const response = await client.listTools(undefined, { cacheMode: 'refresh' })
-      const tools = response.tools.map(tool => this.register(client, tool))
+      // Tools the server's configuration switches off are never registered.
+      const policy = mcpToolPolicy(this.component, this.serverName)
+      const tools = response.tools.filter(tool => policy?.runs(tool.name) ?? true).map(tool => this.register(client, tool))
       return this.settle({ kind: 'connected', tools })
     } catch (error: unknown) {
       if (error instanceof UnauthorizedError && this.authorizationUrl !== undefined) {
@@ -125,7 +123,7 @@ export class RemoteMcp {
       taskRequired: tool.execution?.taskSupport === 'required',
       call: (args: Record<string, unknown>, execution: { signal: AbortSignal }) => client.callTool(
         { name: tool.name, arguments: args },
-        { signal: execution.signal, timeout: CALL_TIMEOUT_MS, toolDefinition: tool },
+        { signal: execution.signal, timeout: this.component.toolTimeoutMs ?? DEFAULT_TOOL_CALL_TIMEOUT_MS, toolDefinition: tool },
       ),
     })
     this.registrations.push(toolCtx.tools.register(definition))
@@ -141,15 +139,6 @@ export class RemoteMcp {
     this.onState(state)
     return state
   }
-}
-
-/** Same public naming contract as dsh-mcp-client. */
-function publicToolName(serverName: string, rawName: string): string {
-  const joined = `mcp__${serverName}__${rawName}`
-  const normalized = joined.replace(/[^A-Za-z0-9_-]/gu, '_')
-  if (normalized === joined && normalized.length <= MAX_PUBLIC_NAME_LENGTH) return normalized
-  const hash = createHash('sha256').update(`${serverName}\0${rawName}`).digest('hex').slice(0, HASH_LENGTH)
-  return `${normalized.slice(0, MAX_PUBLIC_NAME_LENGTH - HASH_LENGTH - 1)}_${hash}`
 }
 
 function rootCause(error: unknown): string {

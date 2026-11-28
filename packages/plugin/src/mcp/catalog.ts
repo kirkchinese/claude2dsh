@@ -11,6 +11,12 @@
 import type { McpComponent } from '@kirkchinese/harness-forge-core'
 import { dshService } from '../dsh/host.js'
 
+/**
+ * How long a catalog-started server may sit unused before the catalog stops
+ * it: started on demand, it is started again by the next call.
+ */
+const CATALOG_IDLE_DISCONNECT_MS = 300_000
+
 /** The catalog meta-tool that runs a catalog entry. */
 export const CATALOG_CALL_TOOL = 'capability_call'
 /** Every catalog meta-tool; an agent that may use an MCP tool may use these. */
@@ -18,16 +24,17 @@ export const CATALOG_TOOLS = ['capability_search', 'capability_describe', CATALO
 /** The services the catalog provides. */
 export const CATALOG_SERVICES = ['capabilityCatalogServers', 'capabilityCatalog'] as const
 
-/** The `mcp__<server>__<tool>` name of a catalog entry id `mcp:<server>/<tool>`. */
-export function catalogToolName(id: unknown): string | undefined {
+/** The server and the raw tool name of a catalog entry id `mcp:<server>/<tool>`; a server name holds no `/`. */
+export function catalogEntry(id: unknown): { readonly server: string; readonly tool: string } | undefined {
   if (typeof id !== 'string') return undefined
   const match = /^mcp:([^/]+)\/(.+)$/u.exec(id)
-  return match === null ? undefined : `mcp__${match[1] ?? ''}__${match[2] ?? ''}`
+  return match === null ? undefined : { server: match[1] ?? '', tool: match[2] ?? '' }
 }
 
-/** The tool a call runs: a catalog call runs the MCP tool its id names. */
-export function calledTool(name: string, args: unknown): string {
-  return name === CATALOG_CALL_TOOL ? catalogToolName((args as { id?: unknown } | undefined)?.id) ?? name : name
+/** The `mcp__<server>__<tool>` name of a catalog entry id `mcp:<server>/<tool>`. */
+export function catalogToolName(id: unknown): string | undefined {
+  const entry = catalogEntry(id)
+  return entry === undefined ? undefined : `mcp__${entry.server}__${entry.tool}`
 }
 
 /** The capability catalog's server registry. */
@@ -67,11 +74,13 @@ export async function mountInCatalog(ctx: object, catalog: CatalogServers, compo
     env: config['env'],
     cwd: config['cwd'],
     headers: {},
-    allowTools: [],
-    denyTools: [],
+    // The catalog's filters are wildcard patterns, an empty allow list meaning every tool; MCP tool names
+    // (`[A-Za-z0-9_.-]`) hold no wildcard, so a name matches itself only. An empty `enabled_tools` enables none.
+    allowTools: component.enabledTools ?? [],
+    denyTools: component.enabledTools?.length === 0 ? ['*'] : component.disabledTools ?? [],
     families: [],
-    idleDisconnectMs: 300_000,
-    callTimeoutMs: 600_000,
+    idleDisconnectMs: CATALOG_IDLE_DISCONNECT_MS,
+    callTimeoutMs: config['toolCallTimeoutMs'],
     discoveryTimeoutMs,
     catalogTtlMs: 86_400_000,
   })

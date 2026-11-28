@@ -7,7 +7,8 @@
  * @module @kirkchinese/harness-forge
  */
 import { readFileSync } from 'node:fs'
-import type { PermissionRules, SettingsComponent } from '@kirkchinese/harness-forge-core'
+import { leadsToShare, type SettingsComponent } from '@kirkchinese/harness-forge-core'
+import type { PermissionRule, PermissionRuleSet } from '../hooks/permissions.js'
 
 /** The session facts settings scoping reads. */
 export interface SessionHeaderLike {
@@ -66,6 +67,8 @@ export class ImportedSettings {
         const kind = /settings\.local\.json$/u.test(file) ? 'local' : component.id.startsWith('claude-code:user') ? 'user' : 'project'
         if (source !== undefined && kind !== source) continue
         try {
+          // A file on a link to a network share it is not on is unreadable (see `leadsToShare`).
+          if (leadsToShare(file)) continue
           deepMerge(merged, JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>)
         } catch {
           // An unreadable file adds nothing.
@@ -84,17 +87,20 @@ export class ImportedSettings {
 
   /**
    * The Claude-syntax permission rules in effect for a session; deny from any
-   * scope holds. An invoked skill's `allowed-tools` and `disallowed-tools`
+   * scope holds. A rule from a settings file carries where its `/path` file
+   * patterns anchor. An invoked skill's `allowed-tools` and `disallowed-tools`
    * count for the rest of its turn.
    */
-  permissionRules(session?: SessionHeaderLike): PermissionRules {
-    const allow: string[] = []
-    const deny: string[] = []
-    const ask: string[] = []
+  permissionRules(session?: SessionHeaderLike): PermissionRuleSet {
+    const allow: PermissionRule[] = []
+    const deny: PermissionRule[] = []
+    const ask: PermissionRule[] = []
     for (const { component } of this.settingsFor(session)) {
-      allow.push(...component.permissions.allow)
-      deny.push(...component.permissions.deny)
-      ask.push(...component.permissions.ask)
+      const { ruleRoot } = component
+      const anchored = (rules: readonly string[]): PermissionRule[] => ruleRoot === undefined ? [...rules] : rules.map(rule => ({ rule, root: ruleRoot }))
+      allow.push(...anchored(component.permissions.allow))
+      deny.push(...anchored(component.permissions.deny))
+      ask.push(...anchored(component.permissions.ask))
     }
     if (session !== undefined) {
       const turn = this.turnRules(session.id)

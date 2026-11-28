@@ -27,7 +27,9 @@ The first screen lists, per harness (Claude Code, Codex, OpenCode), what this co
 - **Your own settings**: skills, commands, agents, MCP servers, hooks and settings under `~/.claude` and `~/.codex`.
 - **Every installed plugin**, with each of its parts marked as **works**, **partly works** or **not possible**, and the reason. Before you migrate, this is a prediction from the plugin's files; after it runs, a part is marked as checked.
 
-Press **Migrate all** to migrate everything not migrated yet, or migrate one plugin. Migrating changes nothing in the original harness: plugins run from where they are installed.
+Only plugins you installed in that harness are listed: the user-scope installs in Claude Code's `installed_plugins.json`, those Codex's `config.toml` lists under `[plugins]`, and for OpenCode the plugin files and packages right inside `~/.config/opencode/plugins` (or `plugin`) and the packages `~/.config/opencode/opencode.json(c)` configures. Plugins a marketplace only offers, and other versions left in a harness's cache, are not; their marketplaces are under **Get plugins** instead (see below). A Claude Code plugin installed only for one project (`--scope project` or `--scope local`) is not listed either: it loads only in that project's sessions.
+
+Press **Migrate all** to migrate everything not migrated yet, or migrate one plugin. Migrating changes nothing in the original harness: plugins run from where they are installed. A plugin you switched off in Claude Code (`enabledPlugins`) or Codex (`enabled = false`) is listed and marked **Off in Claude Code** or **Off in Codex**; **Migrate all** leaves it out and does not count it. You can still migrate it on its own, which turns it on in DSH.
 
 ## Get plugins from the internet
 
@@ -52,18 +54,24 @@ Press **Install** on a plugin. Harness Forge fetches it and shows a confirmation
 
 - **Where files go.** Downloads go into Harness Forge's own folder, `<profile>/.harness-forge/data/remote/`. Nothing is written into `~/.claude`, `~/.codex`, OpenCode's configuration or your DSH profile's configuration. Each install keeps its own copy, pinned to the commit it was fetched at.
 - **git or not.** With git installed, Harness Forge makes a shallow clone; for a plugin in a subfolder it is also sparse. Without git, which is common on Windows, GitHub repositories are downloaded as an archive over HTTPS. Other git hosts need git.
-- **Updates.** Under **Installed from the internet**, press **Check for updates**. It compares each plugin's commit (or npm version) with what its source points at now. **Update** fetches exactly the revision the check found and shows it for confirmation, like an install: what's new or changed, and whether it runs code. Only then is it applied, and parts you switched off stay off.
+- **Updates.** Under **Installed through Get plugins**, press **Check for updates**. It compares each plugin's commit (or npm version) with what its source points at now. **Update** fetches exactly the revision the check found and shows it for confirmation, like an install: what's new or changed, and whether it runs code. Only then is it applied, and parts you switched off stay off.
 - **Removal.** Remove the plugin in **Migrated**; its downloaded files are deleted with it.
 - **Proxies.** Harness Forge, git and npm use the proxy in `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY`, minus the hosts in `NO_PROXY`. Through a proxy, Harness Forge reaches only GitHub (`github.com`, `codeload.github.com`, `api.github.com`, `raw.githubusercontent.com`, `objects.githubusercontent.com`), npm's registry (`registry.npmjs.org`) or yours, and the hosts of sources you paste. A marketplace that points elsewhere is refused, with the host named.
 - **Not supported.** Marketplace entries that run a command (`"source": "command"`) are listed but can't be installed, since that would run a command from the marketplace on your computer. The same goes for zip archives in the ZIP64 format.
 
-The same box also opens a marketplace folder already on disk, for example one under `~/.claude/plugins/marketplaces`.
+The marketplaces your harnesses added (Claude Code's `known_marketplaces.json`, Codex's local `[marketplaces]`) are listed under **On this computer**. Their plugins are never migrated with **Migrate all**: open one and install the plugins you want, each after the same confirmation as above, which shows its parts and what runs code. Harness Forge installs its own copy, taken when the confirmation opens; the marketplace's folder stays as your harness keeps it. The same box also opens any other marketplace folder already on disk.
 
 ## Migrated
 
 Everything active in DSH, plugin by plugin. Switch single parts off, sign in to remote MCP servers that need it, or remove a plugin to undo its migration.
 
 ![Migrated: a plugin expanded, one part switched off and one inactive because its row is off](../assets/migrated.en.jpg)
+
+A migrated plugin follows the harness that installed it. Claude Code and Codex put each new version of a plugin in a folder of its own and may delete the old one. When the harness updates a plugin, Harness Forge moves the migrated plugin to the new version's folder the next time DSH starts or this page loads, and the parts you switched off stay off. The plugin then shows **Updated by Codex from 1.0 to 1.1**, or by Claude Code.
+
+When the harness no longer runs a migrated plugin, nothing of it runs in DSH either. That covers a plugin you uninstalled or switched off in the harness, and one an earlier Harness Forge migrated from the harness's folders that the harness never installed (a marketplace offer, or a Codex plugin read as a Claude Code one). The plugin stays listed with the reason. Choose **Keep** to keep it as your own copy: it runs from the folder it is in and no longer follows the harness. Choose **Remove** to remove it. A plugin you migrated while it was switched off in its harness keeps running. When a harness's own record can't be read in full (malformed, or caught while the harness writes it), nothing changes for the plugins migrated from it: Diagnostics says which record, and it is read again at the next load. A plugin whose folder is gone shows every part as an error, saying so.
+
+After DSH starts, migrated plugins take a moment to be applied again, about a second each. Until they all are, **Discover & migrate** and **Migrated** show **Applying migrated plugins: N of M done…** and fill in by themselves.
 
 ## Gaps
 
@@ -75,7 +83,7 @@ Every part that cannot fully run in DSH, and why. Where an adapter could fill th
 
 | Screen | What it is for |
 |---|---|
-| Import sessions | Import Claude Code, Codex and OpenCode sessions as DSH sessions and open them at once to continue them in DSH. Importing one again opens the session it became. While [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) is installed, this screen points to its **Import sessions** button in the sidebar instead |
+| Import sessions | Import Claude Code, Codex and OpenCode sessions as DSH sessions and open them at once to continue them in DSH. Importing one again opens the session it became. Opening one asks DSH to know it again (in the workspace of its folder, live), and takes it out of DSH's archive if you had archived it there; if DSH offers no way to do that, the screen says the session is archived. Codex subagent threads are not listed, except one an earlier version imported: that copy stays listed, as imported, with **Open session**. An earlier version gave a Codex thread and its forks one session id. Such a session is taken for a thread when it was created at the same time. If other threads created at that time share the id, every turn must also match: what you said and the assistant's answer. Of those threads, exactly one may match in full. A thread whose turns differ is imported as new. When none matches in full (one only begins like the other) or several do, the row offers both: **Open existing** or **Import as new**. While [dsh-chat-import](https://github.com/Nwflower/dsh-chat-import) is installed, this screen points to its **Import sessions** button in the sidebar instead |
 | Settings | Extra folders to search for plugins, whether to discover automatically, and which CLAUDE.md / AGENTS.md files are added to new sessions |
 | Diagnostics | Rows that failed, parts that failed to mount, the shell hooks run in, Bun, and the Harness Forge, DSH and Node.js versions: what to include in a bug report |
 

@@ -223,6 +223,7 @@ export class AgentTool {
   private readonly presets = new Map<string, string>()
   private readonly scoped = new Set<AgentTool>()
   private holding = false
+  private closed = false
   private fiber: { update(config: unknown): void; await(): Promise<unknown>; dispose(): Promise<void> } | undefined
 
   /**
@@ -282,7 +283,17 @@ export class AgentTool {
     this.refresh()
   }
 
+  /**
+   * Take no more changes: the context it runs in is going away (its fiber
+   * goes with it). The agents' withdrawals run after that, and starting or
+   * updating a tool in an inactive context throws.
+   */
+  close(): void {
+    this.closed = true
+  }
+
   async dispose(): Promise<void> {
+    this.close()
     this.inherited?.scoped.delete(this)
     const fiber = this.fiber
     this.fiber = undefined
@@ -290,7 +301,7 @@ export class AgentTool {
   }
 
   private refresh(): void {
-    if (this.holding) return
+    if (this.holding || this.closed) return
     for (const tool of this.scoped) tool.refresh()
     // A session tool exists only while the session has agents of its own.
     const ids = this.presets.size === 0

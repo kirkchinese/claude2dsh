@@ -8,7 +8,7 @@
  */
 import { adapterPackageName, type ForeignPlugin } from '@kirkchinese/harness-forge-core'
 import { coveringAdapter, type AdapterCoverage } from '../workbench/overview.js'
-import { bundleState, type PluginManagerLike } from '../workbench/adapter-coverage.js'
+import { adapterReadiness, managerSnapshot, type PluginManagerLike, type ReadinessCheck } from '../workbench/adapter-coverage.js'
 import { PortSessions, type PortRecord } from './port-sessions.js'
 import { dshService } from '../dsh/host.js'
 import type { HarnessForge } from '../forge/service.js'
@@ -25,11 +25,7 @@ export interface VerifyDeps {
   readonly sessions: PortSessions
 }
 
-export interface PortCheck {
-  readonly check: 'declared' | 'enabled' | 'loaded'
-  readonly ok: boolean
-  readonly detail: string
-}
+export type PortCheck = ReadinessCheck
 
 /** The tool's answer. */
 export interface PortVerification {
@@ -44,23 +40,6 @@ export interface PortVerification {
 }
 
 const check = (name: PortCheck['check'], ok: boolean, detail: string): PortCheck => ({ check: name, ok, detail })
-
-/** Whether the package's plugins started: every row it declares has a live entry, active, without a startup failure. */
-async function loaded(manager: PluginManagerLike, rows: ReadonlyArray<{ readonly rowId: string; readonly entryId?: string }>): Promise<PortCheck> {
-  if (rows.length === 0) return check('loaded', true, 'its bundle declares no plugin rows, so nothing has to start')
-  const entries = new Map((await manager.listPlugins()).map(entry => [entry.entryId, entry]))
-  const problems: string[] = []
-  for (const row of rows) {
-    const entry = row.entryId === undefined ? undefined : entries.get(row.entryId)
-    if (entry === undefined) problems.push(`row "${row.rowId}" has no running entry`)
-    else if (entry.diagnostic !== undefined) problems.push(`row "${row.rowId}" failed to start: ${entry.diagnostic}`)
-    else if (!entry.enabled) problems.push(`row "${row.rowId}" is disabled`)
-    else if (entry.fiberPhase !== 'active') problems.push(`row "${row.rowId}" is ${entry.fiberPhase ?? 'not running'}`)
-  }
-  return problems.length === 0
-    ? check('loaded', true, `all ${String(rows.length)} plugin row(s) of its bundle are active, without startup failures`)
-    : check('loaded', false, problems.join('; '))
-}
 
 /**
  * Verify that an adapter covers one part, and record the answer.
@@ -82,15 +61,8 @@ export async function verifyPort(deps: VerifyDeps, pluginId: string, componentId
     if (deps.pluginManager === undefined) {
       checks.push(check('enabled', false, 'this DSH profile composes no plugin manager, so whether the adapter is enabled cannot be checked'))
     } else {
-      // The criterion the workbench overview counts an adapter by (`bundleState`).
-      const status = bundleState(name, await deps.pluginManager.listBundles())
-      if (status.state === 'unlisted') checks.push(check('enabled', false, `${name} is on disk but DSH does not list it as an installed bundle: install it with plugin_manager install_bundle (a link left by a failed install does not count), and check that its package.json declares a bundle (dsh-doc references/host-plugin.md)`))
-      else if (status.state === 'off') checks.push(check('enabled', false, `${name} is installed but switched off: enable it with plugin_manager set_bundle`))
-      else if (status.state === 'broken') checks.push(check('enabled', false, `${name} is enabled but its bundle cannot load: ${status.error.code}${status.error.diagnostic !== undefined ? ` — ${status.error.diagnostic}` : ''}`))
-      else {
-        checks.push(check('enabled', true, `${name} is enabled`))
-        checks.push(await loaded(deps.pluginManager, status.bundle.rows))
-      }
+      // The decision the workbench overview counts an adapter by.
+      checks.push(...adapterReadiness(name, await managerSnapshot(deps.pluginManager)))
     }
   }
   const covered = checks.every(item => item.ok)

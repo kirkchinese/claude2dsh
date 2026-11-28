@@ -55,7 +55,7 @@ export class HookEngine {
   readonly idleTimers = new Map<string, NodeJS.Timeout>()
 
   constructor(readonly ctx: Context, readonly host: HookBrokerHost) {
-    this.runner = new HandlerRunner(ctx, host.shell, agent => host.environment?.((agent as AgentLike | undefined)?.session.header) ?? {})
+    this.runner = new HandlerRunner(ctx, host.shell, agent => host.environment?.((agent as AgentLike | undefined)?.session.header) ?? {}, call => host.mcpToolPolicy?.(call))
     this.transcripts = new TranscriptMirror(join(host.dataRoot, 'transcripts'), {
       agentName: id => host.agentName(id),
     })
@@ -192,7 +192,7 @@ export class HookEngine {
       switch (handler.type) {
         case 'command': return this.runner.command(handler, request)
         case 'http': return this.runner.http(handler, request)
-        case 'mcp_tool': return this.runner.mcpTool(handler, request, mcpToolName(handler.server, handler.tool))
+        case 'mcp_tool': return this.runner.mcpTool(handler, request, this.host.mcpHookServer?.(source.pluginId, handler.server, agent?.session.header.id))
         case 'prompt': return this.runner.prompt(handler, request)
         case 'agent': return this.runner.agent(handler, request)
       }
@@ -644,13 +644,6 @@ function handlerLabel(handler: Exclude<HookHandler, { type: 'invalid' }>): strin
     case 'prompt':
     case 'agent': return `${handler.type}: ${handler.prompt.slice(0, 60)}`
   }
-}
-
-/** The DSH tool name of a hook's MCP `server`/`tool` (`plugin:<plugin>:<server>` is the scoped form). */
-function mcpToolName(server: string, tool: string): string {
-  const scoped = /^plugin:([^:]+):(.+)$/u.exec(server)
-  const name = scoped !== null ? `plugin_${scoped[1] ?? ''}_${scoped[2] ?? ''}` : server
-  return `mcp__${name.replace(/[^A-Za-z0-9_-]+/gu, '_')}__${tool}`
 }
 
 /** The first existing directory: the working directory, the session's start directory, home, temp. */

@@ -6,7 +6,7 @@
  * @module @kirkchinese/harness-forge
  */
 import { readFileSync } from 'node:fs'
-import type { ForeignPlugin } from '@kirkchinese/harness-forge-core'
+import { LEADS_TO_SHARE, leadsToShare, type ForeignPlugin } from '@kirkchinese/harness-forge-core'
 
 /** Fields every handler type accepts. */
 interface HandlerCommon {
@@ -80,6 +80,8 @@ export type HookTable = ReadonlyMap<string, readonly HookGroup[]>
 
 /** Read a hooks file or settings file. */
 export function readHookTable(path: string): HookTable {
+  // A file on a link to a network share it is not on fails as unreadable (see `leadsToShare`).
+  if (leadsToShare(path)) throw new Error(`${path} ${LEADS_TO_SHARE}`)
   return parseHookTable(JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/u, '')) as unknown)
 }
 

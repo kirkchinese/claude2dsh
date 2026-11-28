@@ -216,7 +216,7 @@ export function portBrief(input: PortBriefInput): string {
     '',
     bullet('In a DSH session of this profile, the behaviour from your one-sentence description happens: the tool answers, the command runs, the hook acts on the event, or the surface draws.'),
     bullet(`The adapter calls or loads the original's own code and data from ${code(plugin.root)} wherever it can, rather than copying or re-implementing them; anything it had to re-implement is listed in its README.`),
-    bullet('The adapter loads without errors (check the plugin list and the Host log) and disabling it in the Plugin Manager removes everything it registered.'),
+    bullet('The adapter loads without errors (check `plugin_manager` `list_bundles` and `cordis_inspect_query`) and disabling it in the Plugin Manager removes everything it registered.'),
     bullet(`Its \`package.json\` declares \`"harnessForge": { "ports": [{ "plugin": ${JSON.stringify(plugin.name)}, "component": ${JSON.stringify(component.name)} }] }\`, so Harness Forge shows this part as covered by the adapter.`),
     bullet('Its README says what it restores, how it finds the original plugin, and every remaining difference from the original.'),
     bullet(`\`harness_verify_port\` with \`${JSON.stringify({ pluginId: plugin.id, componentId: component.id })}\` answers \`"covered": true\`.`),
@@ -227,6 +227,7 @@ export function portBrief(input: PortBriefInput): string {
     bullet('Install it as a LOCAL plugin into the current profile only (`plugin_manager` `install_bundle` with the absolute package directory). Do not install it anywhere else.'),
     bullet('Publishing is optional: publish nothing unless the user explicitly asks, and then only under the user\'s own npm scope.'),
     bullet(`Respect the original's license (${license ?? 'unknown: ask the user before reusing any of its code'}): keep its copyright and license notices for anything reused, and credit ${plugin.name} in the README.`),
+    bullet('Verify what the page shows with `cordis_inspect_query` (Client `Slots.listSubTree`) or by asking the user. Never read DSH\'s access token or logs, `/proc` of another process, or another process\'s files, and never drive a browser with credentials taken from them.'),
     bullet('Put no token or session data into the adapter. If the user later wants to publish it, it must find the original at run time instead of by a path of this machine.'),
   ]
   return `${lines.join('\n')}\n`

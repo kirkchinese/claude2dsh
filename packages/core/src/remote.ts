@@ -19,6 +19,7 @@
  */
 import { HarnessError } from './contracts.js'
 import type { MarketplaceSource } from './marketplace.js'
+import { stripTrailing } from './text.js'
 
 /** A git repository, or one directory of it. */
 export interface GitSpec {
@@ -92,7 +93,8 @@ export const DEFAULT_MARKETPLACES: readonly DefaultMarketplace[] = [
 
 const OWNER = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})'
 const REPO = '[A-Za-z0-9._-]+'
-const SHORTHAND = new RegExp(`^(?:github:)?(${OWNER})/(${REPO}?)((?:/[^@#\\s]+)*)(?:[@#](\\S+))?$`, 'u')
+// One optional `/sub/path` group (its class includes `/`): `(?:/[^@#\s]+)*` matches the same text but backtracks exponentially.
+const SHORTHAND = new RegExp(`^(?:github:)?(${OWNER})/(${REPO}?)((?:/[^@#\\s]+)?)(?:[@#](\\S+))?$`, 'u')
 /** npm's package name rules, loosely: lowercase, URL-safe, optional scope. */
 const NPM_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/u
 const SHA = /^[0-9a-f]{40}$/u
@@ -326,7 +328,7 @@ export function dependencyProblem(name: string, spec: string): string | undefine
 /** The source a fetched plugin is known by: what installed status and stored copies are keyed by. */
 export function specIdentity(spec: RemoteSpec): string {
   switch (spec.kind) {
-    case 'git': return `git:${spec.url}${spec.subpath !== undefined ? `//${spec.subpath.replace(/\\/gu, '/').replace(/\/+$/u, '')}` : ''}`
+    case 'git': return `git:${spec.url}${spec.subpath !== undefined ? `//${stripTrailing(spec.subpath.replace(/\\/gu, '/'), '/')}` : ''}`
     case 'npm': return `npm:${spec.registry ?? ''}:${spec.package}`
     case 'json': return `json:${spec.url}`
     case 'archive': return `archive:${spec.url}`
@@ -367,7 +369,7 @@ export function normalizeRegistry(registry: string): string | undefined {
   try {
     const url = new URL(registry.trim())
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined
-    return `${url.origin}${url.pathname.replace(/\/*$/u, '')}/`
+    return `${url.origin}${stripTrailing(url.pathname, '/')}/`
   } catch {
     return undefined
   }

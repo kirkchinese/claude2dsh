@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -517,7 +517,7 @@ describe('npm', () => {
   it('refuses a resolved tree with anything but registry tarballs with an integrity', () => {
     const registry = 'https://registry.example/'
     const ok = { resolved: 'https://registry.example/a/-/a-1.0.0.tgz', integrity: 'sha512-x' }
-    expect(() => { refuseForeignPackages({ packages: { '': {}, 'node_modules/a': ok, 'node_modules/alias': ok, 'node_modules/a/node_modules/b': { inBundle: true } } }, registry) }).not.toThrow()
+    expect(() => { refuseForeignPackages({ lockfileVersion: 3, packages: { '': {}, 'node_modules/a': ok, 'node_modules/alias': ok, 'node_modules/a/node_modules/b': { inBundle: true } } }, registry) }).not.toThrow()
     for (const entry of [
       { resolved: 'git+ssh://git@github.com/a/b.git#abc', integrity: 'sha512-x' },
       { resolved: 'https://codeload.github.com/a/b/tar.gz/abc', integrity: 'sha512-x' },
@@ -525,7 +525,18 @@ describe('npm', () => {
       { resolved: '../x', link: true },
       { resolved: 'https://registry.example/a/-/a-1.0.0.tgz' },
       { integrity: 'sha512-x' },
-    ]) expect(() => { refuseForeignPackages({ packages: { 'node_modules/bad': entry } }, registry) }).toThrow(/dependency bad would come from/u)
+    ]) expect(() => { refuseForeignPackages({ lockfileVersion: 3, packages: { 'node_modules/bad': entry } }, registry) }).toThrow(/dependency bad would come from/u)
+  })
+
+  it('refuses a lockfile it cannot audit instead of finding nothing in it', () => {
+    const registry = 'https://registry.example/'
+    const git = { 'node_modules/bad': { resolved: 'git+ssh://git@github.com/a/b.git#abc' } }
+    // Version 1 lists its tree under `dependencies`, which the audit does not read.
+    expect(() => { refuseForeignPackages({ lockfileVersion: 1, dependencies: { bad: { version: 'git+ssh://git@github.com/a/b.git#abc' } } } as never, registry) }).toThrow(/cannot check \(lockfileVersion 1, no packages map\)/u)
+    expect(() => { refuseForeignPackages({ lockfileVersion: 3 }, registry) }).toThrow(/no packages map/u)
+    expect(() => { refuseForeignPackages({ packages: git }, registry) }).toThrow(/lockfileVersion null/u)
+    expect(() => { refuseForeignPackages({ lockfileVersion: 4, packages: git }, registry) }).toThrow(/lockfileVersion 4/u)
+    expect(() => { refuseForeignPackages({ lockfileVersion: 2, packages: git }, registry) }).toThrow(/dependency bad would come from/u)
   })
 
   it('says npm is needed when it is missing, once dependencies are installed', async () => {
@@ -619,6 +630,42 @@ describe('the extractor refuses what a plugin does not need', () => {
     await expect(extractZip(zip(files), join(tempRoot(), 'out'), { signal: controller.signal })).rejects.toThrow(/timed out/u)
     const members = Array.from({ length: 300 }, (_, index) => [tarHeader(`root/f${String(index)}`, 1), pad(Buffer.from('x'))]).flat()
     await expect(extractTarGz(tar(...members), join(tempRoot(), 'out'), { strip: 1, signal: controller.signal })).rejects.toThrow(/timed out/u)
+  })
+
+  it('does not unpack a short archive once cancelled, nor report it done', async () => {
+    const aborted = AbortSignal.abort(new Error('cancelled by the person'))
+    const tarDest = join(tempRoot(), 'out')
+    await expect(extractTarGz(tar(tarHeader('root/a.txt', 1), pad(Buffer.from('x'))), tarDest, { strip: 1, signal: aborted })).rejects.toThrow(/cancelled by the person/u)
+    expect(existsSync(join(tarDest, 'a.txt'))).toBe(false)
+    const zipDest = join(tempRoot(), 'out')
+    await expect(extractZip(zip({ 'a.txt': 'A' }), zipDest, { signal: aborted })).rejects.toThrow(/cancelled by the person/u)
+    expect(existsSync(join(zipDest, 'a.txt'))).toBe(false)
+    // Cancelled while it decompresses: the one member is not reported unpacked.
+    for (const unpack of [
+      (signal: AbortSignal) => extractTarGz(tar(tarHeader('root/a.txt', 1), pad(Buffer.from('x'))), join(tempRoot(), 'out'), { strip: 1, signal }),
+      (signal: AbortSignal) => extractZip(zip({ 'a.txt': 'A' }), join(tempRoot(), 'out'), { signal }),
+    ]) {
+      const controller = new AbortController()
+      const running = unpack(controller.signal)
+      controller.abort(new Error('cancelled while unpacking'))
+      await expect(running).rejects.toThrow(/cancelled while unpacking/u)
+    }
+  })
+
+  it('stops writing members once cancelled part-way', async () => {
+    const total = 2000
+    const members = Array.from({ length: total }, (_, index) => [tarHeader(`root/f${String(index)}`, 1), pad(Buffer.from('x'))]).flat()
+    const dest = join(tempRoot(), 'out')
+    const controller = new AbortController()
+    const running = extractTarGz(tar(...members), dest, { strip: 1, signal: controller.signal })
+    // Cancel as soon as the first member is on disk.
+    const watch = (): void => {
+      if (existsSync(dest) && readdirSync(dest).length > 0) controller.abort(new Error('cancelled mid-write'))
+      else if (!controller.signal.aborted) setImmediate(watch)
+    }
+    setImmediate(watch)
+    await expect(running).rejects.toThrow(/cancelled mid-write/u)
+    expect(readdirSync(dest).length).toBeLessThan(total)
   })
 
   it('never copies a plugin from a link or through one', () => {

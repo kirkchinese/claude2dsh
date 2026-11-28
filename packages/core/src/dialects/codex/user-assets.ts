@@ -23,7 +23,8 @@ import { childId, pluginId, shortHash, uniqueName } from '../../naming.js'
 import { fingerprintPlugin } from '../../fingerprint.js'
 import { parseSkillFrontmatter, readMarkdownAsset } from '../../frontmatter.js'
 import { codexSkillPolicy } from './skill-policy.js'
-import { isDirectory, isFile, isPlainObject, readText, stem, toPosix } from '../../paths.js'
+import { codexMcpServer } from './mcp-server.js'
+import { contentPath, isDirectory, isFile, isPlainObject, leadsToShare, readRecordText, readText, type RecordRead, stem, toPosix } from '../../paths.js'
 import { settingsHooksComponent } from '../claude-code/user-assets.js'
 import type { AgentComponent, CommandComponent, ForeignComponent, HookComponent, ForeignPlugin, McpComponent, OtherComponent, SettingsComponent, SkillComponent } from '../../types.js'
 
@@ -32,14 +33,23 @@ export function codexHome(home = homedir()): string {
   return process.env['CODEX_HOME'] ?? join(home, '.codex')
 }
 
-/** `config.toml`, parsed; empty when absent or unreadable. */
+/** `config.toml`, parsed; empty when absent or unreadable (see {@link readCodexConfigRecord} for which). */
 export function readCodexConfig(root: string): Record<string, unknown> {
-  const text = readText(join(root, 'config.toml'))
-  if (text === undefined) return {}
+  return readCodexConfigRecord(root).value ?? {}
+}
+
+/**
+ * `config.toml` as read: absent (a complete read of nothing), parsed, or why it could not be (malformed, or cut off
+ * while Codex or the ChatGPT app writes it).
+ */
+export function readCodexConfigRecord(root: string): RecordRead<Record<string, unknown>> {
+  const path = join(root, 'config.toml')
+  const text = readRecordText(path)
+  if (text.value === undefined) return text.problem === undefined ? {} : { problem: text.problem }
   try {
-    return parseToml(text) as Record<string, unknown>
-  } catch {
-    return {}
+    return { value: parseToml(text.value) as Record<string, unknown> }
+  } catch (error: unknown) {
+    return { problem: `${path} is not valid TOML (${error instanceof Error ? error.message : String(error)})` }
   }
 }
 
@@ -272,7 +282,8 @@ export function codexAgentRoles(pluginIdValue: string, root: string, config: Rec
   const declared = isPlainObject(config['agents']) ? config['agents'] : {}
   for (const [name, raw] of Object.entries(declared)) {
     if (!isPlainObject(raw)) continue
-    const configFile = typeof raw['config_file'] === 'string' ? resolve(root, raw['config_file']) : undefined
+    // A value of the config file: checked against its folder before it is read (see `contentPath`).
+    const configFile = typeof raw['config_file'] === 'string' ? contentPath(raw['config_file'], root) : undefined
     const table = configFile === undefined ? {} : read(configFile) ?? {}
     roles.set(name, { file: configFile ?? join(root, 'config.toml'), table, ...(typeof raw['description'] === 'string' ? { description: raw['description'] } : {}) })
   }
@@ -301,43 +312,15 @@ export function codexAgentRoles(pluginIdValue: string, root: string, config: Rec
 }
 
 /**
- * Codex's MCP servers (`[mcp_servers.<name>]`): `command`/`args`/`env`/
- * `env_vars`/`cwd` run a stdio server, `url` (with `bearer_token_env_var`,
- * `http_headers`, `env_http_headers`) a streamable-HTTP one; `enabled = false`
- * leaves a server out. Variables Codex passes through are referenced as
- * `${NAME}`, expanded when the server starts.
+ * Codex's MCP servers (`[mcp_servers.<name>]`), translated by
+ * {@link codexMcpServer}; a server with `enabled = false` is kept, marked as
+ * not started, so its part says why it does not run.
  */
 export function codexMcpComponents(pluginIdValue: string, servers: Record<string, unknown>): McpComponent[] {
   const out: McpComponent[] = []
   for (const [name, raw] of Object.entries(servers)) {
-    if (!isPlainObject(raw) || raw['enabled'] === false) continue
-    const strings = (value: unknown): Record<string, string> => (isPlainObject(value)
-      ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
-      : {})
-    const command = typeof raw['command'] === 'string' ? raw['command'] : undefined
-    const url = typeof raw['url'] === 'string' ? raw['url'] : undefined
-    const args = Array.isArray(raw['args']) ? raw['args'].filter((arg): arg is string => typeof arg === 'string') : []
-    const passed = Array.isArray(raw['env_vars']) ? raw['env_vars'].filter((item): item is string => typeof item === 'string') : []
-    const env = { ...Object.fromEntries(passed.map(variable => [variable, `\${${variable}}`])), ...strings(raw['env']) }
-    const headers = {
-      ...strings(raw['http_headers']),
-      ...Object.fromEntries(Object.entries(strings(raw['env_http_headers'])).map(([header, variable]) => [header, `\${${variable}}`])),
-      ...(typeof raw['bearer_token_env_var'] === 'string' ? { Authorization: `Bearer \${${raw['bearer_token_env_var']}}` } : {}),
-    }
-    const transport: McpComponent['transport'] = command !== undefined ? 'stdio' : url !== undefined ? 'streamable-http' : 'unknown'
-    out.push({
-      id: childId(pluginIdValue, 'mcp', name),
-      kind: 'mcp',
-      name,
-      description: `user-scope ${transport} MCP server`,
-      transport,
-      ...(command !== undefined ? { command } : {}),
-      ...(args.length > 0 ? { args } : {}),
-      ...(Object.keys(env).length > 0 ? { env } : {}),
-      ...(typeof raw['cwd'] === 'string' ? { cwd: raw['cwd'] } : {}),
-      ...(url !== undefined ? { url } : {}),
-      ...(Object.keys(headers).length > 0 ? { headers } : {}),
-    })
+    if (!isPlainObject(raw)) continue
+    out.push(codexMcpServer(raw, { id: childId(pluginIdValue, 'mcp', name), name, declaredName: name, scope: 'user-scope', disabledCode: 'disabled-in-config' }))
   }
   return out
 }
@@ -408,6 +391,7 @@ function expand(pattern: readonly unknown[]): string[] {
 }
 
 function entries(dir: string): string[] {
+  if (leadsToShare(dir)) return []
   try {
     return readdirSync(dir).sort((a, b) => a.localeCompare(b, 'en'))
   } catch {

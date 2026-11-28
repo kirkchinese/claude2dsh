@@ -22,11 +22,17 @@ describe('discovery performance', () => {
       mkdirSync(join(plugin, 'skills', 'one'), { recursive: true })
       writeFileSync(join(plugin, 'skills', 'one', 'SKILL.md'), '---\nname: one\ndescription: One\n---\n\nOne.\n')
     }
-    const started = performance.now()
-    const result = discoverPlugins([root])
-    const elapsed = performance.now() - started
-    expect(result.plugins).toHaveLength(50)
-    expect(elapsed).toBeLessThan(5000)
+    // Class (a): a coarse guard against a super-linear scan, not a benchmark. Fifty plugins take tens of
+    // milliseconds, so 5 s is over 100 times that; the best of three runs ignores a busy machine.
+    let elapsed = Infinity
+    let result: ReturnType<typeof discoverPlugins> | undefined
+    for (let attempt = 0; attempt < 3 && elapsed >= 5000; attempt++) {
+      const started = performance.now()
+      result = discoverPlugins([root])
+      elapsed = Math.min(elapsed, performance.now() - started)
+    }
+    expect(result?.plugins).toHaveLength(50)
+    expect(elapsed, `scanning took ${elapsed.toFixed(0)} ms`).toBeLessThan(5000)
     expect(scanPlugin(join(root, 'plugin-0'), { source: 'claude-code' }).plugin.components).toHaveLength(1)
   })
 })

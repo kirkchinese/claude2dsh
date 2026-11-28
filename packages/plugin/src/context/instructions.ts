@@ -51,10 +51,9 @@ export class ContextInstructions {
     return this.forge.list().some(record => record.source === 'codex' && (record.outcomes ?? []).some(outcome => outcome.status === 'mounted' && outcome.componentId.endsWith(':other:agents-md')))
   }
 
-  private load(cwd: string): { files: readonly InstructionFile[]; hostFiles: readonly { path: string; bytes: number }[] } {
+  private load(cwd: string): { files: readonly InstructionFile[]; hostFiles: readonly { path: string; bytes: number }[]; stopped?: string } {
     const home = homedir()
-    const { files, hostFiles } = loadInstructions({ cwd, home, codexHome: codexHome(home), hostLoads: HOST_LOADS, skipCodex: this.codexMounted() })
-    return { files, hostFiles }
+    return loadInstructions({ cwd, home, codexHome: codexHome(home), hostLoads: HOST_LOADS, skipCodex: this.codexMounted() })
   }
 
   /** What the instructions of `cwd` are, for the workbench. */
@@ -62,8 +61,8 @@ export class ContextInstructions {
     const yielding = this.yieldingTo()
     if (yielding !== undefined) return { active: false, yieldingTo: yielding, files: [] }
     const directory = cwd ?? (dshService(this.ctx, 'workingDirectory') as WorkingDirectoryLike | undefined)?.defaultDirectory ?? process.cwd()
-    const { files, hostFiles } = this.load(directory)
-    return { active: true, files: files.map(file => ({ path: file.path, bytes: file.bytes })), hostFiles }
+    const { files, hostFiles, stopped } = this.load(directory)
+    return { active: true, files: files.map(file => ({ path: file.path, bytes: file.bytes })), hostFiles, ...(stopped !== undefined ? { stopped } : {}) }
   }
 
   /** The prompt text for one assembly: empty while yielding, and when a failure keeps it from being read. */
@@ -71,7 +70,8 @@ export class ContextInstructions {
     if (this.yieldingTo() !== undefined) return ''
     const directory = this.directoryOf(assembly)
     try {
-      return renderInstructions(this.load(directory).files, MAX_BYTES).text
+      const { files, stopped } = this.load(directory)
+      return renderInstructions(files, MAX_BYTES, stopped).text
     } catch (error: unknown) {
       // Once per directory: a step runs this again and again.
       if (!this.reported.has(directory)) {

@@ -46,6 +46,7 @@ import {
   type RemoteSpec,
 } from '@kirkchinese/harness-forge-core'
 import { messageOf } from '../../shared/util.js'
+import { partOf } from '../../workbench/overview.js'
 import { copyTree, treeDigest } from './archive.js'
 import { dependenciesOf, RemoteFetcher, type FetchContext, type FetchDeps, type FetchLimits, type NpmDependencies } from './fetch.js'
 
@@ -75,7 +76,7 @@ export interface RemoteInstall {
   readonly integrity?: string
   readonly registry?: string
   readonly root: string
-  /** The directory this install uses; deleted once no install uses it. Absent for a local folder installed in place. */
+  /** The directory this install uses; deleted once no install uses it. Absent only for a local folder installed in place before 0.4.1. */
   readonly dir?: string
   /** A digest of everything in `dir` as installed (an npm plugin's dependencies included). */
   readonly digest?: string
@@ -133,6 +134,8 @@ export interface ConfirmedPart {
   readonly name: string
   /** Why it does not work in DSH, when it does not. */
   readonly gap?: string
+  /** The same reasons the overview gives, as codes the browser words in the person's language. */
+  readonly reasons?: ReadonlyArray<{ readonly code: string; readonly detail: string }>
   /** For an update: whether the part is new or its files changed. */
   readonly change?: 'new' | 'changed'
 }
@@ -184,12 +187,12 @@ interface Pins {
 
 /** A fetched plugin before it is installed. */
 interface Candidate {
-  /** The plugin root: in its staging directory, or in place for a local folder. */
+  /** The plugin root, in its staging directory: a copy of Harness Forge's own, even for a folder on this computer. */
   readonly root: string
   /** The staging directory holding it, which nothing else uses. */
-  readonly stage?: string
+  readonly stage: string
   /** The digest of `root` when it was shown. */
-  readonly digest?: string
+  readonly digest: string
   readonly dialect: string
   readonly origin: RemoteOrigin
   readonly identity: string
@@ -205,7 +208,7 @@ interface Candidate {
   readonly warnings?: readonly string[]
 }
 
-/** The installed copy a confirmation replaces, as it was when the confirmation was made. */
+/** The installed copy a confirmation (or an update check) replaces, as it was when it was made. */
 interface Base {
   readonly pluginId: string
   readonly root: string
@@ -226,6 +229,8 @@ export interface RemoteHost {
 
 /** Pending confirmations and update checks are dropped after this long (and their files with them). */
 const PENDING_MS = 30 * 60_000
+/** The revision of a copy of a folder on this computer, which has no history to name one. */
+const LOCAL_REVISION = 'local'
 const CODE_KINDS = new Set(['hooks', 'mcp', 'code', 'settings'])
 /** Entry fields that are the marketplace's, not the plugin manifest's. */
 const ENTRY_ONLY = new Set(['source', 'strict', 'category', 'tags', 'policy', 'relevance', 'metadata', 'headers', 'headersHelper', 'defaultEnabled', 'engines'])
@@ -296,6 +301,16 @@ function pastedHosts(...inputs: readonly string[]): string[] {
   })
 }
 
+/** An install as a confirmation or an update check binds it. */
+function baseOf(install: RemoteInstall): Base {
+  return { pluginId: install.pluginId, root: install.root, revision: install.revision, ...(install.digest !== undefined ? { digest: install.digest } : {}) }
+}
+
+/** Whether an install is still the copy `base` recorded. */
+function sameBase(now: Base, base: Base): boolean {
+  return now.pluginId === base.pluginId && now.root === base.root && now.revision === base.revision && now.digest === base.digest
+}
+
 /** What an origin's source was pasted as. */
 function pastedOf(origin: RemoteOrigin): string {
   return origin.kind === 'direct' ? origin.input : origin.marketplace
@@ -313,7 +328,8 @@ export class RemotePlugins {
   private state: RemoteState
   /** `base`: the installed copy the candidate replaces; `explicit` when the person asked to update it. */
   private readonly pending = new Map<string, { candidate: Candidate; name: string; at: number; base?: Base; explicit: boolean }>()
-  private readonly checks = new Map<string, { pluginId: string; pins: Pins; at: number }>()
+  /** `base`: the installed copy the check compared, which the update it found replaces. */
+  private readonly checks = new Map<string, { pins: Pins; base: Base; at: number }>()
   private readonly statePath: string
   /** Fetching, installing and collecting run one at a time, so a collection never takes files being made or read. */
   private queue: Promise<unknown> = Promise.resolve()
@@ -350,12 +366,15 @@ export class RemotePlugins {
     return next
   }
 
-  /** The default and added marketplaces, and what was installed from the network. */
-  async sources(): Promise<{ defaults: typeof DEFAULT_MARKETPLACES; added: readonly AddedSource[]; installs: readonly RemoteInstall[]; git: boolean }> {
+  /**
+   * The default and added marketplaces, and what was installed through Get plugins; an install taken from a
+   * local marketplace's own folder names that marketplace (`localMarketplace`).
+   */
+  async sources(): Promise<{ defaults: typeof DEFAULT_MARKETPLACES; added: readonly AddedSource[]; installs: ReadonlyArray<RemoteInstall & { readonly localMarketplace?: string }>; git: boolean }> {
     return {
       defaults: DEFAULT_MARKETPLACES,
       added: this.state.sources.filter(source => !DEFAULT_MARKETPLACES.some(item => item.input === source.input)),
-      installs: this.installs(),
+      installs: this.installs().map(install => (install.origin.kind === 'marketplace' && install.revision === LOCAL_REVISION ? { ...install, localMarketplace: install.origin.marketplaceName } : install)),
       git: await this.fetcher.hasGit(),
     }
   }
@@ -509,7 +528,7 @@ export class RemotePlugins {
    * update, what changed). A candidate from the source of an installed plugin
    * (the same identity) replaces that install when confirmed, as an update does.
    */
-  private confirmation(candidate: Candidate, update?: RemoteInstall): Confirmation {
+  private confirmation(candidate: Candidate, update?: RemoteInstall, checked?: Base): Confirmation {
     try {
       let replacing = update ?? this.installs().find(install => install.identity === candidate.identity)
       let plugin = this.host.scan(candidate.root, candidate.dialect, replacing?.pluginId)
@@ -532,11 +551,12 @@ export class RemotePlugins {
       }
       const after = before !== undefined ? partDigests(plugin) : undefined
       const token = randomBytes(16).toString('hex')
-      const base = replacing === undefined ? undefined : { pluginId: replacing.pluginId, root: replacing.root, revision: replacing.revision, ...(replacing.digest !== undefined ? { digest: replacing.digest } : {}) }
-      this.pending.set(token, { candidate, name: plugin.name, at: Date.now(), ...(base !== undefined ? { base } : {}), explicit: update !== undefined })
+      const base = checked ?? (replacing === undefined ? undefined : baseOf(replacing))
+      this.pending.set(token, { candidate, name: plugin.displayName ?? plugin.name, at: Date.now(), ...(base !== undefined ? { base } : {}), explicit: update !== undefined })
       const dependencyCount = candidate.npm === undefined ? undefined : Object.keys(candidate.npm.dependencies.dependencies).length + Object.keys(candidate.npm.dependencies.optionalDependencies).length
       const gaps = new Map<string, string>()
-      for (const gap of assess(plugin).gaps) if (gap.componentId !== undefined && !gaps.has(gap.componentId)) gaps.set(gap.componentId, gap.summary)
+      const allGaps = assess(plugin).gaps
+      for (const gap of allGaps) if (gap.componentId !== undefined && !gaps.has(gap.componentId)) gaps.set(gap.componentId, gap.summary)
       const changeOf = (key: string): 'new' | 'changed' | undefined => {
         if (before === undefined || after === undefined) return undefined
         const was = before.get(key)
@@ -544,7 +564,7 @@ export class RemotePlugins {
       }
       return {
         token,
-        name: plugin.name,
+        name: plugin.displayName ?? plugin.name,
         ...(plugin.version !== undefined ? { version: plugin.version } : {}),
         harness: plugin.source,
         source: candidate.source,
@@ -554,7 +574,8 @@ export class RemotePlugins {
         ...(dependencyCount !== undefined ? { dependencies: dependencyCount } : {}),
         parts: plugin.components.map((component) => {
           const change = changeOf(partKey(component))
-          return { kind: component.kind, name: component.name, ...(gaps.has(component.id) ? { gap: gaps.get(component.id)! } : {}), ...(change !== undefined ? { change } : {}) }
+          const reasons = gaps.has(component.id) ? partOf(component, allGaps, undefined, undefined).reasons : []
+          return { kind: component.kind, name: component.name, ...(gaps.has(component.id) ? { gap: gaps.get(component.id)! } : {}), ...(reasons.length > 0 ? { reasons } : {}), ...(change !== undefined ? { change } : {}) }
         }),
         runsCode: [...new Set(plugin.components.filter(component => CODE_KINDS.has(component.kind)).map(component => component.kind))],
         works: plugin.components.filter(component => !gaps.has(component.id)).length,
@@ -587,42 +608,40 @@ export class RemotePlugins {
         this.discard(candidate)
         throw new HarnessError('not-installed', `${base.pluginId} is no longer installed`)
       }
-      if (now !== undefined && (now.root !== base.root || now.revision !== base.revision || now.digest !== base.digest)) {
+      if (now !== undefined && !sameBase(baseOf(now), base)) {
         this.discard(candidate)
         throw new HarnessError('plan-not-found', `${base.pluginId} changed since this was prepared (it is at ${short(now.revision)} now)`, { suggestion: pending.explicit ? 'Check for updates again.' : 'Open the plugin again.' })
       }
     }
-    let finalDir: string | undefined
-    let root = candidate.root
+    // Named by its source, revision and files, so the same plugin fetched again shares the directory.
+    const finalDir = join(this.root, 'plugins', createHash('sha256').update(`${candidate.identity}\0${candidate.revision}\0${candidate.digest}`).digest('hex').slice(0, 32))
+    let root: string
     let result: { pluginId: string; report?: unknown }
     try {
-      if (candidate.stage !== undefined) {
-        // Bound to what the confirmation showed: anything else is not installed.
-        if (candidate.digest === undefined || !existsSync(candidate.root) || treeDigest(candidate.root) !== candidate.digest) {
-          throw new HarnessError('fetch-failed', 'the fetched files changed after they were shown; open the plugin again')
-        }
-        let inStage = relative(candidate.stage, candidate.root)
-        if (candidate.npm !== undefined) {
-          await this.fetcher.npmDependencies(candidate.stage, candidate.npm.dependencies, candidate.registry!, this.fetcher.context('user'))
-          // Beside its dependencies, where Node looks for them.
-          const placed = join(candidate.stage, 'node_modules', ...candidate.npm.name.split('/'))
-          mkdirSync(dirname(placed), { recursive: true })
-          renameSync(candidate.root, placed)
-          inStage = relative(candidate.stage, placed)
-        }
-        finalDir = join(this.root, 'plugins', createHash('sha256').update(`${candidate.identity}\0${candidate.revision}\0${candidate.digest}`).digest('hex').slice(0, 32))
-        const user = this.state.installs.find(install => install.dir !== undefined && resolve(install.dir) === resolve(finalDir!))
-        if (existsSync(finalDir) && user !== undefined) {
-          // The same source, revision and files are installed already, if the directory still holds what was installed.
-          if (user.digest === undefined || treeDigest(finalDir) !== user.digest) throw new HarnessError('fetch-failed', `the installed copy of ${user.name} changed on disk; remove the plugin and install it again`)
-          rmSync(candidate.stage, { recursive: true, force: true })
-        } else {
-          rmSync(finalDir, { recursive: true, force: true })
-          mkdirSync(dirname(finalDir), { recursive: true })
-          renameSync(candidate.stage, finalDir)
-        }
-        root = join(finalDir, inStage)
+      // Bound to what the confirmation showed: anything else is not installed.
+      if (!existsSync(candidate.root) || treeDigest(candidate.root) !== candidate.digest) {
+        throw new HarnessError('fetch-failed', 'the fetched files changed after they were shown; open the plugin again')
       }
+      let inStage = relative(candidate.stage, candidate.root)
+      if (candidate.npm !== undefined) {
+        await this.fetcher.npmDependencies(candidate.stage, candidate.npm.dependencies, candidate.registry!, this.fetcher.context('user'))
+        // Beside its dependencies, where Node looks for them.
+        const placed = join(candidate.stage, 'node_modules', ...candidate.npm.name.split('/'))
+        mkdirSync(dirname(placed), { recursive: true })
+        renameSync(candidate.root, placed)
+        inStage = relative(candidate.stage, placed)
+      }
+      const user = this.state.installs.find(install => install.dir !== undefined && resolve(install.dir) === resolve(finalDir))
+      if (existsSync(finalDir) && user !== undefined) {
+        // The same source, revision and files are installed already, if the directory still holds what was installed.
+        if (user.digest === undefined || treeDigest(finalDir) !== user.digest) throw new HarnessError('fetch-failed', `the installed copy of ${user.name} changed on disk; remove the plugin and install it again`)
+        rmSync(candidate.stage, { recursive: true, force: true })
+      } else {
+        rmSync(finalDir, { recursive: true, force: true })
+        mkdirSync(dirname(finalDir), { recursive: true })
+        renameSync(candidate.stage, finalDir)
+      }
+      root = join(finalDir, inStage)
       if (base !== undefined && (pending.explicit || this.host.installed(base.pluginId))) {
         // An update, or the source of an installed plugin again: its copy is replaced, keeping its id and the parts switched off.
         await this.host.reroot(base.pluginId, root, candidate.dialect)
@@ -632,10 +651,10 @@ export class RemotePlugins {
       }
     } catch (error: unknown) {
       this.discard(candidate)
-      if (finalDir !== undefined && !this.inUse(finalDir)) rmSync(finalDir, { recursive: true, force: true })
+      if (!this.inUse(finalDir)) rmSync(finalDir, { recursive: true, force: true })
       throw error
     }
-    const digest = finalDir !== undefined ? treeDigest(finalDir) : undefined
+    const digest = treeDigest(finalDir)
     const previous = this.state.installs.find(install => install.pluginId === result.pluginId)
     this.state.installs = this.state.installs.filter(install => install.pluginId !== result.pluginId)
     this.state.installs.push({
@@ -651,8 +670,8 @@ export class RemotePlugins {
       ...(candidate.integrity !== undefined ? { integrity: candidate.integrity } : {}),
       ...(candidate.registry !== undefined ? { registry: candidate.registry } : {}),
       root,
-      ...(finalDir !== undefined ? { dir: finalDir } : {}),
-      ...(digest !== undefined ? { digest } : {}),
+      dir: finalDir,
+      digest,
       installedAt: previous?.installedAt ?? new Date().toISOString(),
       ...(previous !== undefined ? { updatedAt: new Date().toISOString() } : {}),
     })
@@ -691,7 +710,7 @@ export class RemotePlugins {
           let token: string | undefined
           if (update) {
             token = randomBytes(16).toString('hex')
-            this.checks.set(token, { pluginId: install.pluginId, pins: pins!, at: Date.now() })
+            this.checks.set(token, { pins: pins!, base: baseOf(install), at: Date.now() })
           }
           out.push({ pluginId: install.pluginId, name: install.name, current: short(install.revision), ...(pins !== undefined ? { latest: short(pins.revision) } : {}), update, ...(token !== undefined ? { token } : {}) })
         } catch (error: unknown) {
@@ -711,16 +730,18 @@ export class RemotePlugins {
     return this.exclusive(async () => {
       this.collect()
       const check = this.checks.get(token)
-      if (check === undefined || check.pluginId !== pluginId) throw new HarnessError('plan-not-found', 'this update check expired; check for updates again', { suggestion: 'Choose Check for updates again.' })
+      if (check === undefined || check.base.pluginId !== pluginId) throw new HarnessError('plan-not-found', 'this update check expired; check for updates again', { suggestion: 'Choose Check for updates again.' })
       this.checks.delete(token)
       const install = this.installs().find(item => item.pluginId === pluginId)
       if (install === undefined) throw new HarnessError('not-installed', `${pluginId} was not installed from the network`)
+      // Bound to the copy the check compared: an update found against it does not apply to one installed since.
+      if (!sameBase(baseOf(install), check.base)) throw new HarnessError('plan-not-found', `${pluginId} changed since the check (it is at ${short(install.revision)} now)`, { suggestion: 'Check for updates again.' })
       const candidate = await this.fetchCandidate(install.origin, this.fetcher.context('user', pastedHosts(pastedOf(install.origin))), check.pins)
       if (check.pins.identity !== undefined && candidate.identity !== check.pins.identity) {
         this.discard(candidate)
         throw new HarnessError('fetch-failed', 'the marketplace changed where this plugin comes from since the check', { suggestion: 'Check for updates again.' })
       }
-      return this.confirmation(candidate, install)
+      return this.confirmation(candidate, install, check.base)
     })
   }
 
@@ -817,14 +838,19 @@ export class RemotePlugins {
     const market = revision !== undefined ? { marketRevision: revision } : {}
     if (entry.source.kind === 'path' && entry.source.path !== undefined) {
       const from = entry.source.path
-      if (marketSpec.kind === 'local') return { root: from, dialect, origin: resolvedOrigin, identity, source: from, revision: 'local' }
-      if (checkout === undefined || revision === undefined) throw new HarnessError('unsupported-source', `${entry.name} is inside a marketplace fetched by URL, which has no files`)
-      if (pins !== undefined && pins.revision !== revision) throw changed(entry.name, revision, pins.revision)
+      // A marketplace on this computer is another harness's folder, which it may refresh at any time: what is
+      // shown and installed is a copy taken from it once, like a checkout's, and the folder itself is never used.
+      const local = marketSpec.kind === 'local'
+      const boundary = local ? index.root : checkout
+      if (!local && (checkout === undefined || revision === undefined)) throw new HarnessError('unsupported-source', `${entry.name} is inside a marketplace fetched by URL, which has no files`)
+      if (!local && pins !== undefined && pins.revision !== revision) throw changed(entry.name, revision ?? 'none', pins.revision)
       return this.staged(async (stage) => {
         const root = join(stage, safeName(entry.name))
-        const skipped = copyTree(from, root, checkout)
+        const skipped = copyTree(from, root, boundary)
         this.applyEntry(root, entry, dialect)
-        return { root, dialect, origin: resolvedOrigin, identity, source: `${describeSpec(marketSpec)} → ${entry.name}`, ...(page !== undefined ? { page } : {}), revision, ...market, ...linkWarnings(skipped) }
+        return local
+          ? { root, dialect, origin: resolvedOrigin, identity, source: from, revision: LOCAL_REVISION, ...linkWarnings(skipped) }
+          : { root, dialect, origin: resolvedOrigin, identity, source: `${describeSpec(marketSpec)} → ${entry.name}`, ...(page !== undefined ? { page } : {}), revision: revision!, ...market, ...linkWarnings(skipped) }
       })
     }
     const problem = this.problemOf(entry.source)
@@ -851,8 +877,13 @@ export class RemotePlugins {
     const common = { origin, identity: options.identity, source: describeSpec(spec), ...(page !== undefined ? { page } : {}), ...(options.marketRevision !== undefined ? { marketRevision: options.marketRevision } : {}) }
     switch (spec.kind) {
       case 'local': {
-        const root = homePath(spec.path)
-        return { ...common, root, dialect: marketDialect ?? detectSource(root), revision: 'local' }
+        // A folder on this computer is copied like a checkout: what is shown and installed cannot change under it.
+        const from = homePath(spec.path)
+        return this.staged(async (stage) => {
+          const root = join(stage, safeName(basename(from)))
+          const skipped = copyTree(from, root)
+          return { ...common, root, dialect: marketDialect ?? detectSource(root), revision: LOCAL_REVISION, ...linkWarnings(skipped) }
+        })
       }
       case 'git': {
         const { dir: checkout, sha } = await this.fetcher.checkout(spec, context)
@@ -954,7 +985,6 @@ export class RemotePlugins {
 
   /** Delete a candidate's staging directory; it is the candidate's alone. */
   private discard(candidate: Candidate): void {
-    if (candidate.stage === undefined) return
     const staging = resolve(this.root, 'staging')
     if (isInside(staging, resolve(candidate.stage))) rmSync(candidate.stage, { recursive: true, force: true })
   }
@@ -981,7 +1011,7 @@ export class RemotePlugins {
       this.discard(pending.candidate)
     }
     for (const [token, check] of this.checks) if (now - check.at >= PENDING_MS) this.checks.delete(token)
-    const held = new Set([...this.pending.values()].flatMap(pending => pending.candidate.stage !== undefined ? [resolve(pending.candidate.stage)] : []))
+    const held = new Set([...this.pending.values()].map(pending => resolve(pending.candidate.stage)))
     const used = new Set(this.state.installs.flatMap(install => install.dir !== undefined ? [resolve(install.dir)] : []))
     const sweep = (parent: string, keep: (path: string) => boolean): void => {
       if (!existsSync(parent)) return

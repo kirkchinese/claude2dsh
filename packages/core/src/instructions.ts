@@ -27,11 +27,22 @@
  * A project file that is a symbolic link resolving outside the workspace is
  * skipped as well. Files the user wrote themselves (`~/.claude/CLAUDE.md`, `~/.codex`) may
  * import from anywhere.
+ *
+ * Each file is opened once, and what is checked is what is read: the
+ * containment check uses the opened file's own real path (see `openFile`),
+ * and the content comes from that descriptor. Reading runs for every
+ * workspace, trusted or not, so one load reads at most
+ * {@link INSTRUCTION_READ_BYTES} bytes (a binary file's included) while trying
+ * at most {@link INSTRUCTION_PATHS_TRIED} paths (a missing one included), and
+ * lists at most {@link INSTRUCTION_SKIPS_LISTED} files it did not use; past a
+ * limit it stops, says so (`stopped`) and touches the filesystem no more.
  * @module @kirkchinese/harness-forge-core
  */
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, openSync, readlinkSync, readSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { claudeExternalImportsApproved, workspaceRootOf } from './trust.js'
+import { linksReachNewShare, reachesNewShare } from './paths.js'
+import { stripTrailing } from './text.js'
 
 /** How deep `@path` imports nest (Claude Code's limit). */
 export const MAX_IMPORT_DEPTH = 5
@@ -41,6 +52,30 @@ export const DEFAULT_INSTRUCTION_BYTES = 65_536
 
 /** A source file larger than this is not read. */
 const MAX_SOURCE_BYTES = 1_048_576
+
+/**
+ * The bytes one load reads from all its files together: a rendering keeps at
+ * most {@link DEFAULT_INSTRUCTION_BYTES} (64 KiB), so 4 MiB leaves room for
+ * four maximal files or hundreds of ordinary ones, while a cloned repository
+ * full of permitted imports cannot make each session start read gigabytes.
+ */
+export const INSTRUCTION_READ_BYTES = 4 * 1_048_576
+
+/**
+ * The paths one load tries: every candidate path costs one, whether it is
+ * missing, refused, binary or read. Real setups try a few paths per directory
+ * and a handful of imports; 256 is far beyond that, and bounds the filesystem
+ * work a crafted import graph (thousands of missing imports included) can
+ * cause on every prompt.
+ */
+export const INSTRUCTION_PATHS_TRIED = 256
+
+/**
+ * The unused files one load lists with their reasons (`skipped`); the rest are
+ * only counted (`skippedUnlisted`). 32 names every problem a real setup has
+ * and keeps the diagnostics small when a crafted file imports thousands.
+ */
+export const INSTRUCTION_SKIPS_LISTED = 32
 
 export type InstructionKind = 'user' | 'codex' | 'project' | 'local' | 'import'
 
@@ -71,8 +106,12 @@ export interface InstructionSet {
   readonly files: readonly InstructionFile[]
   /** Files the host injects itself; read only for their imports. */
   readonly hostFiles: readonly { readonly path: string; readonly bytes: number }[]
-  /** Files that exist but were not used, with the reason. */
+  /** Files that exist but were not used, with the reason: at most {@link INSTRUCTION_SKIPS_LISTED}. */
   readonly skipped: readonly { readonly path: string; readonly reason: string }[]
+  /** How many more files were not used than `skipped` lists. */
+  readonly skippedUnlisted: number
+  /** Set when reading stopped at a limit: a note saying so, for the prompt and the workbench. */
+  readonly stopped?: string
   /** The directory the project's files are read down from. */
   readonly root: string
 }
@@ -153,14 +192,77 @@ export function importPaths(text: string): string[] {
   return found
 }
 
-function readSource(path: string): string | undefined {
+/** An open regular file: its descriptor, its real path, its identity and its size. */
+interface OpenFile {
+  readonly fd: number
+  readonly real: string
+  readonly identity: string
+  readonly size: number
+}
+
+/** `O_NOFOLLOW` where the platform has it (not Windows): the last part of the path must not be a link. */
+const NO_FOLLOW = constants.O_NOFOLLOW ?? 0
+/** `O_NONBLOCK` where the platform has it: a FIFO swapped in after the check does not hold the open. */
+const NO_BLOCK = constants.O_NONBLOCK ?? 0
+
+/**
+ * Open the regular file `path` resolves to, once: the real path is opened
+ * without following a link in its last part, and the real path reported is
+ * the opened file's own (Linux: `/proc/self/fd`; elsewhere the real path,
+ * accepted only if it still names the file opened, by device and inode).
+ * Undefined when there is no such file, or it changed while being opened.
+ *
+ * Residual risk without `/proc` (macOS, Windows): the real path and the
+ * identity check are separate path operations, so a local process running at
+ * the same time that swaps a parent directory for a link between them could
+ * make a file outside the allowed place pass as the one inside it. Failing
+ * closed there would stop instruction files from loading on those systems, so
+ * the gap is documented (docs/user/compatibility.md, next to the hook input
+ * file note) instead.
+ */
+function openFile(path: string): OpenFile | undefined {
+  let fd: number
   try {
-    if (statSync(path).size > MAX_SOURCE_BYTES) return undefined
-    const text = readFileSync(path, 'utf8')
-    return text.includes('\0') ? undefined : text
+    const resolved = realpathSync(path)
+    if (!statSync(resolved).isFile()) return undefined
+    fd = openSync(resolved, constants.O_RDONLY | NO_FOLLOW | NO_BLOCK)
   } catch {
     return undefined
   }
+  try {
+    const stat = fstatSync(fd)
+    if (!stat.isFile()) throw new Error('not a regular file')
+    const identity = `${String(stat.dev)}:${String(stat.ino)}`
+    let real: string
+    try {
+      real = readlinkSync(`/proc/self/fd/${String(fd)}`)
+    } catch {
+      real = realpathSync(path)
+      const named = statSync(real)
+      if (`${String(named.dev)}:${String(named.ino)}` !== identity) throw new Error('the file changed while it was opened')
+    }
+    return { fd, real, identity, size: stat.size }
+  } catch {
+    closeSync(fd)
+    return undefined
+  }
+}
+
+/**
+ * Up to `limit` bytes of an open file: the bytes read, whatever they were,
+ * and the text, undefined when it is binary or longer than `limit`.
+ */
+function readOpen(file: OpenFile, limit: number): { text: string | undefined; bytes: number } {
+  const buffer = Buffer.alloc(Math.min(file.size, limit) + 1)
+  let length = 0
+  for (;;) {
+    const count = readSync(file.fd, buffer, length, buffer.length - length, length)
+    if (count === 0) break
+    length += count
+    if (length === buffer.length) return { text: undefined, bytes: length }
+  }
+  const text = buffer.subarray(0, length).toString('utf8')
+  return { text: text.includes('\0') ? undefined : text, bytes: length }
 }
 
 function realPath(path: string): string {
@@ -203,48 +305,121 @@ export function loadInstructions(options: InstructionOptions): InstructionSet {
   const files: InstructionFile[] = []
   const hostFiles: { path: string; bytes: number }[] = []
   const skipped: { path: string; reason: string }[] = []
+  let skippedUnlisted = 0
+  const skip = (path: string, reason: string): void => {
+    if (skipped.length < INSTRUCTION_SKIPS_LISTED) skipped.push({ path, reason })
+    else skippedUnlisted++
+  }
   const seen = new Set<string>()
   const external = claudeExternalImportsApproved(workspaceRootOf(cwd), home)
   const allowedFor = (trusted: boolean, path: string): boolean => trusted || external || within(workspace, path)
+  let tried = 0
+  let read = 0
+  let stopped: string | undefined
+  const stop = (limit: string, path: string): void => {
+    stopped = `Harness Forge stopped reading instruction files at ${path}: ${limit}. Files after it, and their imports, were not read.`
+  }
+  /** Charge one path about to be tried; false, before any filesystem work, once the budget is spent. */
+  const attempt = (path: string): boolean => {
+    if (stopped !== undefined) return false
+    if (tried >= INSTRUCTION_PATHS_TRIED) {
+      stop(`more than ${String(INSTRUCTION_PATHS_TRIED)} paths tried`, path)
+      return false
+    }
+    tried++
+    return true
+  }
 
-  const visit = (path: string, source: Source, depth: number, importedBy: string | undefined, kind: InstructionKind): void => {
-    const real = realPath(path)
-    if (!isFileAt(path)) return
-    if (importedBy === undefined && source.within !== undefined && !within(source.within, real)) {
-      skipped.push({ path, reason: 'a link to a file outside the workspace' })
+  /** Whether a file at its real path may be used: a source must stay where it was found, an import inside the workspace. */
+  const refusal = (real: string, source: Source, importedBy: string | undefined): string | undefined => {
+    if (importedBy === undefined && source.within !== undefined && !within(source.within, real)) return 'a link to a file outside the workspace'
+    if (importedBy !== undefined && !allowedFor(source.trusted, real)) return 'an import outside the workspace'
+    return undefined
+  }
+
+  /** Use the first of `candidates` that is a file; each one tried is charged, missing or not. */
+  /**
+   * Whether a project file's path, or a link on its way, leads to a network share the workspace is not on: on
+   * Windows, touching it would sign in to that server, so nothing is opened, resolved or even stat'ed there
+   * (`linksReachNewShare` reads links with `lstat` and `readlink` only). The user's own files are theirs to point
+   * anywhere.
+   */
+  const offShare = (path: string, source: Source): boolean => !source.trusted && linksReachNewShare(path, workspace)
+  const visit = (candidates: readonly string[], source: Source, depth: number, importedBy: string | undefined, kind: InstructionKind): void => {
+    let path: string | undefined
+    for (const candidate of candidates) {
+      if (!attempt(candidate)) return
+      if (offShare(candidate, source)) {
+        skip(candidate, importedBy === undefined ? 'a link to a file outside the workspace' : 'an import outside the workspace')
+        return
+      }
+      if (isFileAt(candidate)) {
+        path = candidate
+        break
+      }
+    }
+    if (path === undefined) return
+    // Refuse what is plainly out of bounds before opening it; the opened file is checked again below.
+    const before = refusal(realPath(path), source, importedBy)
+    if (before !== undefined) {
+      skip(path, before)
       return
     }
-    if (seen.has(real)) return
-    seen.add(real)
-    if (importedBy !== undefined && !allowedFor(source.trusted, real)) {
-      skipped.push({ path, reason: 'an import outside the workspace' })
-      return
-    }
-    const content = readSource(path)
-    if (content === undefined) {
-      skipped.push({ path, reason: 'unreadable, binary, or larger than 1 MiB' })
-      return
+    const file = openFile(path)
+    if (file === undefined) return
+    let content: string
+    try {
+      const after = refusal(file.real, source, importedBy)
+      if (after !== undefined) {
+        skip(path, after)
+        return
+      }
+      if (seen.has(file.identity)) return
+      seen.add(file.identity)
+      if (file.size > MAX_SOURCE_BYTES) {
+        skip(path, 'unreadable, binary, or larger than 1 MiB')
+        return
+      }
+      if (read + file.size > INSTRUCTION_READ_BYTES) {
+        stop(`more than ${String(INSTRUCTION_READ_BYTES)} bytes in all`, path)
+        return
+      }
+      const text = readOpen(file, Math.min(MAX_SOURCE_BYTES, INSTRUCTION_READ_BYTES - read))
+      // What was read counts, text or not.
+      read += text.bytes
+      if (text.text === undefined) {
+        skip(path, 'unreadable, binary, or larger than 1 MiB')
+        return
+      }
+      content = text.text
+    } finally {
+      closeSync(file.fd)
     }
     const bytes = Buffer.byteLength(content)
     if (source.hostLoaded && importedBy === undefined) hostFiles.push({ path, bytes })
     else if (content.trim().length > 0) files.push({ path, kind, content, bytes, ...(importedBy !== undefined ? { importedBy } : {}) })
     if (!source.imports) return
     if (depth >= MAX_IMPORT_DEPTH) {
-      if (importPaths(content).length > 0) skipped.push({ path, reason: `imports nest deeper than ${String(MAX_IMPORT_DEPTH)} levels` })
+      if (importPaths(content).length > 0) skip(path, `imports nest deeper than ${String(MAX_IMPORT_DEPTH)} levels`)
       return
     }
     for (const reference of importPaths(content)) {
+      if (stopped !== undefined) return
       if (reference.startsWith('~') && !reference.startsWith('~/')) continue
+      // A share named as written (`//server/share/x`, `\\\\server\\share\\x`): refused before it is resolved or touched.
+      if (!source.trusted && reachesNewShare(reference, workspace)) {
+        skip(reference, 'an import outside the workspace')
+        continue
+      }
       // "see @notes.md." names notes.md: a trailing sentence mark is not part of the path unless the file has it.
-      const target = [reference, reference.replace(/[.,;:!?)\]]+$/u, '')]
+      const candidates = [...new Set([reference, stripTrailing(reference, '.,;:!?)]')])]
         .filter(candidate => candidate.length > 0)
         .map(candidate => candidate.startsWith('~/') ? join(home, candidate.slice(2)) : resolve(dirname(path), candidate))
-        .find(isFileAt)
-      if (target !== undefined) visit(target, source, depth + 1, path, 'import')
+      visit(candidates, source, depth + 1, path, 'import')
     }
   }
-  for (const source of sources) visit(source.path, source, 0, undefined, source.kind)
-  return { files, hostFiles, skipped, root }
+  for (const source of sources) visit([source.path], source, 0, undefined, source.kind)
+  return { files, hostFiles, skipped, skippedUnlisted, root, ...(stopped !== undefined ? { stopped } : {}) }
 }
 
 const DESCRIPTIONS: Record<InstructionKind, string> = {
@@ -274,9 +449,10 @@ function cut(text: string, bytes: number): string {
 /**
  * Frame the files as prompt text under a byte budget. When they do not fit, the
  * broadest files are left out first and the last one is cut; a note names both.
+ * @param stopped - the note of a load that stopped at a limit (`InstructionSet.stopped`), added at the end.
  */
-export function renderInstructions(files: readonly InstructionFile[], maxBytes = DEFAULT_INSTRUCTION_BYTES): RenderedInstructions {
-  if (files.length === 0) return { text: '', included: [], omitted: [], truncated: [] }
+export function renderInstructions(files: readonly InstructionFile[], maxBytes = DEFAULT_INSTRUCTION_BYTES, stopped?: string): RenderedInstructions {
+  if (files.length === 0) return { text: stopped === undefined ? '' : `[${stopped}]`, included: [], omitted: [], truncated: [] }
   const block = (file: InstructionFile, content: string): string => {
     const label = file.kind === 'import' ? `imported by ${file.importedBy ?? 'an instruction file'}` : DESCRIPTIONS[file.kind]
     return `Contents of ${file.path} (${label}):\n\n${content.trim()}`
@@ -301,7 +477,7 @@ export function renderInstructions(files: readonly InstructionFile[], maxBytes =
     ? ''
     : `\n\n[Harness Forge: the instruction files exceed ${String(maxBytes)} bytes; ${omitted.length > 0 ? `left out: ${omitted.join(', ')}` : ''}${omitted.length > 0 && truncated.length > 0 ? '; ' : ''}${truncated.length > 0 ? `cut: ${truncated.join(', ')}` : ''}.]`
   return {
-    text: `${PREAMBLE}\n\n${kept.map(item => item.text).join('\n\n')}${note}`,
+    text: `${PREAMBLE}\n\n${kept.map(item => item.text).join('\n\n')}${note}${stopped === undefined ? '' : `\n\n[${stopped}]`}`,
     included: kept.map(item => ({ path: item.file.path, bytes: item.file.bytes })),
     omitted,
     truncated,

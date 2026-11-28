@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { agentMemoryDir, AgentProfiles, agentRuntimeFields, memoryInstructions } from '../src/agents/profiles.js'
-import { createForeignShell } from '../src/hooks/shell.js'
+import { createForeignShell, type ForeignShell } from '../src/hooks/shell.js'
 import { McpAuthStore } from '../src/mcp/auth.js'
 
 const temporary: string[] = []
@@ -17,6 +17,15 @@ function temp(): string {
   const root = mkdtempSync(join(tmpdir(), 'harness-forge-profile-'))
   temporary.push(root)
   return root
+}
+
+/** Poll `done` until it holds; a passing run finishes in a few polls, the deadline only bounds a failing one. */
+async function until(done: () => boolean, what: string, timeoutMs = 20_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!done()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
 }
 
 interface Listener { (...args: unknown[]): unknown }
@@ -123,7 +132,20 @@ describe('agent frontmatter', () => {
     git('add', '-A')
     git('-c', 'user.email=lab@example.com', '-c', 'user.name=lab', 'commit', '-q', '-m', 'init')
     const lab = host({ agentPresets: projections })
-    const profiles = new AgentProfiles(lab.ctx, createForeignShell(), temp(), () => ({ auth: new McpAuthStore(tmpdir()), onState: () => {} }))
+    // The disposal runs on its own after `agent/disposed`: count the finished `git status` checks, and the
+    // branch deletions that end a removal (after the worktree folder is gone), to know when it is done.
+    const real = createForeignShell()
+    let statuses = 0
+    let branchesDeleted = 0
+    const shell: ForeignShell = { ...real, runExec: async (file, args, options) => {
+      try {
+        return await real.runExec(file, args, options)
+      } finally {
+        if (args[0] === 'status') statuses += 1
+        if (args[0] === 'branch' && args[1] === '-D') branchesDeleted += 1
+      }
+    } }
+    const profiles = new AgentProfiles(lab.ctx, shell, temp(), () => ({ auth: new McpAuthStore(tmpdir()), onState: () => {} }))
     profiles.install()
     profiles.register({ presetId: 'demo-iso', name: 'iso', pluginId: 'claude-code:demo', frontmatter: { isolation: 'worktree' }, vars: { pluginRoot: repo, dataDir: repo } })
     expect(profiles.isolated('demo-iso')).toBe(true)
@@ -132,13 +154,15 @@ describe('agent frontmatter', () => {
     expect(worktree).toBeDefined()
     expect(existsSync(join(worktree!, 'a.txt'))).toBe(true)
     await lab.emit('agent/disposed', { agent: child('demo-iso', worktree!) })
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    expect(existsSync(worktree!)).toBe(false)
+    await until(() => !existsSync(worktree!) && branchesDeleted === 1, 'the unchanged worktree and its branch to be removed')
+    expect(statuses).toBe(1)
     // A worktree with changes stays.
     const kept = await profiles.worktree(repo)
     writeFileSync(join(kept!, 'b.txt'), 'b')
     await lab.emit('agent/disposed', { agent: child('demo-iso', kept!) })
-    await new Promise(resolve => setTimeout(resolve, 1500))
+    // The changed worktree is left alone once its status check came back with changes: nothing more follows.
+    await until(() => statuses === 2, 'the changed worktree to be checked')
+    await new Promise(resolve => setImmediate(resolve))
     expect(existsSync(join(kept!, 'b.txt'))).toBe(true)
   }, 30_000)
 })

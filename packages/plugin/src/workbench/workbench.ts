@@ -4,12 +4,14 @@
  * no state; the workbench row and the `/harness` command both read through it.
  * @module @kirkchinese/harness-forge
  */
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { join, relative, resolve, isAbsolute } from 'node:path'
+import { dirname, join, relative, resolve, isAbsolute } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import { assess, claudeSettingsStatusLine, claudeStatusLineProvider, discoverPlugins, pluginId, type CompatibilityVector, type DiscoveredPlugin, type ForeignPlugin, type Gap } from '@kirkchinese/harness-forge-core'
-import { itemOf, overviewOf, unreadableItemOf, type AdapterCoverage, type Overview, type OverviewItem } from './overview.js'
+import { assess, claudeSettingsStatusLine, claudeStatusLineProvider, discoverPlugins, pluginId, type CompatibilityVector, type DiscoveredMarketplace, type DiscoveredPlugin, type DiscoveryWarning, type ForeignPlugin, type Gap, type PluginIdProblem, type SourceId } from '@kirkchinese/harness-forge-core'
+import { followedItemOf, itemOf, migratable, overviewOf, qualifyDuplicateNames, unreadableItemOf, type AdapterCoverage, type Overview, type OverviewItem } from './overview.js'
 import { adapterCoverage, enabledAdapters, type PluginManagerLike } from './adapter-coverage.js'
 import { readSettings, writeSettings, type HarnessSettings } from './settings.js'
 import { messageOf } from '../shared/util.js'
@@ -17,6 +19,22 @@ import { dshService, type DshService } from '../dsh/host.js'
 import type { HarnessForge } from '../forge/service.js'
 import type { InstalledPluginRecord } from '../forge/state.js'
 import { findBun } from '../opencode/bun.js'
+
+/**
+ * Harness Forge's own version, from its package.json: the nearest one up
+ * from this module (`lib/workbench/` when built, `src/workbench/` in tests).
+ */
+export function forgeVersion(from: string = fileURLToPath(import.meta.url)): string | undefined {
+  for (let dir = dirname(from); ; dir = dirname(dir)) {
+    try {
+      const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown }
+      if (manifest.name === '@kirkchinese/harness-forge' && typeof manifest.version === 'string') return manifest.version
+    } catch {
+      // No package.json here: look one folder up.
+    }
+    if (dirname(dir) === dir) return undefined
+  }
+}
 
 /** A package's version as this process resolves it, if it resolves. */
 function versionOf(specifier: string): string | undefined {
@@ -142,19 +160,45 @@ export class Workbench {
     throw new Error(`no plugin ${id} is installed or discovered`)
   }
 
-  /** Discover plugin roots using the saved settings. */
-  discover(): { settings: HarnessSettings; plugins: Array<DiscoveredPlugin & { installed: boolean }>; missingRoots: readonly string[] } {
+  /**
+   * Discover plugin roots using the saved settings: the plugins each harness
+   * installed and the person's own assets, never what a marketplace only offers.
+   */
+  discover(): { settings: HarnessSettings; plugins: Array<DiscoveredPlugin & { installed: boolean }>; marketplaces: readonly DiscoveredMarketplace[]; missingRoots: readonly string[]; warnings: readonly DiscoveryWarning[] } {
     const settings = this.settings()
     const result = discoverPlugins(settings.discoveryRoots)
-    const installedRoots = new Set([...this.installs.live.values()].map(install => resolve(install.record.root)))
     return {
       settings,
-      plugins: result.plugins.map(plugin => ({
-        ...plugin,
-        installed: installedRoots.has(resolve(plugin.root)) || this.installs.live.has(pluginId(plugin.source, plugin.name)),
-      })),
+      plugins: result.plugins.map(plugin => ({ ...plugin, installed: this.migrated(plugin) })),
+      marketplaces: result.marketplaces,
       missingRoots: result.missingRoots,
+      warnings: result.warnings,
     }
+  }
+
+  /**
+   * Whether a discovered plugin is migrated already. A record that follows a harness install counts for that install
+   * only, wherever either's folder is (an update moves it to the harness's new folder); one of an install the harness
+   * no longer runs, or of one read through another harness, never makes a current install look migrated. A record
+   * that follows no harness counts by its folder, and (unless the person kept it as their own copy) by its id.
+   */
+  private migrated(plugin: DiscoveredPlugin): boolean {
+    for (const { record, unrecorded } of this.installs.live.values()) {
+      if (unrecorded === true) continue
+      const followed = record.harnessInstall
+      if (followed !== undefined) {
+        if (record.keptAt === undefined && plugin.installKey !== undefined && followed.harness === plugin.source && followed.key === plugin.installKey && record.source === plugin.source) return true
+        continue
+      }
+      if (resolve(record.root) === resolve(plugin.root)) return true
+      if (record.keptAt === undefined && record.id === pluginId(plugin.source, plugin.name)) return true
+    }
+    return false
+  }
+
+  /** The local marketplaces the harnesses added: under "Get plugins", each plugin installed on its own after the confirmation. */
+  localMarketplaces(): Array<{ readonly input: string; readonly name: string; readonly harness: string }> {
+    return discoverPlugins(this.settings().discoveryRoots).marketplaces.map(market => ({ input: market.root, name: market.name, harness: market.source }))
   }
 
   /** Aggregate capabilities and context cost for installed plugins. */
@@ -179,7 +223,7 @@ export class Workbench {
         const description = 'description' in component ? component.description : undefined
         return {
           pluginId: plugin.id,
-          pluginName: plugin.name,
+          pluginName: plugin.displayName ?? plugin.name,
           kind: component.kind,
           name: component.name,
           ...(description !== undefined ? { description } : {}),
@@ -193,7 +237,7 @@ export class Workbench {
           : sum
       ), 0)
       residentTokens += measured
-      plugins.push({ pluginId: plugin.id, name: plugin.name, source: plugin.source, items, compat, residentTokens: measured })
+      plugins.push({ pluginId: plugin.id, name: plugin.displayName ?? plugin.name, source: plugin.source, items, compat, residentTokens: measured })
     }
     const budgetTokens = settings.contextBudgetTokens
     const tools = dshService(this.installs.ctx, 'tools') as { schemas(): unknown[] } | undefined
@@ -240,11 +284,15 @@ export class Workbench {
 
   /** Scan the roots the overview lists, and attribute the user's configured status line. */
   private overviewSources(requiredId?: string) {
-    const scanned: Array<{ plugin: ForeignPlugin; record?: InstalledPluginRecord }> = []
+    const scanned: Array<{ plugin: ForeignPlugin; record?: InstalledPluginRecord; enabled?: boolean; enabledUnknown?: PluginIdProblem }> = []
     const unreadable: OverviewItem[] = []
-    const seen = new Set<string>()
     for (const record of this.installs.list()) {
-      seen.add(resolve(record.root).toLowerCase())
+      if (!existsSync(record.root)) {
+        // Its folder is gone (the harness deleted an old version, say): a fault, never a plugin ready with no parts.
+        if (record.id === requiredId) throw new Error(`the plugin's folder is gone: ${record.root}`)
+        unreadable.push(unreadableItemOf(record, record.root, 'folder-gone'))
+        continue
+      }
       try {
         scanned.push({ plugin: this.installs.scan(record.root, record.source), record })
       } catch (error: unknown) {
@@ -254,9 +302,13 @@ export class Workbench {
       }
     }
     for (const found of this.discover().plugins) {
-      if (found.installed || seen.has(resolve(found.root).toLowerCase())) continue
+      if (found.installed) continue
       try {
-        scanned.push({ plugin: this.installs.scan(found.root, found.source) })
+        scanned.push({
+          plugin: this.installs.scan(found.root, found.source),
+          ...(found.enabled !== undefined ? { enabled: found.enabled } : {}),
+          ...(found.enabledUnknown !== undefined ? { enabledUnknown: found.enabledUnknown } : {}),
+        })
       } catch {
         // An unreadable root has nothing to show.
       }
@@ -279,6 +331,7 @@ export class Workbench {
   private fetched(root: string): boolean {
     const dataRoot = this.installs.dataRoot as string | undefined
     if (dataRoot === undefined) return false
+    // `marketplace-cache` held the clones of the retired one-step marketplace install; plugins installed from it before 0.4.1 still live there.
     return [join(dataRoot, 'remote'), join(dataRoot, 'marketplace-cache')].some((dir) => {
       const path = relative(resolve(dir), resolve(root))
       return path.length > 0 && !path.startsWith('..') && !isAbsolute(path)
@@ -289,30 +342,42 @@ export class Workbench {
   async overview(): Promise<Overview> {
     const adapters = await this.enabledAdapters()
     const { scanned, unreadable, link } = this.overviewSources()
-    const items = scanned.map(({ plugin, record }) => itemOf(plugin, record, adapters))
-    const marked = [...items, ...unreadable].map(item => item.installed && this.fetched(item.root) ? { ...item, fetched: true as const } : item)
-    return overviewOf(marked, link)
+    const items = scanned.map(({ plugin, record, enabled, enabledUnknown }) => {
+      const item = itemOf(plugin, record, adapters)
+      if (item.installed) return item
+      return enabled === false ? { ...item, enabled: false as const } : enabledUnknown !== undefined ? { ...item, enabledUnknown } : item
+    })
+    const marked = [...items, ...unreadable].map((item) => {
+      if (!item.installed) return item
+      const followed = followedItemOf(item, this.installs.live.get(item.id)?.record, !existsSync(item.root))
+      return this.fetched(item.root) ? { ...followed, fetched: true as const } : followed
+    })
+    return overviewOf(qualifyDuplicateNames(marked), link)
   }
 
   /** Read-only workbench diagnostics: host services, mounts, tool budget and row failures. */
   diagnostics(): Record<string, unknown> {
     const catalog = this.capabilities()
+    const faults = this.forge.faults()
+    const failedMounts = this.installs.list().flatMap(plugin => (plugin.mounts ?? [])
+      .filter(mount => mount.status === 'failed')
+      .map(mount => ({ pluginId: plugin.id, plugin: plugin.displayName ?? plugin.name, kind: mount.kind, name: mount.name, ...(mount.events !== undefined ? { events: mount.events } : {}), error: mount.error ?? '' })))
     return {
+      // What the page says first: Harness Forge's own parts (rows) and the migrated parts are counted apart.
+      summary: { ok: faults.length === 0 && failedMounts.length === 0, faults: faults.length, failedMounts: failedMounts.length },
       host: this.hostCapabilities(),
       hookShell: { bash: this.forge.shell.bash ?? null, powershell: this.forge.shell.powershell, default: this.forge.shell.defaultKind },
       bun: findBun(this.installs.dataRoot) ?? null,
       versions: {
-        forge: versionOf('../package.json') ?? null,
+        forge: forgeVersion() ?? null,
         dsh: versionOf('@deepseek-ai/dsh-session/package.json') ?? null,
         node: process.versions.node,
       },
       platform: process.platform,
-      faults: this.forge.faults(),
+      faults,
       tools: { count: catalog.toolCount ?? 0, tokens: catalog.toolTokens ?? 0, residentTokens: catalog.residentTokens },
       skillRoots: this.listSkillRoots(),
-      failedMounts: this.installs.list().flatMap(plugin => (plugin.mounts ?? [])
-        .filter(mount => mount.status === 'failed')
-        .map(mount => ({ pluginId: plugin.id, kind: mount.kind, name: mount.name, error: mount.error ?? '' }))),
+      failedMounts,
       plugins: this.installs.list().map(plugin => ({ id: plugin.id, source: plugin.source, root: plugin.root, installedAt: plugin.installedAt })),
       statePath: this.installs.statePath,
       dataRoot: this.installs.dataRoot,
@@ -324,14 +389,17 @@ export class Workbench {
     return this.forge.lookup('skills')?.roots() ?? []
   }
 
-  /** Migrate everything of one harness that is not migrated yet: its plugins and the person's own assets. */
-  async migrate(source: 'claude-code' | 'codex' | 'opencode'): Promise<{ readonly installed: readonly string[]; readonly failed: ReadonlyArray<{ readonly name: string; readonly error: string }> }> {
+  /**
+   * "Migrate all" of one harness: its plugins and the person's own assets that {@link migratable} takes, the
+   * rule the overview counts by. A plugin switched off in its harness stays where it is; it can be migrated alone.
+   */
+  async migrate(source: SourceId): Promise<{ readonly installed: readonly string[]; readonly failed: ReadonlyArray<{ readonly name: string; readonly error: string }> }> {
     const installed: string[] = []
     const failed: Array<{ name: string; error: string }> = []
-    for (const found of this.discover().plugins.filter(item => item.source === source && !item.installed)) {
+    for (const found of this.discover().plugins.filter(item => item.source === source && migratable(item))) {
       try {
         const report = await this.forge.install(found.root, found.source)
-        installed.push(report.plugin.name)
+        installed.push(report.plugin.displayName ?? report.plugin.name)
       } catch (error: unknown) {
         failed.push({ name: found.name, error: messageOf(error) })
       }

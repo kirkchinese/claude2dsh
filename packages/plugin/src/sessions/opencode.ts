@@ -16,11 +16,17 @@ import type {
   NormalizedToolResult,
   NormalizedTurn,
 } from '@kirkchinese/harness-forge-core'
-import { synthesizeDshSession } from '@kirkchinese/harness-forge-core'
-import { persistImported, type PersistedSession } from './persist.js'
+import { assertSessionSize } from '@kirkchinese/harness-forge-core'
+import { SESSION_PAGE_SIZE, type SessionPage, type SessionPageRequest } from '../forge/contract.js'
+import { importReport, persistImported, targetIdentity, type ImportIdentity, type ImportReport } from './persist.js'
 
 interface Database {
-  prepare(sql: string): { all(...params: unknown[]): unknown[]; get(...params: unknown[]): unknown }
+  prepare(sql: string): {
+    all(...params: unknown[]): unknown[]
+    get(...params: unknown[]): unknown
+    /** Rows one at a time (`StatementSync.iterate`, Node 22.13+): a session's rows are never all held. */
+    iterate(...params: unknown[]): IterableIterator<unknown>
+  }
   close(): void
 }
 interface MutableStep {
@@ -45,14 +51,11 @@ export interface OpenCodeSessionCandidate {
   readonly title?: string
   readonly cwd?: string
   readonly createdAt?: number
+  readonly updatedAt?: number
+  /** The size of the session's messages and parts, in bytes; absent when the database does not say. */
+  readonly bytes?: number
 }
-export interface OpenCodeImportReport extends PersistedSession {
-  readonly sourcePath: string
-  readonly title?: string
-  readonly turns: number
-  readonly events: number
-  readonly stats: Record<string, number>
-}
+export type OpenCodeImportReport = ImportReport
 
 /** Default OpenCode database path (the desktop build uses ~/.local/share). */
 export function defaultOpenCodeDatabase(home = homedir()): string {
@@ -63,17 +66,20 @@ export function defaultOpenCodeDatabase(home = homedir()): string {
 }
 
 /** Discover top-level OpenCode sessions (subagent sessions are excluded). */
-export async function discoverOpenCodeSessions(path = defaultOpenCodeDatabase(), limit = 200): Promise<OpenCodeSessionCandidate[]> {
+export async function discoverOpenCodeSessions(path = defaultOpenCodeDatabase(), page: SessionPageRequest = {}): Promise<SessionPage<OpenCodeSessionCandidate>> {
+  const limit = Math.max(1, page.limit ?? SESSION_PAGE_SIZE)
+  const offset = Math.max(0, page.cursor ?? 0)
   const db = await openDatabase(path)
   try {
-    const schema = schemaKind(db)
-    const rows = schema === 'v2'
-      ? db.prepare('select id, title, directory, time_created from session_v2 where parent_id is null order by time_updated desc limit ?').all(limit) as Array<Record<string, unknown>>
-      : db.prepare('select id, title, directory, time_created from session where parent_id is null order by time_updated desc limit ?').all(limit) as Array<Record<string, unknown>>
-    return rows.map((row) => {
+    const table = schemaKind(db) === 'v2' ? 'session_v2' : 'session'
+    // One more than a page, to know whether another page follows.
+    const rows = db.prepare(`select id, title, directory, time_created, time_updated from ${table} where parent_id is null order by time_updated desc limit ? offset ?`).all(limit + 1, offset) as Array<Record<string, unknown>>
+    const sessions = rows.slice(0, limit).map((row) => {
       const title = stringField(row['title'])
       const cwd = stringField(row['directory'])
       const createdAt = numberField(row['time_created'])
+      const updatedAt = numberField(row['time_updated'])
+      const bytes = sessionBytes(db, String(row['id']))
       return {
         path,
         sourceId: String(row['id']),
@@ -81,8 +87,11 @@ export async function discoverOpenCodeSessions(path = defaultOpenCodeDatabase(),
         ...(title !== undefined ? { title } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
         ...(createdAt !== undefined ? { createdAt } : {}),
+        ...(updatedAt !== undefined ? { updatedAt } : {}),
+        ...(bytes !== undefined ? { bytes } : {}),
       }
     })
+    return { sessions, ...(rows.length > limit ? { next: offset + limit } : {}) }
   } finally {
     db.close()
   }
@@ -96,10 +105,14 @@ export async function readOpenCodeSession(
 ): Promise<{ session: NormalizedSession; title?: string }> {
   const db = await openDatabase(path)
   try {
+    // Before any message is read: a session is rows, not a file, and its size is what they add up to.
+    const bytes = sessionBytes(db, sourceId)
+    if (bytes !== undefined) assertSessionSize(bytes)
     if (schemaKind(db) === 'v2') return readOpenCodeV2(db, path, sourceId, targetId)
     const row = db.prepare('select id, title, directory, time_created from session where id = ?').get(sourceId) as Record<string, unknown> | undefined
     if (row === undefined) throw new Error(`OpenCode session not found: ${sourceId}`)
-    const messages = db.prepare('select id, data from message where session_id = ? order by time_created').all(sourceId) as Array<Record<string, unknown>>
+    const messages = db.prepare('select id, data from message where session_id = ? order by time_created').iterate(sourceId) as Iterable<Record<string, unknown>>
+    const parts = db.prepare('select data from part where message_id = ? order by time_created')
     const turns: MutableTurn[] = []
     let current: MutableTurn | undefined
     let step: MutableStep | undefined
@@ -126,14 +139,18 @@ export async function readOpenCodeSession(
       if (data === undefined) continue
       const created = numberField(asRecord(data['time'])?.['created'])
       const role = data['role']
-      const parts = db.prepare('select data from part where message_id = ? order by time_created').all(String(message['id'])) as Array<Record<string, unknown>>
+      if (role !== 'user' && role !== 'assistant') continue
+      const rows = parts.iterate(String(message['id'])) as Iterable<Record<string, unknown>>
       if (role === 'user') {
-        const prompt = parts.map(part => parseRecord(part['data'])).filter(isTextPart).map(part => part['text']).join('\n')
-        startTurn(prompt, created)
+        const texts: string[] = []
+        for (const part of rows) {
+          const data = parseRecord(part['data'])
+          if (isTextPart(data)) texts.push(data['text'])
+        }
+        startTurn(texts.join('\n'), created)
         continue
       }
-      if (role !== 'assistant') continue
-      for (const partRow of parts) {
+      for (const partRow of rows) {
         const part = parseRecord(partRow['data'])
         if (part === undefined) continue
         if (part['type'] === 'text') {
@@ -195,6 +212,11 @@ export function openCodeSessionId(sourceId: string): string {
   return `opencode-${sourceId}`
 }
 
+/** How an import finds the DSH session holding an OpenCode session: earlier versions used the bare id. */
+export function openCodeIdentity(sourceId: string): ImportIdentity {
+  return { id: openCodeSessionId(sourceId), legacyIds: [sourceId] }
+}
+
 /** Import one OpenCode session into DSH session persistence. */
 export async function importOpenCodeSession(
   ctx: Context,
@@ -204,28 +226,25 @@ export async function importOpenCodeSession(
 ): Promise<OpenCodeImportReport> {
   const parsed = await readOpenCodeSession(path, sourceId, options.targetId)
   if (parsed.session.turns.length === 0) throw new Error(`nothing to import from OpenCode session ${sourceId}: it has no conversation`)
-  const synthesized = synthesizeDshSession(parsed.session)
-  const events = synthesized.events
-  const persisted = await persistImported(ctx, synthesized, options.targetId === undefined ? [sourceId] : [])
-  return {
-    ...persisted,
-    sourcePath: path,
-    ...(parsed.title !== undefined ? { title: parsed.title } : {}),
-    turns: synthesized.stats.turns,
-    events: events.length,
-    stats: {
-      steps: synthesized.stats.steps,
-      messages: synthesized.stats.messages,
-      toolCalls: synthesized.stats.toolCalls,
-      toolResults: synthesized.stats.toolResults,
-      synthesizedToolResults: synthesized.stats.synthesizedToolResults,
-    },
-  }
+  const identity = options.targetId !== undefined ? targetIdentity(options.targetId) : openCodeIdentity(sourceId)
+  return importReport(path, parsed.title, await persistImported(ctx, parsed.session, identity))
 }
 
 async function openDatabase(path: string): Promise<Database> {
   const { DatabaseSync } = await import('node:sqlite')
   return new DatabaseSync(path, { readOnly: true }) as unknown as Database
+}
+
+/** What one session's message and part rows add up to, in bytes; `undefined` when the schema is not one this knows. */
+function sessionBytes(db: Database, sourceId: string): number | undefined {
+  const sum = (sql: string): number => Number((db.prepare(sql).get(sourceId) as Record<string, unknown> | undefined)?.['bytes'] ?? 0)
+  try {
+    if (schemaKind(db) === 'v2') return sum('select coalesce(sum(length(cast(data as blob))), 0) as bytes from session_message where session_id = ?')
+    return sum('select coalesce(sum(length(cast(data as blob))), 0) as bytes from message where session_id = ?')
+      + sum('select coalesce(sum(length(cast(p.data as blob))), 0) as bytes from part p join message m on m.id = p.message_id where m.session_id = ?')
+  } catch {
+    return undefined
+  }
 }
 
 function schemaKind(db: Database): 'v1' | 'v2' {
@@ -236,7 +255,7 @@ function schemaKind(db: Database): 'v1' | 'v2' {
 function readOpenCodeV2(db: Database, path: string, sourceId: string, targetId?: string): { session: NormalizedSession; title?: string } {
   const row = db.prepare('select id, title, directory, time_created from session_v2 where id = ?').get(sourceId) as Record<string, unknown> | undefined
   if (row === undefined) throw new Error(`OpenCode session not found: ${sourceId}`)
-  const messages = db.prepare('select id, type, data, time_created from session_message where session_id = ? order by seq, time_created').all(sourceId) as Array<Record<string, unknown>>
+  const messages = db.prepare('select id, type, data, time_created from session_message where session_id = ? order by seq, time_created').iterate(sourceId) as Iterable<Record<string, unknown>>
   const turns: MutableTurn[] = []
   let current: MutableTurn | undefined
   let step: MutableStep | undefined

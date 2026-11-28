@@ -16,6 +16,9 @@ import {
   dialects,
   fingerprintPlugin,
   HarnessError,
+  dialectOf,
+  harnessInstalls,
+  type HarnessInstalls,
   planPlugin,
   scanRoot,
   shortHash,
@@ -34,13 +37,16 @@ import { writeReceipt, readReceipt } from './receipts.js'
 import { messageOf } from '../shared/util.js'
 import { mountKindOf, ROW_OF_KIND, type MountKind, type Mounter, type MountScope } from './contract.js'
 import { LiveMounts } from './live-mounts.js'
+import { followingChanges, followingOf, newHarnessInstall, withHarnessInstall, type Following } from './follow.js'
 import {
   isTransient,
-  readState,
+  loadState,
+  type LoadedState,
   receiptsDirectory,
   retryFile,
   writeState,
   type CompatState,
+  type DetachedReason,
   type InstalledComponentRecord,
   type InstalledPluginRecord,
   type MountRecord,
@@ -125,6 +131,20 @@ export function failedToCleanUp(componentId: string, reason: string): ComponentO
   return { componentId, status: 'failed', level: 'L0', evidence: 'runtime', message: `failed to clean up after a failed install: ${reason}` }
 }
 
+/** What an outcome's message says when the plugin's harness no longer runs it (see `follow.ts`). */
+export const NOT_FOLLOWED = 'not run: its harness no longer runs this plugin'
+
+/** The outcome of a component of a detached plugin: off until the person removes or keeps the plugin. */
+export function notFollowed(componentId: string): ComponentOutcome {
+  return { componentId, status: 'inactive', level: 'L0', evidence: 'source', message: NOT_FOLLOWED }
+}
+
+/** How far applying the ledger's records has got: every record at startup, those a harness changed later. */
+export interface ApplyProgress {
+  readonly done: number
+  readonly total: number
+}
+
 function skipped(componentId: string, message: string): ComponentOutcome {
   return { componentId, status: 'skipped', level: 'L0', evidence: 'source', message }
 }
@@ -141,14 +161,20 @@ export class Ledger {
   disposed = false
   queue: Promise<unknown> = Promise.resolve()
   persistTimer: NodeJS.Timeout | undefined
-  /** Why the ledger could not be read at startup; while set, it is never written. */
-  private unreadLedger: string | undefined
+  /** Records being applied (restored at startup, or followed to their harness's change) and how many are done. */
+  private progress: { done: number; total: number } = { done: 0, total: 0 }
+  /** The last unreadable-record problem reported per harness, so each is said once, not at every page load. */
+  private readonly unreadReported = new Map<string, string>()
+  /** The follow pass queued and not yet run: another request joins it instead of queueing its own. */
+  private following: Promise<void> | undefined
+  /** Why the ledger may not be written (unreadable at startup, or a newer Harness Forge's); while set, it never is. */
+  private writeRefusal: { readonly message: string; readonly suggestion: string } | undefined
 
   constructor(
     readonly ctx: Context,
     readonly statePath: string,
     readonly dataRoot: string,
-    /** Where a withdrawal that failed is recorded (the shared service's faults). */
+    /** Where a withdrawal that failed, or a ledger read only in part, is recorded (the shared service's faults). */
     private readonly fault?: (error: unknown) => void,
   ) {}
 
@@ -161,7 +187,7 @@ export class Ledger {
   registerMounter(kind: MountKind, mounter: Mounter): () => void {
     if (this.mounters.has(kind)) throw new HarnessError('internal', `a mounter for ${kind} is already registered`)
     this.mounters.set(kind, mounter)
-    this.reapply()
+    this.reapply(kind)
     return () => {
       if (this.mounters.get(kind) !== mounter) return
       this.mounters.delete(kind)
@@ -171,16 +197,18 @@ export class Ledger {
 
   /**
    * Re-apply installed plans; only actions without a live registration run.
-   * Called when a mounter appears.
+   * Called when a mounter appears: with its kind, only that kind's actions
+   * mount, so a part that failed (a server that cannot start) is tried again
+   * when its own row comes back, not once for every row that starts at boot.
    */
-  reapply(): void {
+  reapply(kind?: MountKind): void {
     if (this.disposed) return
     void this.exclusive(async () => {
       if (this.disposed) return
       for (const install of [...this.live.values()]) {
         if (install.plan === undefined) continue
         try {
-          await this.applyNow(install.plan)
+          await this.applyNow(install.plan, kind)
         } catch {
           // The ledger keeps the previous outcome; the next re-apply runs again.
         }
@@ -276,39 +304,77 @@ export class Ledger {
   }
 
   async restoreNow(): Promise<void> {
-    let state: CompatState
+    let loaded: LoadedState
     try {
-      state = await retryFile(() => readState(this.statePath))
+      loaded = await retryFile(() => loadState(this.statePath))
     } catch (error: unknown) {
       // Writing now would replace the ledger with what is live: nothing. Every write is refused until it is read.
-      this.unreadLedger = messageOf(error)
+      this.writeRefusal = {
+        message: `the ledger could not be read at startup (${messageOf(error)}); nothing is written over it`,
+        suggestion: 'Fix or move aside .harness-forge/state.json, then restart DSH.',
+      }
       throw error
     }
-    this.unreadLedger = undefined
-    for (const record of state.plugins) {
-      if (this.live.has(record.id)) continue
-      if (!existsSync(record.root)) {
-        this.keepUnrestored(record, `source directory is missing: ${record.root}`)
-        continue
-      }
+    if (loaded.readOnly !== undefined) {
+      // A newer Harness Forge's ledger: never downgraded, never overwritten.
+      this.writeRefusal = { message: loaded.readOnly, suggestion: 'Upgrade Harness Forge, then restart DSH.' }
+      this.faultOf(new Error(loaded.readOnly))
+      return
+    }
+    this.writeRefusal = undefined
+    if (loaded.rejected.length > 0) {
+      this.faultOf(new Error(`part of the ledger could not be read and was left out: ${loaded.rejected.join('; ')}. The file as it was is kept at ${loaded.backup ?? this.statePath}`))
+    }
+    const state: CompatState = loaded.state
+    const current = this.readHarnesses()
+    this.begin(state.plugins.length)
+    for (const stored of state.plugins) {
       try {
-        const plan = this.planNow(record.root, record.source)
-        if (record.fingerprint !== undefined && plan.fingerprint.digest !== record.fingerprint.digest) {
-          // The source changed while DSH was closed; apply its current content.
-          this.live.set(record.id, { record, mounts: new LiveMounts(this.faultOf), outcomes: new Map() })
-        } else {
-          this.live.set(record.id, {
-            record,
-            mounts: new LiveMounts(this.faultOf),
-            outcomes: new Map((record.outcomes ?? []).map(outcome => [outcome.componentId, outcome])),
-          })
-        }
-        await this.applyNow(plan)
-      } catch (error: unknown) {
-        this.keepUnrestored(record, messageOf(error))
+        if (!this.live.has(stored.id)) await this.restoreRecord(withHarnessInstall(stored, current, homedir()), current)
+      } finally {
+        this.step()
       }
     }
     this.persist()
+  }
+
+  /** Restore one record, following its harness: to the folder of a new version, or detached when no longer run. */
+  private async restoreRecord(stored: InstalledPluginRecord, current: HarnessInstalls): Promise<void> {
+    const following = followingOf(stored, current)
+    if (following.kind === 'detached' || (following.kind === 'none' && stored.detached !== undefined)) {
+      this.keepDetached(stored, following.kind === 'detached' ? following.reason : stored.detached!.reason)
+      return
+    }
+    const { detached: _attached, ...record } = following.kind === 'none' ? stored : { ...stored, harnessInstall: following.identity }
+    if (following.kind === 'moved') {
+      this.live.set(record.id, { record, mounts: new LiveMounts(this.faultOf), outcomes: new Map() })
+      try {
+        await this.moveNow(record.id, following.root)
+      } catch {
+        // The move could not apply: the plugin was restored from its old folder, or kept with why it was not.
+      }
+      return
+    }
+    if (!existsSync(record.root)) {
+      this.keepUnrestored(record, `source directory is missing: ${record.root}`)
+      return
+    }
+    try {
+      const plan = this.planNow(record.root, record.source)
+      if (record.fingerprint !== undefined && plan.fingerprint.digest !== record.fingerprint.digest) {
+        // The source changed while DSH was closed; apply its current content.
+        this.live.set(record.id, { record, mounts: new LiveMounts(this.faultOf), outcomes: new Map() })
+      } else {
+        this.live.set(record.id, {
+          record,
+          mounts: new LiveMounts(this.faultOf),
+          outcomes: new Map((record.outcomes ?? []).map(outcome => [outcome.componentId, outcome])),
+        })
+      }
+      await this.applyNow(plan)
+    } catch (error: unknown) {
+      this.keepUnrestored(record, messageOf(error))
+    }
   }
 
   /** Keep a record that could not be restored visible, with the reason. */
@@ -319,6 +385,153 @@ export class Ledger {
       mounts: new LiveMounts(this.faultOf),
       outcomes: new Map(outcomes.map(outcome => [outcome.componentId, outcome])),
     })
+  }
+
+  /** Keep a record its harness no longer runs listed, nothing of it mounted. */
+  private keepDetached(record: InstalledPluginRecord, reason: DetachedReason, stillLive: readonly ComponentOutcome[] = []): void {
+    const detached = record.detached?.reason === reason ? record.detached : { reason, at: new Date().toISOString() }
+    const ids = new Set([...(record.outcomes ?? []).map(outcome => outcome.componentId), ...this.live.get(record.id)?.plan?.actions.flatMap(action => action.componentId ?? []) ?? []])
+    const stuck = new Map(stillLive.map(outcome => [outcome.componentId, outcome]))
+    const outcomes = [...ids].map(id => stuck.get(id) ?? notFollowed(id))
+    const mounts = this.live.get(record.id)?.mounts ?? new LiveMounts(this.faultOf)
+    this.live.set(record.id, {
+      record: { ...record, detached, outcomes, mounts: [], skillRoots: [] },
+      mounts,
+      outcomes: new Map(outcomes.map(outcome => [outcome.componentId, outcome])),
+    })
+  }
+
+  /** Detach a live plugin its harness no longer runs: its registrations are withdrawn, the record kept. */
+  private async detachNow(id: string, reason: DetachedReason): Promise<void> {
+    const install = this.live.get(id)
+    if (install === undefined) return
+    const { failed } = await install.mounts.release()
+    for (const mounter of this.mounters.values()) await mounter.settle?.(GLOBAL_SCOPE).catch(() => undefined)
+    // A registration that could not be withdrawn stays shown as such: following again retries nothing, removing does.
+    this.keepDetached(install.record, reason, failed.map(({ mount, reason: why }) => failedToSwitchOff(mount.componentId, why)))
+  }
+
+  /**
+   * Move a followed plugin to the folder its harness now runs (an update), as Get plugins' Update moves a fetched
+   * one (see {@link rerootNow}): the parts the person switched off stay off, and the move is noted on the record.
+   */
+  private async moveNow(id: string, root: string): Promise<void> {
+    const before = this.live.get(id)?.record
+    if (before === undefined) return
+    await this.rerootNow(id, root, before.source)
+    const install = this.live.get(id)
+    if (install === undefined) return
+    install.record = { ...install.record, harnessUpdate: { ...(before.version !== undefined ? { from: before.version } : {}), ...(install.record.version !== undefined ? { to: install.record.version } : {}), at: new Date().toISOString() } }
+    this.persist()
+  }
+
+  /**
+   * Follow every harness's changes since the last pass (see `follow.ts`). Queued behind the ledger's other work;
+   * nothing is queued when no record needs anything, and a pass already waiting is joined. Settles when it has run.
+   */
+  follow(): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    if (this.following !== undefined) return this.following
+    const current = this.readHarnesses()
+    const pending = [...this.live.values()].filter(install => install.unrecorded !== true && followingChanges(install.record, followingOf(install.record, current))).map(install => install.record.id)
+    if (pending.length === 0) return Promise.resolve()
+    this.begin(pending.length)
+    const run = this.exclusive(async () => {
+      this.following = undefined
+      // Read again: the harness may have changed while the pass waited.
+      const now = this.readHarnesses()
+      for (const id of pending) {
+        try {
+          if (!this.disposed) await this.followOne(id, now)
+        } catch (error: unknown) {
+          this.faultOf(error)
+        } finally {
+          this.step()
+        }
+      }
+      this.persist()
+    })
+    this.following = run.catch(() => undefined)
+    return this.following
+  }
+
+  /**
+   * What every harness has installed now. A harness whose record could not be read in full, while plugins migrated
+   * from it follow it, is reported once per distinct problem: nothing of those plugins changes until it reads whole.
+   */
+  private readHarnesses(): HarnessInstalls {
+    const current = harnessInstalls(homedir())
+    const followed = new Set([...this.live.values()].flatMap(install => install.record.harnessInstall?.harness ?? []))
+    for (const harness of new Set([...this.unreadReported.keys(), ...current.uncertain])) {
+      const problems = current.unread.filter(item => item.harness === harness).map(item => item.message)
+      const said = problems.join('; ')
+      if (problems.length === 0) this.unreadReported.delete(harness)
+      else if (this.unreadReported.get(harness) !== said && followed.has(harness)) {
+        this.unreadReported.set(harness, said)
+        const label = dialectOf(harness)?.label ?? harness
+        this.faultOf(new Error(`couldn't read ${label}'s plugin list (${said}); nothing changed for the plugins migrated from ${label}, and it is read again at the next load`))
+      }
+    }
+    return current
+  }
+
+  /** Follow one live plugin's harness install. */
+  private async followOne(id: string, current: HarnessInstalls): Promise<void> {
+    const install = this.live.get(id)
+    if (install === undefined || install.unrecorded === true) return
+    const following: Following = followingOf(install.record, current)
+    if (!followingChanges(install.record, following)) return
+    if (following.kind === 'detached') return this.detachNow(id, following.reason)
+    if (following.kind === 'none') return
+    const { detached, ...record } = install.record
+    install.record = { ...record, harnessInstall: following.identity }
+    if (following.kind === 'moved') return this.moveNow(id, following.root)
+    // Running again where it was (installed again, switched on again): its parts mount as at install.
+    if (detached === undefined) return
+    try {
+      await this.applyNow(this.planNow(record.root, record.source))
+    } catch (error: unknown) {
+      this.keepUnrestored(install.record, messageOf(error))
+      throw error
+    }
+  }
+
+  /**
+   * Keep a plugin its harness no longer runs as the person's own copy, in the folder it is in: it follows no harness
+   * any more and its parts mount again.
+   */
+  async keepNow(id: string): Promise<ApplyResult> {
+    this.assertAlive()
+    const install = this.live.get(id)
+    if (install === undefined) throw new HarnessError('not-installed', `no installed plugin ${id}`)
+    if (install.record.detached === undefined) throw new HarnessError('internal', `${id} is still run by its harness; there is nothing to keep`)
+    if (!existsSync(install.record.root)) {
+      throw new HarnessError('manifest-not-found', `the plugin's folder is gone: ${install.record.root}`, { suggestion: 'Remove it, or install it again in its harness.' })
+    }
+    const previous = install.record
+    const { detached: _detached, harnessInstall: _followed, ...record } = previous
+    install.record = { ...record, keptAt: new Date().toISOString() }
+    install.outcomes.clear()
+    try {
+      return await this.applyNow(this.planNow(record.root, record.source))
+    } catch (error: unknown) {
+      this.keepDetached(previous, previous.detached!.reason)
+      throw error
+    }
+  }
+
+  /** How far applying records has got, while any are still being applied. */
+  applying(): ApplyProgress | undefined {
+    return this.progress.total === 0 ? undefined : { ...this.progress }
+  }
+
+  private begin(count: number): void {
+    this.progress.total += count
+  }
+
+  private step(): void {
+    this.progress.done++
+    if (this.progress.done >= this.progress.total) this.progress = { done: 0, total: 0 }
   }
 
   planNow(root: string, source?: string): Plan {
@@ -333,7 +546,11 @@ export class Ledger {
     return plan
   }
 
-  async applyNow(plan: Plan): Promise<ApplyResult> {
+  /**
+   * Apply a plan: every action without a live registration mounts.
+   * @param only - mount only this kind's actions; the others keep their outcome.
+   */
+  async applyNow(plan: Plan, only?: MountKind): Promise<ApplyResult> {
     this.assertAlive()
     const plugin = this.scanRoot(plan.root, plan.source)
     const fingerprint = fingerprintPlugin(plugin)
@@ -345,6 +562,9 @@ export class Ledger {
     // A failed install left registrations live: they are withdrawn before anything is installed over them.
     if (this.live.get(plan.pluginId)?.unrecorded === true) await this.teardown(plan.pluginId)
     const existing = this.live.get(plan.pluginId)
+    if (existing?.record.detached !== undefined) {
+      throw new HarnessError('not-installed', `${plan.pluginId} is no longer run by its harness: nothing of it mounts until it is kept or removed`, { suggestion: 'Keep it as your own copy, or remove it.' })
+    }
     const components = new Map(plugin.components.map(component => [component.id, component]))
     const outcomes = new Map<string, ComponentOutcome>(existing?.outcomes ?? [])
     const mounts = existing?.mounts ?? new LiveMounts(this.faultOf)
@@ -387,6 +607,10 @@ export class Ledger {
         continue
       }
       const mounter = this.mounters.get(kind)
+      if (only !== undefined && kind !== only && mounter !== undefined && prior !== undefined) {
+        receiptActions.push({ actionId: action.id, kind: action.kind, name: action.name, status: 'skipped' })
+        continue
+      }
       if (mounter === undefined) {
         outcomes.set(component.id, inactive(component.id, kind))
         receiptActions.push({ actionId: action.id, kind: action.kind, name: action.name, status: 'skipped' })
@@ -654,7 +878,7 @@ export class Ledger {
     if (holder === undefined || samePath(holder.record.root, root)) return plugin
     const name = `${plugin.name}-${shortHash(resolve(root).toLowerCase(), 6)}`
     const renamed = scanRoot(root, plugin.source, { name })
-    return { ...renamed, warnings: [...renamed.warnings, { code: 'name-conflict', message: `a plugin named ${plugin.name} is already installed from ${holder.record.root}; this one is installed as ${name}` }] }
+    return { ...renamed, displayName: plugin.displayName ?? plugin.name, warnings: [...renamed.warnings, { code: 'name-conflict', message: `a plugin named ${plugin.name} is already installed from ${holder.record.root}; this one is installed as ${name}` }] }
   }
 
   private buildRecord(
@@ -678,6 +902,7 @@ export class Ledger {
       id: plugin.id,
       source: plugin.source,
       name: plugin.name,
+      ...(plugin.displayName !== undefined ? { displayName: plugin.displayName } : {}),
       root: plugin.root,
       ...(plugin.version !== undefined ? { version: plugin.version } : {}),
       ...(plugin.license !== undefined ? { license: plugin.license } : {}),
@@ -691,7 +916,18 @@ export class Ledger {
       outcomes: [...outcomes.values()],
       receipts: [...(existing?.record.receipts ?? []), receiptId],
       ...(existing?.record.disabled !== undefined && existing.record.disabled.length > 0 ? { disabled: existing.record.disabled } : {}),
+      ...this.followed(plugin, existing),
     }
+  }
+
+  /** What a record follows: kept from its earlier record, else the harness install it was migrated from, if any. */
+  private followed(plugin: ForeignPlugin, existing: LiveInstall | undefined): Pick<InstalledPluginRecord, 'harnessInstall' | 'harnessUpdate' | 'keptAt'> {
+    if (existing !== undefined) {
+      const { harnessInstall, harnessUpdate, keptAt } = existing.record
+      return { ...(harnessInstall !== undefined ? { harnessInstall } : {}), ...(harnessUpdate !== undefined ? { harnessUpdate } : {}), ...(keptAt !== undefined ? { keptAt } : {}) }
+    }
+    const harnessInstall = newHarnessInstall(plugin.root, plugin.displayName ?? plugin.name, plugin.source, harnessInstalls(homedir()), homedir())
+    return harnessInstall === undefined ? {} : { harnessInstall }
   }
 
   report(result: ApplyResult): InstallReport {
@@ -753,10 +989,8 @@ export class Ledger {
   }
 
   private writeLedger(): void {
-    if (this.unreadLedger !== undefined) {
-      throw new HarnessError('internal', `the ledger could not be read at startup (${this.unreadLedger}); nothing is written over it`, {
-        suggestion: 'Fix or move aside .harness-forge/state.json, then restart DSH.',
-      })
+    if (this.writeRefusal !== undefined) {
+      throw new HarnessError('internal', this.writeRefusal.message, { suggestion: this.writeRefusal.suggestion })
     }
     const state: CompatState = { schemaVersion: 2, plugins: [...this.live.values()].filter(install => install.unrecorded !== true).map(install => install.record) }
     writeState(state, this.statePath)
@@ -818,11 +1052,15 @@ export function mountsFor(plugin: ForeignPlugin, outcomes: ReadonlyMap<string, C
     if (component === undefined) continue
     if (component.kind !== 'mcp' && component.kind !== 'hooks' && component.kind !== 'agent' && component.kind !== 'code') continue
     if (outcome.status === 'skipped' || outcome.status === 'inactive') continue
+    // A run-time failure is in the failing observations; `message` then only names the mount.
+    const failing = (outcome.observations ?? []).filter(observation => !observation.ok).map(observation => (observation.detail !== undefined ? `${observation.signal}: ${observation.detail}` : observation.signal))
+    const error = failing.length > 0 ? failing.join('; ') : outcome.message
     mounts.push({
       kind: component.kind === 'agent' ? 'agent' : component.kind === 'code' ? 'code' : component.kind === 'mcp' ? 'mcp' : 'hooks',
       name: component.name,
+      ...(component.kind === 'hooks' ? { events: component.events } : {}),
       status: outcome.status === 'failed' ? 'failed' : 'mounted',
-      ...(outcome.status === 'failed' && outcome.message !== undefined ? { error: outcome.message } : {}),
+      ...(outcome.status === 'failed' && error !== undefined ? { error } : {}),
     })
   }
   return mounts

@@ -63,6 +63,8 @@ describe('the porting brief', () => {
     expect(brief).toContain('LOCAL plugin into the current profile only')
     expect(brief).toMatch(/publish nothing unless the user explicitly asks, and then only under the user's own npm scope/u)
     expect(brief).toContain("Respect the original's license (MIT)")
+    expect(brief).toContain('Never read DSH\'s access token or logs, `/proc` of another process')
+    expect(brief).not.toContain('Host log')
   })
 
   it('lists the questions the part leaves to the user, with defaults', () => {

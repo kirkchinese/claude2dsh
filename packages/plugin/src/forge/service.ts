@@ -12,21 +12,18 @@ import {
   detectSource,
   dialectOf,
   HarnessError,
-  readMarketplace,
   type ForeignPlugin,
-  type MarketplaceIndex,
   type Observation,
   type Plan,
   scanRoot as scanForeignRoot,
 } from '@kirkchinese/harness-forge-core'
 import { createForeignShell, type ForeignShell } from '../hooks/shell.js'
 import { Invocations } from '../shared/invocation.js'
-import { fetchGitSource } from './marketplace-install.js'
 import { sessionDirectory } from '../dsh/host.js'
 import type { InstalledPluginRecord } from './state.js'
 import { loggerOf, messageOf } from '../shared/util.js'
 import type { Disposer, MountKind, Mounter, RowApis } from './contract.js'
-import { Ledger, type ApplyResult, type InstallReport } from './ledger.js'
+import { Ledger, type ApplyProgress, type ApplyResult, type InstallReport } from './ledger.js'
 import { ProjectAssets } from './projects.js'
 import { WorkspaceTrust } from './trust.js'
 import { ImportedSettings } from './settings.js'
@@ -76,7 +73,11 @@ export class HarnessForge {
    */
   /** `remote`: what plugins from the network are fetched with (tests replace git, npm, fetch and the resolver). */
   constructor(readonly ctx: Context, readonly statePath: string, readonly dataRoot: string, options: { readonly remote?: { readonly deps?: FetchDeps; readonly limits?: FetchLimits } } = {}) {
-    this.shell = createForeignShell(process.env, dataRoot)
+    this.shell = createForeignShell(process.env, dataRoot, (path) => {
+      const message = `could not remove the hook input file ${path}`
+      loggerOf(ctx)?.warn?.(`harness-forge: ${message}`)
+      this.fault('hooks', new Error(message))
+    })
     this.invocations = new Invocations(ctx, name => this.lookup('agents')?.presetOf(name), (agent, signal) => sessionDirectory(ctx, agent, signal))
     this.settings = new ImportedSettings(sessionId => this.invocations.rules(sessionId))
     this.ledger = new Ledger(ctx, statePath, dataRoot, error => this.fault('ledger', error))
@@ -260,24 +261,6 @@ export class HarnessForge {
     return this.ledger.report(result)
   }
 
-  /** Read a marketplace index without installing anything. */
-  scanMarketplace(path: string): MarketplaceIndex {
-    return readMarketplace(path)
-  }
-
-  /** Install one marketplace entry from a local path or git source. */
-  async installMarketplace(path: string, name: string): Promise<InstallReport> {
-    const index = readMarketplace(path)
-    const entry = index.entries.find(candidate => candidate.name === name)
-    if (entry === undefined) throw new HarnessError('marketplace-failed', `marketplace ${index.name} has no entry "${name}"`)
-    if (entry.source.kind === 'path' && entry.source.path !== undefined) return this.install(entry.source.path, marketplaceDialect(index))
-    if (entry.source.kind === 'git') {
-      const root = await fetchGitSource(entry.source, join(this.dataRoot, 'marketplace-cache'))
-      return this.install(root, marketplaceDialect(index))
-    }
-    throw new HarnessError('unsupported-source', `entry "${name}" uses ${entry.source.kind}; supported marketplace sources are local path and git`)
-  }
-
   /** Undo the actions of one receipt and remove its live registrations. */
   undo(receiptId: string): Promise<boolean> {
     return this.ledger.exclusive(() => this.ledger.undoNow(receiptId))
@@ -301,6 +284,21 @@ export class HarnessForge {
       }
       return true
     })
+  }
+
+  /** Keep a plugin its harness no longer runs as the person's own copy: it mounts again and follows no harness. */
+  keep(id: string): Promise<ApplyResult> {
+    return this.ledger.exclusive(() => this.ledger.keepNow(id))
+  }
+
+  /** Follow the harnesses' updates and removals of migrated plugins; see `follow.ts`. Settles once applied. */
+  follow(): Promise<void> {
+    return this.ledger.follow()
+  }
+
+  /** How far applying the ledger's records has got, while some still are (at startup, after a harness change). */
+  applying(): ApplyProgress | undefined {
+    return this.ledger.applying()
   }
 
   /** Scan one plugin without writing anything. */
@@ -330,10 +328,3 @@ export class HarnessForge {
   }
 }
 
-/** Infer the dialect of a marketplace index from its manifest location. */
-export function marketplaceDialect(index: MarketplaceIndex): string {
-  const normalized = index.manifestPath.replace(/\\/gu, '/')
-  if (normalized.includes('/.agents/plugins/')) return 'codex'
-  if (normalized.includes('/.claude-plugin/')) return 'claude-code'
-  return 'agent-plugins'
-}

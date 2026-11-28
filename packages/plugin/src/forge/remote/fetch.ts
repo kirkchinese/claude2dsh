@@ -207,14 +207,55 @@ function processRunner(resolveCommand: (args: readonly string[]) => { command: s
   })
 }
 
+/**
+ * Where the URL scheme ending at `colon` (the `:` of a `://`) starts, as
+ * `\b[a-z][a-z0-9+.-]*` finds it, any length. Scans, here and below, rather than
+ * patterns: a pattern tried from every letter of a long run is quadratic.
+ */
+function schemeStart(text: string, colon: number): number | undefined {
+  let start = colon
+  while (start > 0 && /[a-z0-9+.-]/iu.test(text[start - 1] ?? '')) start--
+  for (let at = start; at < colon; at++) {
+    if (/[a-z]/iu.test(text[at] ?? '') && (at === 0 || !/\w/u.test(text[at - 1] ?? ''))) return at
+  }
+  return undefined
+}
+
+/** Where the run from `from` of characters not in `stop` ends. */
+function runEnd(text: string, from: number, stop: RegExp): number {
+  let end = from
+  while (end < text.length && !stop.test(text[end] ?? '')) end++
+  return end
+}
+
 /** A text with the credentials of any URL in it replaced (proxy passwords never reach a message). */
 export function redact(text: string): string {
-  return text.replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^/@\s]*@/giu, '$1***@')
+  let out = ''
+  let cursor = 0
+  for (let colon = text.indexOf('://'); colon !== -1; colon = text.indexOf('://', colon + 3)) {
+    if (schemeStart(text, colon) === undefined) continue
+    const end = runEnd(text, colon + 3, /[/@\s]/u)
+    if (text[end] !== '@') continue
+    out += `${text.slice(cursor, colon + 3)}***@`
+    cursor = end + 1
+  }
+  return out + text.slice(cursor)
 }
 
 /** A text with every URL in it shown as {@link shown} shows one (for what git and npm write to stderr). */
 export function scrub(text: string): string {
-  return redact(text).replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/giu, url => shown(url))
+  const redacted = redact(text)
+  let out = ''
+  let cursor = 0
+  for (let colon = redacted.indexOf('://'); colon !== -1; colon = redacted.indexOf('://', Math.max(colon + 3, cursor))) {
+    const start = schemeStart(redacted, colon)
+    if (start === undefined || start < cursor) continue
+    const end = runEnd(redacted, colon + 3, /[\s'"<>]/u)
+    if (end === colon + 3) continue
+    out += redacted.slice(cursor, start) + shown(redacted.slice(start, end))
+    cursor = end
+  }
+  return out + redacted.slice(cursor)
 }
 
 /** A URL as messages show it: no credentials, no query string (signed URLs), no fragment. */
@@ -945,7 +986,7 @@ export class RemoteFetcher {
     if (fromEnv !== undefined && normalizeRegistry(fromEnv) !== undefined) return normalizeRegistry(fromEnv)!
     try {
       const npmrc = readFileSync(process.env['npm_config_userconfig'] ?? join(homedir(), '.npmrc'), 'utf8')
-      const line = /^\s*registry\s*=\s*(\S+)\s*$/mu.exec(npmrc)?.[1]
+      const line = /^[ \t]*registry[ \t]*=[ \t]*(\S+)[ \t]*\r?$/mu.exec(npmrc)?.[1]
       if (line !== undefined && !line.includes('${') && normalizeRegistry(line) !== undefined) return normalizeRegistry(line)!
     } catch {
       // No .npmrc.
@@ -1026,7 +1067,8 @@ export class RemoteFetcher {
     writeJson(join(prefix, 'package.json'), { name: 'harness-forge-remote', private: true, dependencies: dependencies.dependencies, optionalDependencies: dependencies.optionalDependencies })
     if (Object.keys(dependencies.dependencies).length + Object.keys(dependencies.optionalDependencies).length === 0) return
     const cache = join(prefix, '.npm-cache')
-    const args = ['--ignore-scripts', '--no-audit', '--no-fund', `--registry=${registry}`, `--cache=${cache}`]
+    // The lockfile version is forced, so a person's npmrc cannot pick one the audit cannot read.
+    const args = ['--ignore-scripts', '--no-audit', '--no-fund', `--lockfile-version=${String(NPM_LOCKFILE_VERSION)}`, `--registry=${registry}`, `--cache=${cache}`]
     const step = { cwd: prefix, watch: prefix, stepMs: this.limits.fetchMs, what: 'installing the dependencies' }
     try {
       await this.run(this.deps.npm, 'npm', ['install', '--package-lock-only', ...args], context, step)
@@ -1066,7 +1108,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * The lockfile version npm is told to write: 3, the default of npm 7 and
+ * later, holds only the `packages` map the audit reads (version 1 has none,
+ * so an audit of it would see nothing).
+ */
+export const NPM_LOCKFILE_VERSION = 3
+/** Lockfile versions with a `packages` map (2 carries it beside version 1's data). */
+const AUDITED_LOCKFILE_VERSIONS: readonly unknown[] = [2, 3]
+
 interface Lockfile {
+  readonly lockfileVersion?: unknown
   readonly packages?: Readonly<Record<string, { readonly resolved?: unknown; readonly integrity?: unknown; readonly link?: unknown; readonly inBundle?: unknown }>>
 }
 
@@ -1079,7 +1131,11 @@ interface Lockfile {
  */
 export function refuseForeignPackages(lock: Lockfile, registry: string): void {
   const origin = new URL(registry).origin
-  for (const [path, entry] of Object.entries(lock.packages ?? {})) {
+  // Fail closed: a lockfile the audit cannot read is not a tree with nothing in it.
+  if (!AUDITED_LOCKFILE_VERSIONS.includes(lock.lockfileVersion) || !isRecord(lock.packages)) {
+    throw new HarnessError('unsupported-source', `npm wrote a lockfile Harness Forge cannot check (lockfileVersion ${JSON.stringify(lock.lockfileVersion ?? null)}${isRecord(lock.packages) ? '' : ', no packages map'}), so the dependencies are not installed`, { suggestion: `Use npm 7 or later; Harness Forge asks it for lockfile version ${String(NPM_LOCKFILE_VERSION)}.` })
+  }
+  for (const [path, entry] of Object.entries(lock.packages)) {
     if (path === '' || entry.inBundle === true) continue
     const name = path.replace(/^.*node_modules\//u, '')
     const resolved = typeof entry.resolved === 'string' ? entry.resolved : undefined

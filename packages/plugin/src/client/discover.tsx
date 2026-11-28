@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { call } from './typert.js'
-import { Chevron, fill, harnessName, itemName, kindLabel, messageOf, Notice, Reasons, StateLabel, VerdictBar, type Harness, type Item, type TFn } from './shared.js'
+import { Chevron, fill, harnessName, itemName, kindLabel, messageOf, Notice, Reasons, StateLabel, VerdictBar, type Harness, type Item, type Key, type Part, type TFn } from './shared.js'
 
 interface MarketEntry {
   readonly name: string
@@ -44,7 +44,7 @@ interface Confirmation {
   readonly revision: string
   readonly registry?: string
   readonly dependencies?: number
-  readonly parts: ReadonlyArray<{ readonly kind: string; readonly name: string; readonly gap?: string; readonly change?: 'new' | 'changed' }>
+  readonly parts: ReadonlyArray<{ readonly kind: string; readonly name: string; readonly gap?: string; readonly reasons?: Part['reasons']; readonly change?: 'new' | 'changed' }>
   readonly runsCode: readonly string[]
   readonly works: number
   readonly total: number
@@ -59,11 +59,15 @@ interface RemoteInstall {
   readonly source: string
   readonly page?: string
   readonly revision: string
+  /** Taken from a marketplace's folder on this computer: that marketplace's name. */
+  readonly localMarketplace?: string
 }
 
 interface Sources {
   readonly defaults: ReadonlyArray<{ readonly id: string; readonly input: string; readonly harness: string }>
   readonly added: ReadonlyArray<{ readonly input: string; readonly name: string; readonly harness: string }>
+  /** Marketplaces the harnesses on this computer added: their plugins are offers, installed one at a time. */
+  readonly local?: ReadonlyArray<{ readonly input: string; readonly name: string; readonly harness: string }>
   readonly installs: readonly RemoteInstall[]
   readonly git: boolean
 }
@@ -75,6 +79,22 @@ interface UpdateStatus {
   /** Names the revision found: preparing the update fetches exactly that one. */
   readonly token?: string
   readonly error?: string
+}
+
+/** The key of the words for why a plugin's id cannot be told. */
+const PLUGIN_ID_PROBLEM: Readonly<Record<NonNullable<Item['enabledUnknown']>, Key>> = {
+  missing: 'pluginIdMissing',
+  ambiguous: 'pluginIdAmbiguous',
+  dynamic: 'pluginIdDynamic',
+  escape: 'pluginIdEscape',
+}
+
+/** Why "Migrate all" leaves a plugin out: switched off in its harness, or not known to run there, and why. */
+function holdNote(item: Item, t: TFn): string | undefined {
+  const harness = harnessName(item.source)
+  if (item.enabled === false) return fill(t('disabledInNote'), { harness })
+  if (item.enabledUnknown !== undefined) return fill(t('enabledUnknownNote'), { harness, why: t(PLUGIN_ID_PROBLEM[item.enabledUnknown]) })
+  return undefined
 }
 
 /** One plugin or the person's settings, with its parts behind an expander. */
@@ -89,13 +109,16 @@ function ItemRow({ item, t, busy, onMigrate }: { item: Item; t: TFn; busy: boole
             <span className="hf-item-title">
               {itemName(item, t)}
               {item.installed ? <span className="hf-tag">{t('migratedTag')}</span> : null}
+              {item.enabled === false ? <span className="hf-tag">{fill(t('disabledInTag'), { harness: harnessName(item.source) })}</span> : null}
+              {item.enabledUnknown !== undefined ? <span className="hf-tag">{fill(t('enabledUnknownTag'), { harness: harnessName(item.source) })}</span> : null}
             </span>
             <span className="hf-item-desc">{item.version !== undefined ? `${item.version} · ` : ''}{item.root}</span>
+            {holdNote(item, t) !== undefined ? <span className="hf-reason">{holdNote(item, t)}</span> : null}
           </span>
         </button>
         <VerdictBar item={item} t={t} />
         <span style={{ width: 76, flex: 'none', display: 'flex', justifyContent: 'flex-end' }}>
-          {item.installed ? null : <button className="hf-btn" disabled={busy} onClick={() => { onMigrate(item) }}>{t('migrate')}</button>}
+          {item.installed ? null : <button className="hf-btn" disabled={busy} title={holdNote(item, t)} onClick={() => { onMigrate(item) }}>{t('migrate')}</button>}
         </span>
       </div>
       {open ? (
@@ -144,7 +167,7 @@ function ConfirmInstall({ t, plan, busy, onConfirm, onCancel }: { t: TFn; plan: 
               <span className="hf-part-kind">{kindLabel(part.kind, t)}</span>
               <span className="hf-part-name">{part.name}</span>
               {part.change !== undefined ? <span className="hf-tag">{t(part.change === 'new' ? 'partNew' : 'partChanged')}</span> : null}
-              {part.gap !== undefined ? <div className="hf-reason">{part.gap}</div> : null}
+              {part.reasons !== undefined ? <Reasons part={{ reasons: part.reasons }} t={t} /> : part.gap !== undefined ? <div className="hf-reason">{part.gap}</div> : null}
             </div>
           ))}
           {plan.update !== undefined && plan.update.removed.length > 0 ? <div className="hf-muted" style={{ marginTop: 4 }}>{fill(t('confirmRemoved'), { names: plan.update.removed.join(', ') })}</div> : null}
@@ -282,6 +305,18 @@ function GetPlugins({ t, onInstalled }: { t: TFn; onInstalled: () => void }): JS
           </div>
         </div>
       ) : null}
+      {sources?.local !== undefined && sources.local.length > 0 ? (
+        <div style={{ marginTop: 12 }}>
+          <div className="hf-muted" style={{ marginBottom: 6 }}>{t('marketLocal')}</div>
+          <div className="hf-form">
+            {sources.local.map(item => (
+              <button key={item.input} className="hf-btn" disabled={busy !== undefined} title={item.input} onClick={() => { void open(item.input) }}>
+                {item.name}<span className="hf-tag">{harnessName(item.harness)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {error !== undefined ? <Notice kind="error">{error}</Notice> : null}
       {notice !== undefined ? <Notice>{notice}</Notice> : null}
       {plan !== undefined ? <ConfirmInstall t={t} plan={plan} busy={busy === 'confirm'} onConfirm={() => { void confirm() }} onCancel={cancel} /> : null}
@@ -347,7 +382,11 @@ function GetPlugins({ t, onInstalled }: { t: TFn; onInstalled: () => void }): JS
                   <div className="hf-item-head">
                     <span className="hf-item-main">
                       <span className="hf-item-title">{install.name}<span className="hf-code">{install.revision.length === 40 ? install.revision.slice(0, 12) : install.revision}</span></span>
-                      <span className="hf-item-desc">{install.page !== undefined ? <a href={install.page} target="_blank" rel="noreferrer">{install.source}</a> : install.source}</span>
+                      <span className="hf-item-desc" title={install.source}>
+                        {install.localMarketplace !== undefined
+                          ? fill(t('remoteLocalMarketplace'), { name: install.localMarketplace })
+                          : install.page !== undefined ? <a href={install.page} target="_blank" rel="noreferrer">{install.source}</a> : install.source}
+                      </span>
                       {status?.error !== undefined ? <span className="hf-reason">{status.error}</span> : null}
                     </span>
                     {status === undefined ? null : status.update && status.latest !== undefined && status.token !== undefined

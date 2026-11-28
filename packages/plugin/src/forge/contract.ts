@@ -13,6 +13,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ComponentOutcome, ForeignComponent, ForeignPlugin, Gap, PlanAction } from '@kirkchinese/harness-forge-core'
 import type { HookConfigSource } from '../hooks/config.js'
 import type { RemoteMcpHost } from '../mcp/mount.js'
+import type { OpenedSession } from '../sessions/persist.js'
 
 /** What a row's start returns: its teardown. */
 export type Disposer = () => unknown
@@ -168,6 +169,31 @@ export interface McpApi {
   startSignIn(serverName: string, sessionId?: string): string
   /** The remote-MCP host a component's servers use: its sign-in state becomes the component's evidence. */
   remoteHost(componentId: string, scope?: MountScope): RemoteMcpHost
+  /**
+   * A server's own filters and approval modes for one call (`mcp__<server>__<tool>`, or `capability_call` with
+   * `mcp:<server>/<tool>`): `deny` for a tool filtered out, `ask` for one that needs approval, undefined otherwise.
+   * The one decision the row's pre-execute check and hook-initiated calls both use.
+   */
+  toolPolicy(call: McpToolCall): McpToolVerdict | undefined
+  /**
+   * The registered name of the server an `mcp_tool` hook of plugin `pluginId` names: among that plugin's own
+   * servers by the name it declared them under (`plugin:<plugin>:<server>`: among that plugin's), else among the
+   * user's own servers (config.toml, the user `.mcp.json`); the session's own first. Undefined when none is mounted.
+   */
+  hookServer(pluginId: string, server: string, sessionId?: string): string | undefined
+}
+
+/** A tool call as the MCP tool policy reads it. */
+export interface McpToolCall {
+  readonly name: string
+  readonly arguments?: unknown
+  readonly agent?: unknown
+}
+
+/** What a server's tool policy says about one call. */
+export interface McpToolVerdict {
+  readonly kind: 'deny' | 'ask'
+  readonly reason: string
 }
 
 /** What the mods row offers. */
@@ -181,12 +207,29 @@ export interface ModsApi {
 /** A harness whose sessions can be imported. */
 export type SessionSource = 'claude-code' | 'codex' | 'opencode'
 
+/** Sessions per page when the caller names no limit. */
+export const SESSION_PAGE_SIZE = 50
+
+/** Which page of a harness's sessions to read: `cursor` is the `next` of the previous page. */
+export interface SessionPageRequest {
+  readonly cursor?: number
+  readonly limit?: number
+}
+
+/** One page of sessions, newest first; `next` is the cursor of the following page, absent on the last. */
+export interface SessionPage<T = unknown> {
+  readonly sessions: readonly T[]
+  readonly next?: number
+}
+
 /** What the sessions row offers. */
 export interface SessionsApi {
-  /** The sessions of one harness available for import. */
-  sessions(root: string | undefined, source: SessionSource): Promise<readonly unknown[]>
+  /** One page of the sessions of one harness available for import, newest first; each says which DSH session already holds it (`importedId`). */
+  sessions(root: string | undefined, source: SessionSource, page?: SessionPageRequest): Promise<SessionPage>
   /** Import one session into DSH. */
   importSession(path: string, targetId: string | undefined, source: SessionSource, sourceId: string | undefined): Promise<unknown>
+  /** Open a session an import stored: known to DSH again (workspace, live) and out of its archive. */
+  open(id: string): Promise<OpenedSession>
 }
 
 /** What the instruction files of a workspace are, for the workbench. */
@@ -199,6 +242,8 @@ export interface ContextStatus {
   readonly files: readonly { readonly path: string; readonly bytes: number }[]
   /** The files DSH injects itself (`CLAUDE.md`, `CLAUDE.local.md`); only their imports come from here. */
   readonly hostFiles?: readonly { readonly path: string; readonly bytes: number }[]
+  /** Set when reading stopped at a limit: why, and where. */
+  readonly stopped?: string
 }
 
 /** What the context row offers. */
@@ -235,7 +280,7 @@ export function mountKindOf(action: PlanAction, component: ForeignComponent): Mo
   switch (action.kind) {
     case 'link-skill-root': return 'skill'
     case 'register-command': return 'command'
-    case 'mount-mcp': return 'mcp'
+    case 'mount-mcp': return component.kind === 'mcp' && component.notStarted !== undefined ? { skipped: component.notStarted.detail } : 'mcp'
     case 'mount-hooks': return 'hooks'
     case 'register-agent': return 'agent'
     case 'apply-settings': return 'settings'

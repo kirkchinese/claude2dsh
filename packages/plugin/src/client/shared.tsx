@@ -19,7 +19,7 @@ export function messageOf(cause: unknown): string {
 }
 
 export type PartState = 'works' | 'partial' | 'needs-port' | 'unsupported' | 'failed' | 'inactive' | 'off' | 'provided'
-export type ReasonCode = 'events-never-raised' | 'cannot-block' | 'handlers-inert' | 'output-style' | 'experimental-runtime' | 'no-equivalent-ui' | 'not-mapped' | 'hosted-connector' | 'unknown-transport' | 'run-failed' | 'setup-failed' | 'unreadable' | 'row-off' | 'other'
+export type ReasonCode = 'events-never-raised' | 'cannot-block' | 'handlers-inert' | 'output-style' | 'experimental-runtime' | 'no-equivalent-ui' | 'not-mapped' | 'hosted-connector' | 'unknown-transport' | 'disabled-in-plugin' | 'disabled-in-config' | 'disabled-in-claude-code' | 'needs-chatgpt-sign-in' | 'run-failed' | 'setup-failed' | 'unreadable' | 'folder-gone' | 'not-followed' | 'row-off' | 'other'
 /** A dialect id: `claude-code`, `codex`, `opencode`, or a common format such as `agent-skills`. */
 export type Source = string
 
@@ -44,6 +44,22 @@ export interface Item {
   readonly installed: boolean
   readonly version?: string
   readonly parts: readonly Part[]
+  /** Downloaded by Get plugins: removing it deletes its files. */
+  readonly fetched?: true
+  /** Not migrated and switched off in its own harness: "Migrate all" leaves it out. */
+  readonly enabled?: false
+  /** Not migrated, and whether its harness runs it cannot be told, with why: "Migrate all" leaves it out. */
+  readonly enabledUnknown?: 'missing' | 'ambiguous' | 'dynamic' | 'escape'
+  /** Migrated, but its harness no longer runs it: nothing of it runs until the person keeps or removes it. */
+  readonly detached?: { readonly reason: 'uninstalled' | 'switched-off' | 'never-installed' | 'misread'; readonly harness: Source; readonly folderGone: boolean }
+  /** The last update its harness made, which the migrated plugin followed. */
+  readonly updated?: { readonly harness: Source; readonly from?: string; readonly to?: string; readonly at: string }
+}
+
+/** How far applying migrated plugins has got (at startup, or after a harness changed some). */
+export interface Applying {
+  readonly done: number
+  readonly total: number
 }
 
 /** A workspace of open sessions, with its trust and the project parts that wait for it. */
@@ -99,7 +115,7 @@ export const STATE_LABEL: Record<PartState, Key> = {
   provided: 'stateProvided',
 }
 
-const REASON_LABEL: Record<ReasonCode, Key | undefined> = {
+export const REASON_LABEL: Record<ReasonCode, Key | undefined> = {
   'events-never-raised': 'reasonEventsNeverRaised',
   'cannot-block': 'reasonCannotBlock',
   'handlers-inert': 'reasonHandlersInert',
@@ -109,9 +125,15 @@ const REASON_LABEL: Record<ReasonCode, Key | undefined> = {
   'not-mapped': 'reasonNotMapped',
   'hosted-connector': 'reasonHostedConnector',
   'unknown-transport': 'reasonUnknownTransport',
+  'disabled-in-plugin': 'reasonDisabledInPlugin',
+  'disabled-in-config': 'reasonDisabledInConfig',
+  'disabled-in-claude-code': 'reasonDisabledInClaudeCode',
+  'needs-chatgpt-sign-in': 'reasonNeedsChatgptSignIn',
   'run-failed': 'reasonRunFailed',
   'setup-failed': 'reasonSetupFailed',
   unreadable: 'reasonUnreadable',
+  'folder-gone': 'reasonFolderGone',
+  'not-followed': 'reasonNotFollowed',
   'row-off': 'reasonRowOff',
   other: undefined,
 }
@@ -145,6 +167,14 @@ export const ROW_TITLE: Record<string, Key> = {
 export function kindLabel(kind: string, t: TFn): string {
   const key = KIND_LABEL[kind]
   return key !== undefined ? t(key) : kind
+}
+
+/** A migrated part that failed to start, as Diagnostics lists it: its kind, name and, for hooks, its events. */
+export function mountLabel(mount: { readonly kind: string; readonly name: string; readonly events?: readonly string[] }, t: TFn): string {
+  const kind = kindLabel(mount.kind, t)
+  return mount.events !== undefined && mount.events.length > 0
+    ? fill(t('diagMountEvents'), { kind, name: mount.name, events: mount.events.join(t('listSeparator')) })
+    : fill(t('diagMountPart'), { kind, name: mount.name })
 }
 
 /** A part that can't fully run in DSH (the Gaps screen lists these). */
@@ -194,7 +224,7 @@ export function VerdictBar({ item, t }: { item: Item; t: TFn }): JSX.Element {
 }
 
 /** A part's reasons in words, with the specifics in small monospace. */
-export function Reasons({ part, t }: { part: Part; t: TFn }): JSX.Element | null {
+export function Reasons({ part, t }: { part: Pick<Part, 'reasons'> & Partial<Pick<Part, 'providedBy'>>; t: TFn }): JSX.Element | null {
   const provider = part.providedBy
   if (provider !== undefined) return (
     <div className="hf-reason">
@@ -207,11 +237,11 @@ export function Reasons({ part, t }: { part: Part; t: TFn }): JSX.Element | null
     <>
       {part.reasons.map((reason, index) => {
         const lead = REASON_LABEL[reason.code]
-        // A row-off detail names the row; the screens word it themselves.
-        const detail = reason.code === 'row-off' ? '' : reason.detail
+        // A row-off detail names the row, which the screens word themselves; a not-followed one the harness, worded here.
+        const detail = reason.code === 'row-off' || reason.code === 'not-followed' ? '' : reason.detail
         return (
           <div key={index} className="hf-reason">
-            {lead !== undefined ? <span>{t(lead)} </span> : null}
+            {lead !== undefined ? <span>{reason.code === 'not-followed' ? fill(t(lead), { harness: harnessName(reason.detail) }) : t(lead)} </span> : null}
             {detail.length > 0 ? <span className="hf-code">{detail}</span> : null}
           </div>
         )

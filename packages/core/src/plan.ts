@@ -96,7 +96,9 @@ function describe(component: ForeignComponent): string {
     case 'skill': return `Link skill root for ${component.name}`
     case 'command': return `Register slash command ${component.name}`
     case 'agent': return `Register agent preset ${component.name}`
-    case 'mcp': return `Mount MCP server ${component.name} (${component.transport})`
+    case 'mcp': return component.notStarted !== undefined
+      ? `Leave MCP server ${component.name} unstarted: ${component.notStarted.detail}`
+      : `Mount MCP server ${component.name} (${component.transport})`
     case 'hooks': return `Mount hook bridge ${component.name} (${component.events.join(', ') || 'no events'})`
     case 'code': return `Load ${component.runtime} ${component.name} through its runtime shim`
     case 'ui': return `Report UI surface ${component.name} (${component.surface}); not rendered`

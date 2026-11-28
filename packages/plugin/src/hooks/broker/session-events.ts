@@ -6,6 +6,7 @@
 import { existsSync, watch } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { contentPath } from '@kirkchinese/harness-forge-core'
 import { specific } from '../output.js'
 import { foreignTool } from '../vocabulary.js'
 import type { HookEngine } from './engine.js'
@@ -17,6 +18,15 @@ import type { AgentLike, Occurrence, SessionLike } from './types.js'
  * changes, approvals, model responses), the idle notification and the
  * FileChanged watchers, each raised in the background.
  */
+/**
+ * The files a `FileChanged` matcher names (`a.txt|b.md`), resolved against the working directory; a name on a
+ * network share the working directory is not on is left out unwatched (see `contentPath`).
+ */
+export function fileChangedTargets(matcher: string, cwd: string): string[] {
+  return matcher.split('|').map(item => item.trim()).filter(item => item.length > 0)
+    .map(name => contentPath(name, cwd)).filter((path): path is string => path !== undefined)
+}
+
 export class SessionEvents {
   constructor(private readonly engine: HookEngine) {}
 
@@ -130,7 +140,7 @@ export class SessionEvents {
     const files = new Set(state.watchPaths)
     for (const source of this.engine.sources.values()) {
       for (const group of source.table.get('FileChanged') ?? []) {
-        for (const name of (group.matcher ?? '').split('|').map(item => item.trim()).filter(item => item.length > 0)) files.add(resolve(cwd, name))
+        for (const file of fileChangedTargets(group.matcher ?? '', cwd)) files.add(file)
       }
     }
     const byDir = new Map<string, Set<string>>()

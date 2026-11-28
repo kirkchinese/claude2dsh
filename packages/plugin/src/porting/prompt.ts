@@ -54,6 +54,7 @@ export function portPrompt(input: PortPromptInput): string {
     '   b. Each behaviour the acceptance criteria name happens: exercise it and observe the result (the tool\'s answer, the command\'s output, the hook acting, the surface\'s value).',
     `   c. \`${VERIFY_TOOL}\` with \`${verifyArgs}\` answers \`"covered": true\`.`,
     '   When a check fails, fix the cause and run all three again.',
+    '   To check what the page shows, use runtime inspection: `cordis_inspect_list`, then `cordis_inspect_query` on the Client `Slots.listSubTree` (the live slot tree and props, when a page is connected); if that cannot show it, ask the user to look and confirm. Never read DSH\'s access token or logs, `/proc` of another process, or another process\'s files, and never drive a browser with credentials taken from them.',
     '4. **Report immediately when step 3 passes.** Do not start or wait for optional reviews before sending the final report; give the result first, then mention any review still running. Say what now works, with the evidence (what each check showed, including the `' + VERIFY_TOOL + '` answer), where the source is, and what still differs from the original. If you cannot close the gap, say exactly what blocks it, what you tried, and what the user can do.',
     '',
     '---',

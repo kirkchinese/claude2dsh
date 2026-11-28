@@ -52,6 +52,12 @@ describe('the port prompt', () => {
     expect(prompt).toMatch(/say exactly what blocks it/u)
   })
 
+  it('verifies the page through runtime inspection or the user, never through DSH\'s credentials', () => {
+    expect(prompt).toContain('Never read DSH\'s access token or logs, `/proc` of another process, or another process\'s files, and never drive a browser with credentials taken from them.')
+    expect(prompt).toContain('Client `Slots.listSubTree`')
+    expect(prompt).toContain('ask the user to look and confirm')
+  })
+
   it('names the user\'s language, and ends with the brief', () => {
     expect(prompt).toContain('Talk to the user in Chinese (简体中文), the language of their DSH interface')
     expect(portPrompt({ plugin, component, brief: 'b' })).toContain('Talk to the user in the language they write in.')

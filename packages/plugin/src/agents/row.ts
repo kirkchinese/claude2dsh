@@ -153,9 +153,11 @@ export function startAgents(ctx: Context, forge: HarnessForge): Disposer {
   }))
   // A preset registry that starts after this row retries the agents that needed it.
   parts.add('preset registry', () => {
-    const fiber = ctx.inject(['agentPresets'], () => { forge.ledger.reapply() }) as unknown as { dispose(): unknown }
+    const fiber = ctx.inject(['agentPresets'], () => { forge.ledger.reapply('agent') }) as unknown as { dispose(): unknown }
     return () => fiber.dispose()
   })
   parts.add('api', () => forge.provide('agents', api))
+  // Torn down first: the row's context is already inactive, so the agents withdrawn after this leave the tool alone.
+  parts.add('closing', () => () => { agents.close() })
   return () => parts.dispose()
 }

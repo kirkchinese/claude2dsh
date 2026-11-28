@@ -18,7 +18,7 @@ import zh from './locale/zh.json' with { type: 'json' }
 import contribution, { call, isWorkbenchOff, setMountedRemote, setMountedRemoteError } from './typert.js'
 import { CSS } from './styles.js'
 import { registerModsDock } from './mods.js'
-import { isGap, messageOf, Notice, type Harness, type Item, type Key, type TFn, type Workspace } from './shared.js'
+import { fill, isGap, messageOf, Notice, type Applying, type Harness, type Item, type Key, type TFn, type Workspace } from './shared.js'
 import { DiscoverScreen } from './discover.js'
 import { MigratedScreen, TrustBanners } from './migrated.js'
 import { GapsScreen } from './gaps.js'
@@ -28,6 +28,11 @@ import { ChatImportOffer, useSessionImport } from './chat-import.js'
 const NS = 'harnessForge'
 const PANEL_ID = 'harness-forge' as never
 const INTRO_KEY = 'harness-forge.intro-dismissed'
+/**
+ * How often the page asks again while migrated plugins are still being applied: applying one takes about a second
+ * (72 took some 70 s at startup), so the count moves visibly without asking more often than it can change.
+ */
+const APPLYING_POLL_MS = 2000
 
 /** Services the browser half needs before apply runs. */
 export const inject = ['slots', 'locale', 'remote']
@@ -110,14 +115,16 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   const [error, setError] = useState<string | undefined>(undefined)
   const [workbenchOff, setWorkbenchOff] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [applying, setApplying] = useState<Applying | undefined>(undefined)
   const [introDismissed, setIntroDismissed] = useState(readDismissed)
   const sessionImport = useSessionImport()
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
-      const overview = await call<{ harnesses: Harness[]; fetched?: Item[]; workspaces?: Workspace[] }>('overview')
+      const overview = await call<{ harnesses: Harness[]; fetched?: Item[]; workspaces?: Workspace[]; applying?: Applying }>('overview')
       setHarnesses(overview.harnesses)
+      setApplying(overview.applying)
       setFetched(overview.fetched ?? [])
       setWorkspaces(overview.workspaces ?? [])
       setError(undefined)
@@ -136,6 +143,13 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // While records are still being applied, the lists grow: ask again until every one is done.
+  useEffect(() => {
+    if (applying === undefined) return
+    const timer = setTimeout(() => { void load() }, APPLYING_POLL_MS)
+    return () => { clearTimeout(timer) }
+  }, [applying, load])
 
   const dismissIntro = (): void => {
     setIntroDismissed(true)
@@ -210,6 +224,9 @@ function HarnessPage({ t }: { t: TFn }): JSX.Element {
         {error !== undefined && secondary === undefined ? <Notice kind="error">{error}</Notice> : null}
         {secondary === undefined && harnesses === undefined && error === undefined ? <div className="hf-empty">{t('loading')}</div> : null}
 
+        {applying !== undefined && (screen === 'discover' || screen === 'migrated')
+          ? <Notice>{fill(t('applying'), { done: applying.done, total: applying.total })}</Notice>
+          : null}
         {screen === 'discover' || screen === 'migrated' ? <TrustBanners t={t} workspaces={workspaces} reload={load} /> : null}
         {harnesses !== undefined && screen === 'discover' ? <DiscoverScreen t={t} harnesses={harnesses} reload={load} /> : null}
         {harnesses !== undefined && screen === 'migrated' ? <MigratedScreen t={t} items={migrated} signInWaiting={signInWaiting} reload={load} /> : null}
@@ -248,7 +265,7 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     label: () => t('panel'),
   }, HarnessIcon as never))
-  registerModsDock(ctx)
+  registerModsDock(ctx, t)
 
   void (async () => {
     try {

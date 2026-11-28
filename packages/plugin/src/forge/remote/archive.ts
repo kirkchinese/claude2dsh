@@ -9,14 +9,12 @@
  * @module @kirkchinese/harness-forge
  */
 import { createHash } from 'node:crypto'
-import { copyFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
-import { promisify } from 'node:util'
-import { gunzip, inflateRaw } from 'node:zlib'
+import { Readable, type Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { createGunzip, createInflateRaw } from 'node:zlib'
 import { HarnessError, isInside } from '@kirkchinese/harness-forge-core'
-
-const gunzipAsync = promisify(gunzip)
-const inflateRawAsync = promisify(inflateRaw)
 
 /** Bounds on what one unpack or copy may write. */
 export interface TreeLimits {
@@ -50,10 +48,42 @@ function special(name: string): HarnessError {
   return new HarnessError('fetch-failed', `the archive contains a link or special file (${name}); plugins are plain files, so Harness Forge does not unpack it`)
 }
 
+/** Stop when cancellation (or the deadline) has fired, with its reason. */
+function stopIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new HarnessError('fetch-failed', 'cancelled')
+}
+
 /** Let timers (the deadline) and cancellation in, and stop when they fired. */
 async function checkpoint(signal: AbortSignal | undefined): Promise<void> {
   await new Promise<void>((resolvePromise) => { setImmediate(resolvePromise) })
-  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new HarnessError('fetch-failed', 'cancelled')
+  stopIfAborted(signal)
+}
+
+/** Raised inside {@link decompress} when the output passes its bound. */
+class OutputTooLarge extends Error {}
+
+/**
+ * Decompress `input` as a stream, chunk by chunk, so cancellation stops it
+ * part-way and its output is bounded as it grows.
+ * @throws {OutputTooLarge} once more than `maxOutput` bytes come out.
+ */
+async function decompress(input: Buffer, inflater: Transform, maxOutput: number, signal: AbortSignal | undefined): Promise<Buffer> {
+  stopIfAborted(signal)
+  const chunks: Buffer[] = []
+  let length = 0
+  try {
+    await pipeline(Readable.from([input]), inflater, async (source: AsyncIterable<Buffer>) => {
+      for await (const chunk of source) {
+        length += chunk.length
+        if (length > maxOutput) throw new OutputTooLarge()
+        chunks.push(chunk)
+      }
+    }, ...(signal !== undefined ? [{ signal }] : []))
+  } catch (error: unknown) {
+    stopIfAborted(signal)
+    throw error
+  }
+  return Buffer.concat(chunks, length)
 }
 
 /** Windows device names, reserved in any folder and with any extension. */
@@ -95,7 +125,7 @@ class Destination {
   private readonly paths = new Map<string, 'file' | 'dir'>()
   entries = 0
 
-  constructor(private readonly root: string, private readonly limits: TreeLimits) {}
+  constructor(private readonly root: string, private readonly limits: TreeLimits, private readonly signal: AbortSignal | undefined) {}
 
   /** Count `n` more entries (records an unpack reads without writing). */
   charge(n = 1): void {
@@ -125,6 +155,8 @@ class Destination {
 
   /** A file, with its parents; created, never written over (whatever name the file system takes as the same). */
   file(path: string, data: Buffer, mode: number): void {
+    // Nothing more is written once the unpack is cancelled.
+    stopIfAborted(this.signal)
     this.directory(dirname(path))
     this.claim(path, 'file')
     try {
@@ -175,14 +207,16 @@ export async function extractTarGz(archive: Buffer, dest: string, options: Unpac
   const limits = options.limits ?? REPOSITORY_LIMITS
   let tar: Buffer
   try {
-    tar = await gunzipAsync(archive, { maxOutputLength: limits.maxBytes + limits.maxEntries * 1024 })
+    tar = await decompress(archive, createGunzip(), limits.maxBytes + limits.maxEntries * 1024, options.signal)
   } catch (error: unknown) {
-    if ((error as { code?: unknown }).code === 'ERR_BUFFER_TOO_LARGE') throw tooLarge('the archive', limits)
+    if (error instanceof OutputTooLarge) throw tooLarge('the archive', limits)
+    if (error instanceof HarnessError || options.signal?.aborted === true) throw error
     throw new HarnessError('fetch-failed', 'the download is not a valid .tar.gz archive', { cause: error })
   }
+  stopIfAborted(options.signal)
   mkdirSync(dest, { recursive: true })
   const root = resolve(dest)
-  const out = new Destination(root, limits)
+  const out = new Destination(root, limits, options.signal)
   const strip = options.strip ?? 0
   let commit: string | undefined
   let bytes = 0
@@ -233,6 +267,8 @@ export async function extractTarGz(archive: Buffer, dest: string, options: Unpac
     const mode = octal(header, 100, 8) ?? 0o644
     out.file(target, data, (mode & 0o755) | 0o600)
   }
+  // A cancelled unpack is not reported done, however short the archive.
+  await checkpoint(options.signal)
   return commit === undefined ? {} : { commit }
 }
 
@@ -240,6 +276,7 @@ export async function extractTarGz(archive: Buffer, dest: string, options: Unpac
 export async function extractZip(archive: Buffer, dest: string, options: UnpackOptions = {}): Promise<void> {
   const limits = options.limits ?? PLUGIN_LIMITS
   const invalid = (why: string): HarnessError => damaged('zip', why)
+  stopIfAborted(options.signal)
   let end = -1
   for (let index = archive.length - 22; index >= Math.max(0, archive.length - 22 - 65_535); index -= 1) {
     if (archive.readUInt32LE(index) === 0x06054b50) {
@@ -255,7 +292,7 @@ export async function extractZip(archive: Buffer, dest: string, options: UnpackO
   if (directoryStart > end) throw invalid('a central directory outside the archive')
   mkdirSync(dest, { recursive: true })
   const root = resolve(dest)
-  const out = new Destination(root, limits)
+  const out = new Destination(root, limits, options.signal)
   /** Byte ranges of the members' local records and data: no two may overlap, nor reach into the central directory. */
   const ranges: Array<readonly [number, number]> = []
   let bytes = 0
@@ -295,8 +332,9 @@ export async function extractZip(archive: Buffer, dest: string, options: UnpackO
       content = raw
     } else if (method === 8) {
       try {
-        content = await inflateRawAsync(raw, { maxOutputLength: Math.max(1, Math.min(size, limits.maxBytes - bytes) + 1) })
-      } catch {
+        content = await decompress(raw, createInflateRaw(), Math.min(size, limits.maxBytes - bytes), options.signal)
+      } catch (error: unknown) {
+        if (options.signal?.aborted === true) throw error
         throw bytes + size > limits.maxBytes ? tooLarge('the archive', limits) : invalid(`${name} does not inflate to its size`)
       }
       if (content.length !== size) throw invalid(`${name} does not inflate to its size`)
@@ -308,13 +346,65 @@ export async function extractZip(archive: Buffer, dest: string, options: UnpackO
     if (bytes > limits.maxBytes) throw tooLarge('the archive', limits)
     out.file(target, content, (mode & 0o755) | 0o600)
   }
+  await checkpoint(options.signal)
+}
+
+/**
+ * How a source file is opened: read-only, without following a link, and
+ * without waiting. A FIFO or device put in a listed file's place would
+ * otherwise block the synchronous open (a FIFO until something writes to it),
+ * and with it DSH; non-blocking, it opens at once, and `fstat` then turns it
+ * away before anything is read. Neither flag exists on Windows, where
+ * `fs.constants` leaves them out: creating links there needs privileges the
+ * plugin's folder does not grant, and named pipes live under `\\.\pipe\`,
+ * never in a folder.
+ */
+const SOURCE_FILE_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
+
+/**
+ * Read a regular file without following a link, even one put in its place
+ * after it was listed (a folder another program refreshes): undefined when it
+ * is not a regular file now. Everything is read from the one descriptor whose
+ * type was checked. At most `size` bytes are read, the size its listing gave,
+ * so the copy's budget holds while the file grows.
+ */
+function readPlainFile(path: string, size: number): { data: Buffer; mode: number } | undefined {
+  let fd: number
+  try {
+    fd = openSync(path, SOURCE_FILE_FLAGS)
+  } catch (error: unknown) {
+    if ((error as { code?: unknown }).code === 'ELOOP') return undefined
+    throw error
+  }
+  try {
+    const stat = fstatSync(fd)
+    if (!stat.isFile()) return undefined
+    const data = Buffer.alloc(Math.min(size, stat.size))
+    let read = 0
+    while (read < data.length) {
+      const n = readSync(fd, data, read, data.length - read, read)
+      if (n === 0) break
+      read += n
+    }
+    return { data: data.subarray(0, read), mode: stat.mode }
+  } finally {
+    closeSync(fd)
+  }
 }
 
 /**
  * Copy a plugin directory to `dest`, leaving out `.git` and every link (a
  * link is not followed, so nothing outside the checkout is read). The
  * directory itself must be a real directory inside `boundary`, reached through
- * no link. Returns the links left out.
+ * no link, and so must every directory under it when it is read. Returns the
+ * links and anything else that is not a regular file (a FIFO, a device) left
+ * out. Used for every source, a folder on this computer included, so what is
+ * shown and installed is this copy.
+ *
+ * A parent directory replaced by a link between a directory's real-path check
+ * and the open of a file in it is not caught: that takes a process running
+ * now, on this computer, with write access to the user's own folders, which
+ * could as well change the plugin's files before they are listed.
  */
 export function copyTree(source: string, dest: string, boundary: string = source, limits: TreeLimits = PLUGIN_LIMITS): string[] {
   const top = lstatSync(source)
@@ -328,25 +418,33 @@ export function copyTree(source: string, dest: string, boundary: string = source
   let bytes = 0
   let entries = 0
   const skipped: string[] = []
-  const visit = (from: string, to: string): void => {
+  const visit = (from: string, realFrom: string, to: string): void => {
+    // Still where it was listed, not a link swapped in since.
+    if (realpathSync(from) !== realFrom) throw new HarnessError('path-escape', `the plugin folder changed into a link while it was copied: ${relative(source, from) || '.'}`)
     mkdirSync(to, { recursive: true })
     for (const name of readdirSync(from)) {
       if (name === '.git') continue
       const path = join(from, name)
+      const relativePath = relative(source, path).replace(/\\/gu, '/')
       entries += 1
       if (entries > limits.maxEntries) throw tooLarge('the plugin', limits)
       const stat = lstatSync(path)
-      if (stat.isDirectory()) visit(path, join(to, name))
-      else if (stat.isFile()) {
-        bytes += stat.size
-        if (bytes > limits.maxBytes) throw tooLarge('the plugin', limits)
-        copyFileSync(path, join(to, name))
-      } else {
-        skipped.push(relative(source, path).replace(/\\/gu, '/'))
+      if (stat.isDirectory()) {
+        visit(path, join(realFrom, name), join(to, name))
+        continue
       }
+      if (stat.isFile() && bytes + stat.size > limits.maxBytes) throw tooLarge('the plugin', limits)
+      const file = stat.isFile() ? readPlainFile(path, stat.size) : undefined
+      if (file === undefined) {
+        skipped.push(relativePath)
+        continue
+      }
+      bytes += file.data.length
+      if (bytes > limits.maxBytes) throw tooLarge('the plugin', limits)
+      writeFileSync(join(to, name), file.data, { mode: file.mode & 0o777, flag: 'wx' })
     }
   }
-  visit(source, dest)
+  visit(source, real, dest)
   return skipped
 }
 

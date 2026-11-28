@@ -6,6 +6,9 @@
  */
 import { readdirSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
+import { openCodeConfigFiles, openCodeInventory, pluginEntryOf, type OpenCodeLocation, type OpenCodePluginEntry } from './inventory.js'
+import type { PluginIdProblem } from './plugin-id.js'
+import type { UserEnablement } from '../types.js'
 import { childId, kebabCase, pluginId, uniqueName } from '../../naming.js'
 import { fingerprintPlugin } from '../../fingerprint.js'
 import {
@@ -14,6 +17,7 @@ import {
   isFile,
   isInside,
   isPlainObject,
+  leadsToShare,
   readJsonObject,
   readText,
   stem,
@@ -191,6 +195,7 @@ export function scanOpenCodeProject(root: string, options: { readonly name?: str
       id: childId(id, 'mcp', nameSafe),
       kind: 'mcp',
       name: nameSafe,
+      declaredName: serverName,
       transport: type === 'remote' || url !== undefined ? 'streamable-http' : command !== undefined ? 'stdio' : 'unknown',
       ...(command !== undefined ? { command } : {}),
       ...(url !== undefined ? { url } : {}),
@@ -201,82 +206,46 @@ export function scanOpenCodeProject(root: string, options: { readonly name?: str
     components.push(component)
   }
 
-  // Plugin entries: local directories become code components; package entries
-  // are reported as other components until the code shim can load them.
-  const pluginEntries = Array.isArray(config['plugins']) ? config['plugins'] : Array.isArray(config['plugin']) ? config['plugin'] : []
-  for (const entry of pluginEntries) {
-    const spec = typeof entry === 'string' ? entry : isPlainObject(entry) && typeof entry['package'] === 'string' ? entry['package'] : undefined
-    if (spec === undefined) continue
-    const local = spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('file:')
-    const path = local ? join(root, spec.replace(/^file:/u, '')) : undefined
-    const entryPath = path !== undefined && isInside(root, path) && isDirectory(path) ? pluginEntryOf(path) : undefined
-    if (path !== undefined && entryPath !== undefined) {
-      const codeName = uniqueName(stem(path), usedCodeNames, path)
-      usedCodeNames.add(codeName)
-      const component: CodeComponent = {
-        id: childId(id, 'code', codeName),
-        kind: 'code',
-        name: codeName,
-        runtime: 'opencode-plugin',
-        entryPath,
-        path: toPosix(entryPath.slice(root.length + 1)),
-      }
-      components.push(component)
-    } else if (path === undefined || isDirectory(path)) {
-      const component: OtherComponent = {
-        id: childId(id, 'other', spec),
-        kind: 'other',
-        originalKind: 'opencode-plugin-package',
-        name: spec,
-        description: path === undefined
-          ? 'OpenCode npm/git plugin package; not loaded by the preview shim'
-          : 'OpenCode local plugin has no index/server entry',
-      }
-      components.push(component)
-    }
-  }
-
-  // Plugins OpenCode discovers on its own: files and package directories under `.opencode/plugin(s)/`.
-  for (const dir of [join(root, '.opencode', 'plugins'), join(root, '.opencode', 'plugin')]) {
-    let entries: string[] = []
-    try {
-      entries = readdirSync(dir)
-    } catch {
+  // The plugins OpenCode loads for this project: configured entries and the `.opencode/plugin(s)/` folders.
+  // Only what lies inside the project is read as its code; a package from elsewhere is reported by its spec.
+  // A plugin the project's config switches off, or may switch off, is not surely OpenCode's to run here, and is left out.
+  const inventory = openCodeInventory({ configDir: join(root, '.opencode'), configFiles: [...openCodeConfigFiles(root), ...openCodeConfigFiles(join(root, '.opencode'))] })
+  warnings.push(...inventory.warnings)
+  for (const entry of inventory.entries) {
+    if (entry.enabled !== true) {
+      warnings.push(leftOut(entry))
       continue
     }
-    for (const entry of entries.sort((a, b) => a.localeCompare(b, 'en'))) {
-      const path = join(dir, entry)
-      const entryPath = isFile(path) && /\.(ts|tsx|js|mjs)$/u.test(entry) ? path : isDirectory(path) ? pluginEntryOf(path) : undefined
-      if (entryPath === undefined || !isInside(root, entryPath)) continue
-      const codeName = uniqueName(stem(entry), usedCodeNames, entryPath)
-      usedCodeNames.add(codeName)
-      components.push({ id: childId(id, 'code', codeName), kind: 'code', name: codeName, runtime: 'opencode-plugin', entryPath, path: toPosix(entryPath.slice(root.length + 1)) })
+    const entryPath = entry.kind === 'file' ? entry.path : entry.kind === 'package' ? entry.entryPath : undefined
+    if (entryPath !== undefined && isInside(root, entryPath)) {
+      components.push(codeComponent(id, root, entry.kind === 'package' ? entry.root : entryPath, entryPath, usedCodeNames))
+    } else if (entry.kind !== 'file' && entry.spec !== undefined) {
+      const local = entry.kind === 'package' && isInside(root, entry.root)
+      components.push({
+        id: childId(id, 'other', entry.spec),
+        kind: 'other',
+        originalKind: 'opencode-plugin-package',
+        name: entry.spec,
+        description: local ? 'OpenCode local plugin has no index/server entry' : 'OpenCode npm/git plugin package; not loaded by the preview shim',
+      } satisfies OtherComponent)
     }
   }
 
-  // The directory is itself a plugin package: it depends on OpenCode's plugin SDK.
+  // The directory is itself a plugin package: it depends on OpenCode's plugin SDK, or it is a bare package
+  // directory OpenCode loads from a plugins folder (no config of its own, no `.opencode/`).
   const declared = {
     ...(packageJson !== undefined && isPlainObject(packageJson['dependencies']) ? packageJson['dependencies'] : {}),
     ...(packageJson !== undefined && isPlainObject(packageJson['peerDependencies']) ? packageJson['peerDependencies'] : {}),
   }
-  const isCodePackage = Object.keys(declared).some(name => name === '@opencode-ai/plugin' || name === '@opencode/plugin')
+  const bare = openCodeConfigFiles(root).length === 0 && !isDirectory(join(root, '.opencode'))
+  const isCodePackage = bare || Object.keys(declared).some(name => name === '@opencode-ai/plugin' || name === '@opencode/plugin')
   if (isCodePackage && !components.some(component => component.kind === 'code')) {
     const entryPath = pluginEntryOf(root)
-    if (entryPath !== undefined && isInside(root, entryPath)) {
-      const codeName = uniqueName(stem(entryPath), usedCodeNames, entryPath)
-      usedCodeNames.add(codeName)
-      components.push({
-        id: childId(id, 'code', codeName),
-        kind: 'code',
-        name: codeName,
-        runtime: 'opencode-plugin',
-        entryPath,
-        path: toPosix(entryPath.slice(root.length + 1)),
-      })
-    }
+    if (entryPath !== undefined && isInside(root, entryPath)) components.push(codeComponent(id, root, entryPath, entryPath, usedCodeNames))
   }
 
   const problems = components.length === 0 ? ['no OpenCode components found'] : []
+  warnings.push(...problems)
   const plugin: ForeignPlugin = {
     id,
     source: 'opencode',
@@ -292,65 +261,112 @@ export function scanOpenCodeProject(root: string, options: { readonly name?: str
       manifestKind: 'opencode',
     },
     components,
-    warnings: problems.map(message => ({ code: 'opencode-empty', message })),
+    warnings: [
+      ...warnings.filter(message => !problems.includes(message)).map(message => ({ code: 'opencode-plugin', message })),
+      ...problems.map(message => ({ code: 'opencode-empty', message })),
+    ],
     manifest: config,
   }
-  return { plugin: { ...plugin, fingerprint: fingerprintPlugin(plugin) }, warnings: problems }
+  return { plugin: { ...plugin, fingerprint: fingerprintPlugin(plugin) }, warnings }
+}
+
+/** A code component OpenCode runs: `named` gives its name (a package directory, or the file itself). */
+function codeComponent(id: string, root: string, named: string, entryPath: string, used: Set<string>): CodeComponent {
+  const name = uniqueName(stem(named), used, entryPath)
+  used.add(name)
+  return { id: childId(id, 'code', name), kind: 'code', name, runtime: 'opencode-plugin', entryPath, path: toPosix(entryPath.slice(root.length + 1)) }
+}
+
+/** OpenCode's global config directory (https://opencode.ai/docs/plugins/: "Global plugins use the same discovery layout under the OpenCode config directory"). */
+export function openCodeConfigDir(home: string): string {
+  return join(home, '.config', 'opencode')
+}
+
+/** OpenCode's package cache, where V1 installed npm plugins (https://opencode.ai/v1/docs/plugins.md: "cached in ~/.cache/opencode/node_modules/"). */
+export function openCodeCacheDir(home: string): string {
+  return join(home, '.cache', 'opencode')
+}
+
+/** Where OpenCode keeps a global config directory's plugins, its npm cache included. */
+export function openCodeGlobalLocation(home: string): OpenCodeLocation {
+  const configDir = openCodeConfigDir(home)
+  return { configDir, configFiles: openCodeConfigFiles(configDir), cacheDir: openCodeCacheDir(home) }
+}
+
+/** What a plugin of the inventory is called in a warning: its file, folder or spec. */
+function pluginLabel(entry: OpenCodePluginEntry): string {
+  return `OpenCode plugin ${entry.kind === 'file' ? entry.path : entry.kind === 'package' ? entry.root : entry.spec}`
+}
+
+/** Why a plugin OpenCode may not run is left out: it is switched off, or its id does not tell whether it is. */
+function leftOut(entry: OpenCodePluginEntry): string {
+  return !('unknownBecause' in entry)
+    ? `${pluginLabel(entry)} is switched off in OpenCode's config and is left out`
+    : `${pluginLabel(entry)} is left out: an entry in OpenCode's config switches plugins by id, and its id ${ID_PROBLEM_TEXT[entry.unknownBecause]}, so whether OpenCode runs it cannot be told`
+}
+
+/** How a warning says why a plugin's id cannot be told. */
+const ID_PROBLEM_TEXT: Readonly<Record<PluginIdProblem, string>> = {
+  missing: 'is declared by no Plugin.define({ id }) Harness Forge can read',
+  ambiguous: 'is declared more than once',
+  dynamic: 'is computed, not a plain string',
+  escape: 'is written with an escape JavaScript refuses in a module',
+}
+
+/** The plugin files right in OpenCode's global plugins folder, with whether OpenCode runs each. */
+function userPluginFiles(home: string): { files: Array<OpenCodePluginEntry & { kind: 'file' }>; warnings: readonly string[] } {
+  const inventory = openCodeInventory(openCodeGlobalLocation(home))
+  return { files: inventory.entries.filter((entry): entry is OpenCodePluginEntry & { kind: 'file' } => entry.kind === 'file'), warnings: inventory.warnings }
 }
 
 /**
- * A plugin package's server entry, as OpenCode loads it: `exports` `./server`
- * or `.`, else `main`/`module`, else `server` or `index` at its root. A
- * source checkout whose build output is absent runs from its TypeScript
- * source (`dist/x.js` → `src/x.ts` or `x.ts`), as Bun runs it.
+ * Whether OpenCode runs the person's plugin files: on when it surely runs one; else not known when it may run one
+ * (why, from the first such file), else off when its config switches off every one.
  */
-function pluginEntryOf(directory: string): string | undefined {
-  const packageJson = readJsonObject(join(directory, 'package.json'))
-  const targets: string[] = []
-  const exportsField = packageJson?.['exports']
-  const conditional = (value: unknown): string | undefined => {
-    if (typeof value === 'string') return value
-    if (!isPlainObject(value)) return undefined
-    for (const key of ['bun', 'import', 'default', 'node', 'require']) {
-      const found = conditional(value[key])
-      if (found !== undefined) return found
-    }
-    return undefined
-  }
-  if (typeof exportsField === 'string') targets.push(exportsField)
-  else if (isPlainObject(exportsField)) {
-    for (const key of ['./server', '.']) {
-      const target = conditional(exportsField[key])
-      if (target !== undefined) targets.push(target)
-    }
-  }
-  for (const key of ['main', 'module']) if (typeof packageJson?.[key] === 'string') targets.push(packageJson[key])
-  for (const target of targets) {
-    const resolved = resolve(directory, target)
-    if (isFile(resolved)) return resolved
-    const source = sourceOf(directory, target)
-    if (source !== undefined) return source
-  }
-  for (const name of ['server.ts', 'server.tsx', 'server.js', 'index.ts', 'index.tsx', 'index.js', 'index.mjs']) {
-    const candidate = join(directory, name)
-    if (isFile(candidate)) return candidate
-  }
-  return undefined
+export function openCodeUserEnablement(home: string): UserEnablement {
+  const { files } = userPluginFiles(home)
+  if (files.length === 0 || files.some(file => file.enabled === true)) return { enabled: true }
+  for (const file of files) if ('unknownBecause' in file) return { enabledUnknown: file.unknownBecause }
+  return { enabled: false }
 }
 
-/** The TypeScript source of a build output path, when the checkout has it. */
-function sourceOf(directory: string, target: string): string | undefined {
-  const relative = target.replace(/^\.\//u, '').replace(/^(dist|build|lib|out)\//u, '').replace(/\.(m|c)?js$/u, '')
-  for (const candidate of [`src/${relative}.ts`, `src/${relative}.tsx`, `${relative}.ts`, `${relative}.tsx`]) {
-    const path = join(directory, candidate)
-    if (isFile(path)) return path
+/**
+ * The plugin files a person keeps right in OpenCode's global plugins folder, as one plugin `opencode:user`
+ * rooted at the config directory (where OpenCode installs their dependencies). Package directories and
+ * configured packages are plugins of their own (`harnessPlugins`). When OpenCode surely runs some files, the others
+ * (switched off, or not known to run) are left out, with why; else the plugin holds them all, and is off or not
+ * known to run ({@link openCodeUserEnablement}).
+ * @returns undefined when there is no such file.
+ */
+export function scanOpenCodeUser(home: string): ForeignPlugin | undefined {
+  const root = openCodeConfigDir(home)
+  const id = pluginId('opencode', 'user')
+  const used = new Set<string>()
+  const { files, warnings } = userPluginFiles(home)
+  const running = files.some(file => file.enabled === true)
+  const kept = running ? files.filter(file => file.enabled === true) : files
+  const components: ForeignComponent[] = kept.map(file => codeComponent(id, root, file.path, file.path, used))
+  if (components.length === 0) return undefined
+  const manifest = { name: 'user', scope: 'user', description: 'OpenCode plugin files (~/.config/opencode/plugins)' }
+  const left = running ? files.filter(file => file.enabled !== true).map(leftOut) : []
+  const plugin: ForeignPlugin = {
+    id,
+    source: 'opencode',
+    name: 'user',
+    description: manifest.description,
+    root,
+    ref: { kind: 'opencode', root, manifestPath: join(root, 'opencode.json'), manifestKind: 'opencode' },
+    components,
+    warnings: [...warnings, ...left].map(message => ({ code: 'opencode-plugin', message })),
+    manifest,
   }
-  return undefined
+  return { ...plugin, fingerprint: fingerprintPlugin(plugin) }
 }
 
 function walkMarkdown(root: string): string[] {
   const out: string[] = []
   const walk = (dir: string): void => {
+    if (leadsToShare(dir)) return
     try {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = join(dir, entry.name)

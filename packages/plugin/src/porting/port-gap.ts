@@ -35,6 +35,18 @@ interface SessionControllerLike {
   rename?(request: { sessionId: string; title: string }): Promise<unknown>
 }
 
+/** The workspace of a directory (made when there is none), or undefined where the host has no workspace registry or refuses. */
+async function workspaceOf(ctx: Context, cwd: string): Promise<string | undefined> {
+  const registry = dshService(ctx, 'workspaceRegistry') as { create?(path: string): Promise<{ id?: unknown }> } | undefined
+  if (typeof registry?.create !== 'function') return undefined
+  try {
+    const id = (await registry.create(cwd)).id
+    return typeof id === 'string' ? id : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** The session title for a brief: its heading, without the Markdown marker DSH would otherwise show in the sidebar. */
 export function briefTitle(brief: string): string {
   return (brief.split('\n', 1)[0] ?? '').replace(/^#+\s*/u, '').trim()
@@ -114,7 +126,11 @@ export async function startCreatorSession(ctx: Context, task: string, location: 
   }
   const cwd = location.cwd ?? join(homedir(), ADAPTERS_DIR)
   if (location.workspaceId === undefined && location.cwd === undefined) mkdirSync(cwd, { recursive: true })
-  const where = location.workspaceId !== undefined ? { workspaceId: location.workspaceId } : { cwd }
+  // DSH groups a session under the workspace whose path is its directory; without one the session lands in
+  // "Ungrouped" among the person's own. The adapters directory gets a workspace named after the folder, reused by
+  // every creation session.
+  const workspaceId = location.workspaceId ?? await workspaceOf(ctx, cwd)
+  const where = workspaceId !== undefined ? { workspaceId } : { cwd }
   const { sessionId } = await controller.create({ ...where, agentPreset: CREATOR_PRESET })
   // Named before the task is sent, so the sidebar shows the brief's heading rather than the protocol's first line. A title the host refuses only leaves DSH's own.
   if (title.length > 0) await controller.rename?.({ sessionId, title }).catch(() => undefined)

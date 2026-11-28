@@ -59,8 +59,7 @@ describe('project assets and workspace trust', () => {
     const [listed] = await projects.workspaces()
     expect(listed).toMatchObject({ workspace: root, trusted: false })
 
-    trust.set(join(root, '.claude'), true)
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await projects.setTrust(join(root, '.claude'), true)
     expect(mounted.sort()).toEqual(['command:plain', 'command:shell', 'hooks:settings'])
     expect(trust.state(root)).toMatchObject({ trusted: true, sources: ['forge'] })
     expect(waitingParts(root, trust.state(root))).toEqual([])
@@ -105,15 +104,13 @@ describe('project assets and workspace trust', () => {
     expect(applied[0]?.disableAllHooks).toBeUndefined()
     expect(waitingParts(root, trust.state(root)).map(part => part.kind).sort()).toEqual(['command', 'settings'])
 
-    trust.set(root, true)
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await projects.setTrust(root, true)
     expect(applied).toHaveLength(2)
     expect(applied[1]).toMatchObject({ env: { NODE_OPTIONS: '--require x' }, permissions: { allow: ['Bash(*)'], deny: ['Bash(rm:*)'] }, disableAllHooks: false })
     expect(live.size).toBe(1)
 
     // Revoked: the grants go, the restrictions stay.
-    trust.set(root, false)
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await projects.setTrust(root, false)
     expect(applied).toHaveLength(3)
     expect(applied[2]).toMatchObject({ env: {}, permissions: { allow: [], deny: ['Bash(rm:*)'] } })
     expect(live.size).toBe(1)
@@ -138,11 +135,9 @@ describe('project assets and workspace trust', () => {
     const projects = new ProjectAssets(ledger, join(home, 'data'), trust)
     await projects.prepare({ ctx: {}, session: { header: { id: 'session-4', cwd: root } } }, root)
     expect([...live]).toEqual(['settings'])
-    trust.set(root, false)
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await projects.setTrust(root, false)
     expect([...live]).toEqual([])
-    trust.set(root, true)
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await projects.setTrust(root, true)
     expect([...live]).toEqual(['settings'])
     await projects.dispose()
   })
@@ -211,8 +206,10 @@ describe('project assets and workspace trust', () => {
     const live = new Set<string>()
     let gate: Promise<void> = Promise.resolve()
     let open: () => void = () => undefined
+    let reached: () => void = () => undefined
     const hooks: Mounter = {
       async mount(request: MountRequest) {
+        reached()
         await gate
         live.add(request.component.name)
         return { outcome: { componentId: request.component.id, status: 'mounted', level: 'L2', evidence: 'runtime' }, disposer: async () => { live.delete(request.component.name) } }
@@ -224,8 +221,9 @@ describe('project assets and workspace trust', () => {
     const projects = new ProjectAssets(ledger, join(home, 'data'), trust)
     await projects.prepare({ ctx: {}, session: { header: { id: 'session-race', cwd: root } } }, root)
     gate = new Promise((resolve) => { open = resolve })
+    const inFlight = new Promise<void>((resolve) => { reached = resolve })
     const granting = projects.setTrust(root, true)
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await inFlight
     // The hooks mount is in flight with the grant; the person revokes before it lands.
     const revoking = projects.setTrust(root, false)
     open()
@@ -246,11 +244,12 @@ describe('project assets and workspace trust', () => {
     const ledger = recordingLedger(mounted)
     let withdrawing: Promise<void> = Promise.resolve()
     let finish: () => void = () => undefined
+    let withdrawalStarted: () => void = () => undefined
     ;(ledger.mounters as Map<MountKind, Mounter>).set('settings', {
       async mount(request: MountRequest) {
         const component = request.component as SettingsComponent
         mounted.push(Object.keys(component.env).length > 0 ? 'settings:granted' : 'settings:restricted')
-        return { outcome: { componentId: component.id, status: 'mounted', level: 'L1b', evidence: 'source' }, disposer: () => withdrawing }
+        return { outcome: { componentId: component.id, status: 'mounted', level: 'L1b', evidence: 'source' }, disposer: () => { withdrawalStarted(); return withdrawing } }
       },
     })
     const trust = new WorkspaceTrust(state, home)
@@ -259,8 +258,9 @@ describe('project assets and workspace trust', () => {
     expect(mounted.sort()).toEqual(['command:plain', 'settings:restricted'])
     withdrawing = new Promise((resolve) => { finish = resolve })
     // Granting withdraws the restricted settings first; the person revokes while that withdrawal runs.
+    const started = new Promise<void>((resolve) => { withdrawalStarted = resolve })
     trust.set(root, true)
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await started
     trust.set(root, false)
     finish()
     await projects.setTrust(root, false)
@@ -325,5 +325,39 @@ describe('project assets and workspace trust', () => {
     fail = false
     expect((await projects.setTrust(root, false)).stillLive).toEqual([])
     await projects.dispose()
+  })
+
+  it('retries the withdrawal of an ended session\'s parts on a later revoke or trust change, without mounting them again', async () => {
+    const { root, home, state } = project()
+    let fail = true
+    let mounts = 0
+    let disposals = 0
+    const hooks: Mounter = {
+      async mount(request: MountRequest) {
+        mounts += 1
+        return { outcome: { componentId: request.component.id, status: 'mounted', level: 'L2', evidence: 'runtime' }, disposer: async () => { disposals += 1; if (fail) throw new Error('busy') } }
+      },
+    }
+    const ledger = recordingLedger([])
+    ;(ledger.mounters as Map<MountKind, Mounter>).set('hooks', hooks)
+    const trust = new WorkspaceTrust(state, home)
+    trust.set(root, true)
+    const projects = new ProjectAssets(ledger, join(home, 'data'), trust)
+    await projects.prepare({ ctx: {}, session: { header: { id: 'session-ended', cwd: root } } }, root)
+    expect((await projects.setTrust(root, false)).stillLive).toHaveLength(1)
+    // The session ends while its withdrawal still fails: the part stays live, retained.
+    await projects.release('session-ended')
+    expect((await projects.setTrust(root, false)).stillLive).toHaveLength(1)
+    // Trusting again does not mount the ended session's parts.
+    await projects.setTrust(root, true)
+    expect(mounts).toBe(1)
+    // Revoking once the withdrawal can succeed withdraws it.
+    fail = false
+    const before = disposals
+    expect((await projects.setTrust(root, false)).stillLive).toEqual([])
+    expect(disposals).toBe(before + 1)
+    expect(mounts).toBe(1)
+    await projects.dispose()
+    expect(disposals).toBe(before + 1)
   })
 })

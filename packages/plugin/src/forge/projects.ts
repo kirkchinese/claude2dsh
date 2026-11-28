@@ -89,7 +89,7 @@ function gate(component: ForeignComponent, plugin: ForeignPlugin, cwd: string, t
   // A `.mcp.json` server: Claude Code's rejection always holds; its approval is needed unless the person trusted the workspace here.
   if (component.kind === 'mcp' && plugin.source === 'claude-code' && component.metadata?.['scope'] === 'project') {
     const approval = claudeMcpApproval(component.name, trust.workspace, cwd, true, homedir())
-    if (approval === 'disabled') return { componentId: component.id, status: 'skipped', level: 'L0', evidence: 'source', message: 'disabled in Claude Code (disabledMcpjsonServers)' }
+    if (approval === 'disabled') return { componentId: component.id, status: 'skipped', level: 'L0', evidence: 'source', message: 'disabled in Claude Code (disabledMcpjsonServers)', skippedBy: 'disabled-in-claude-code' }
     if (approval === 'pending' && !trust.sources.includes('forge')) return waiting(WAITING_FOR_APPROVAL)
   }
   return undefined
@@ -119,7 +119,7 @@ export class ProjectAssets {
   private readonly mounts = new Map<string, Promise<Mount[]>>()
   /** Each session's mounts, once its first mount finished. */
   private readonly settled = new Map<string, Mount[]>()
-  /** Mounts of ended sessions whose withdrawal failed: kept, and withdrawn again on the next release or at dispose. */
+  /** Mounts of ended sessions whose withdrawal failed: kept, and withdrawn again on every trust change, release and at dispose. */
   private readonly retained = new Map<string, Mount[]>()
   /** Mounting, reconciling and releasing run one at a time, in the order they were asked for. */
   private chain: Promise<unknown> = Promise.resolve()
@@ -217,10 +217,12 @@ export class ProjectAssets {
 
   /**
    * Trust changed for a workspace: mount what now may run in its open
-   * sessions, and withdraw what no longer may (trust revoked).
+   * sessions, and withdraw what no longer may (trust revoked). Ended
+   * sessions' parts whose withdrawal failed are withdrawn again, never mounted.
    */
   private async reconcile(workspace: string): Promise<void> {
     // Runs in the chain: every session mounted before it has settled, and those after read the new trust themselves.
+    for (const [sessionId, mounts] of [...this.retained]) await this.withdrawEnded(sessionId, mounts)
     for (const mount of [...this.settled.values()].flat()) {
       if (!isInside(workspace, mount.workspace) && mount.unsettled.size === 0) continue
       const trust = this.trust.state(mount.cwd)
@@ -366,16 +368,21 @@ export class ProjectAssets {
     await this.serial(async () => {
       const mounts = this.settled.get(sessionId) ?? this.retained.get(sessionId) ?? []
       this.settled.delete(sessionId)
-      const left: Mount[] = []
-      for (const mount of mounts) if ((await mount.live.release()).failed.length > 0) left.push(mount)
-      if (left.length > 0) {
-        this.retained.set(sessionId, left)
-        return
-      }
-      this.retained.delete(sessionId)
-      if (mounts.length === 0) return
-      for (const mounter of this.ledger.mounters.values()) await mounter.release?.({ sessionId }).catch((error: unknown) => this.fault?.(error))
+      await this.withdrawEnded(sessionId, mounts)
     })
+  }
+
+  /** Withdraw an ended session's mounts; those whose withdrawal fails are retained, to be tried again. */
+  private async withdrawEnded(sessionId: string, mounts: readonly Mount[]): Promise<void> {
+    const left: Mount[] = []
+    for (const mount of mounts) if ((await mount.live.release()).failed.length > 0) left.push(mount)
+    if (left.length > 0) {
+      this.retained.set(sessionId, left)
+      return
+    }
+    this.retained.delete(sessionId)
+    if (mounts.length === 0) return
+    for (const mounter of this.ledger.mounters.values()) await mounter.release?.({ sessionId }).catch((error: unknown) => this.fault?.(error))
   }
 
   async dispose(): Promise<void> {

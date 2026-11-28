@@ -132,7 +132,7 @@ export function startCommands(ctx: Context, forge: HarnessForge): Disposer {
   }))
   // A command registry that starts after this row retries the commands that needed it.
   parts.add('command registry', () => {
-    const fiber = ctx.inject(['commands'], () => { forge.ledger.reapply() }) as unknown as { dispose(): unknown }
+    const fiber = ctx.inject(['commands'], () => { forge.ledger.reapply('command') }) as unknown as { dispose(): unknown }
     return () => fiber.dispose()
   })
   parts.add('api', () => forge.provide('commands', api))

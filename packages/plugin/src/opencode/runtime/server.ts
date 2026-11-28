@@ -9,6 +9,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { stripTrailing } from '@kirkchinese/harness-forge-core'
 import { appendNotice } from '../../hooks/notice.js'
 import { isRecord, messagesOf, sessionInfo, userInfo, userParts, type MessageWithParts } from '../convert.js'
 import { dshService } from '../../dsh/host.js'
@@ -113,7 +114,7 @@ export class OpenCodeServer {
 
   /** OpenCode's server routes, as DSH serves them; undefined when not served. */
   private async route(method: string, url: URL, body: Record<string, unknown>): Promise<{ status?: number; body: unknown } | undefined> {
-    const path = url.pathname.replace(/\/+$/u, '') || '/'
+    const path = stripTrailing(url.pathname, '/') || '/'
     const agents = this.core.agents()
     const sessionMatch = /^\/session\/([^/]+)(?:\/(.+))?$/u.exec(path)
     const sessionId = sessionMatch === null ? undefined : decodeURIComponent(sessionMatch[1] ?? '')

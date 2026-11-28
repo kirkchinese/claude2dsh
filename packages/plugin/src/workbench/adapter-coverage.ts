@@ -4,9 +4,9 @@
  * or one installed from npm) declares `harnessForge.ports`
  * (`[{ plugin, component }]`, the original's names) in its package.json.
  * A package found on disk only counts once DSH's plugin manager lists it as an
- * enabled bundle that loads (`enabledAdapters`): a failed install can leave a
- * `node_modules` link behind that DSH never runs. The workbench overview and
- * `harness_verify_port` apply the same criterion.
+ * enabled bundle whose plugin rows started without a fault (`adapterReadiness`):
+ * a failed install can leave a `node_modules` link behind that DSH never runs.
+ * The workbench overview and `harness_verify_port` apply that one decision.
  * @module @kirkchinese/harness-forge
  */
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
@@ -108,12 +108,59 @@ export function bundleState(name: string, bundles: readonly ListedBundle[]): Bun
   return { state: 'enabled', bundle }
 }
 
+/** One step of an adapter's readiness, as `harness_verify_port` reports it. */
+export interface ReadinessCheck {
+  readonly check: 'declared' | 'enabled' | 'loaded'
+  readonly ok: boolean
+  readonly detail: string
+}
+
+const step = (name: ReadinessCheck['check'], ok: boolean, detail: string): ReadinessCheck => ({ check: name, ok, detail })
+
+/** What the plugin manager says now, read once for any number of adapters. */
+export interface ManagerSnapshot {
+  readonly bundles: readonly ListedBundle[]
+  readonly plugins: Awaited<ReturnType<PluginManagerLike['listPlugins']>>
+}
+
+export async function managerSnapshot(manager: PluginManagerLike): Promise<ManagerSnapshot> {
+  const [bundles, plugins] = await Promise.all([manager.listBundles(), manager.listPlugins()])
+  return { bundles, plugins }
+}
+
 /**
- * The adapters on disk that DSH has installed and enabled (see `bundleState`). Without a plugin manager none is
- * confirmed, so none counts.
+ * Whether an adapter package found on disk is ready: DSH lists it as an enabled bundle that loads, and every
+ * plugin row it declares runs, active, without a startup fault. The one decision the overview counts an adapter
+ * by and `harness_verify_port` reports step by step; the last check returned is the first that failed.
+ */
+export function adapterReadiness(name: string, snapshot: ManagerSnapshot): ReadinessCheck[] {
+  const status = bundleState(name, snapshot.bundles)
+  if (status.state === 'unlisted') return [step('enabled', false, `${name} is on disk but DSH does not list it as an installed bundle: install it with plugin_manager install_bundle (a link left by a failed install does not count), and check that its package.json declares a bundle (dsh-doc references/host-plugin.md)`)]
+  if (status.state === 'off') return [step('enabled', false, `${name} is installed but switched off: enable it with plugin_manager set_bundle`)]
+  if (status.state === 'broken') return [step('enabled', false, `${name} is enabled but its bundle cannot load: ${status.error.code}${status.error.diagnostic !== undefined ? ` — ${status.error.diagnostic}` : ''}`)]
+  const enabled = step('enabled', true, `${name} is enabled`)
+  const rows = status.bundle.rows
+  if (rows.length === 0) return [enabled, step('loaded', true, 'its bundle declares no plugin rows, so nothing has to start')]
+  const entries = new Map(snapshot.plugins.map(entry => [entry.entryId, entry]))
+  const problems: string[] = []
+  for (const row of rows) {
+    const entry = row.entryId === undefined ? undefined : entries.get(row.entryId)
+    if (entry === undefined) problems.push(`row "${row.rowId}" has no running entry`)
+    else if (entry.diagnostic !== undefined) problems.push(`row "${row.rowId}" failed to start: ${entry.diagnostic}`)
+    else if (!entry.enabled) problems.push(`row "${row.rowId}" is disabled`)
+    else if (entry.fiberPhase !== 'active') problems.push(`row "${row.rowId}" is ${entry.fiberPhase ?? 'not running'}`)
+  }
+  return [enabled, problems.length === 0
+    ? step('loaded', true, `all ${String(rows.length)} plugin row(s) of its bundle are active, without startup failures`)
+    : step('loaded', false, problems.join('; '))]
+}
+
+/**
+ * The adapters on disk that are ready (see `adapterReadiness`). Without a plugin manager none is confirmed, so
+ * none counts.
  */
 export async function enabledAdapters(adapters: readonly AdapterCoverage[], manager: PluginManagerLike | undefined): Promise<AdapterCoverage[]> {
   if (manager === undefined || adapters.length === 0) return []
-  const bundles = await manager.listBundles()
-  return adapters.filter(adapter => bundleState(adapter.name, bundles).state === 'enabled')
+  const snapshot = await managerSnapshot(manager)
+  return adapters.filter(adapter => adapterReadiness(adapter.name, snapshot).every(item => item.ok))
 }

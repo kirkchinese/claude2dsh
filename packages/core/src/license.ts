@@ -4,9 +4,9 @@
  * SPDX expression parsing is intentionally out of scope.
  * @module @kirkchinese/harness-forge-core
  */
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { readJsonObject } from './paths.js'
+import { leadsToShare, readJsonObject, readText } from './paths.js'
 
 const SIGNATURES: ReadonlyArray<[RegExp, string]> = [
   [/MIT License|Permission is hereby granted, free of charge/iu, 'MIT'],
@@ -28,6 +28,8 @@ export function detectLicense(root: string, declared?: string): string | undefin
     return packageJson['license'].trim()
   }
   let names: string[]
+  // On a link to a network share the path is not on: as unreadable (see `leadsToShare`).
+  if (leadsToShare(root)) return undefined
   try {
     names = readdirSync(root)
   } catch {
@@ -37,12 +39,10 @@ export function detectLicense(root: string, declared?: string): string | undefin
     .filter(name => /^(?:licen[cs]e|copying)(?:\..*)?$/iu.test(name))
     .sort((a, b) => a.localeCompare(b, 'en'))
   for (const name of candidates) {
-    try {
-      const text = readFileSync(join(root, name), 'utf8').slice(0, 16_384)
-      for (const [pattern, id] of SIGNATURES) if (pattern.test(text)) return id
-    } catch {
-      // A license file we cannot read is simply not recognized.
-    }
+    // A license file we cannot read (or one on a link to a network share, see `leadsToShare`) is simply not recognized.
+    const text = readText(join(root, name))?.slice(0, 16_384)
+    if (text === undefined) continue
+    for (const [pattern, id] of SIGNATURES) if (pattern.test(text)) return id
   }
   return undefined
 }

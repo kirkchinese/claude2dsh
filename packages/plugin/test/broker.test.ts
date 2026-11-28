@@ -28,7 +28,19 @@ process.stdin.on('end', () => {
     case 'rewrite': return out({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { ...event.tool_input, command: 'echo rewritten' } } })
     case 'context': return out({ hookSpecificOutput: { hookEventName: event.hook_event_name, additionalContext: 'ctx from ' + event.hook_event_name } })
     case 'plain': process.stdout.write('plain context'); return
-    case 'sleep': setTimeout(() => process.exit(0), 700); return
+    case 'barrier': {
+      // Done only once all three siblings have started: a serial run never gets there.
+      const dir = process.env.CLAUDE_PLUGIN_DATA
+      const deadline = Date.now() + 20000
+      const wait = () => {
+        const started = fs.readFileSync(dir + '/seen.jsonl', 'utf8').trim().split('\\n').length
+        if (started >= 3) { fs.appendFileSync(dir + '/met.txt', 'x'); process.exit(0) }
+        if (Date.now() > deadline) process.exit(0)
+        setTimeout(wait, 20)
+      }
+      wait()
+      return
+    }
     case 'stop-block': if (!event.stop_hook_active) { process.stderr.write('keep going'); process.exit(2) } return
     case 'stop-always': out({ decision: 'block', reason: 'again' }); return
     case 'halt': return out({ continue: false, stopReason: 'build failed' })
@@ -250,11 +262,11 @@ describe('HookBroker — PreToolUse', () => {
   })
 
   it('runs matching hooks in parallel', async () => {
-    const hooks = lab({ PreToolUse: [{ hooks: [node('sleep'), node('sleep'), node('sleep')] }] })
-    const started = Date.now()
+    // Each hook finishes only once all three have started, so a serial run cannot meet (no timing involved).
+    const hooks = lab({ PreToolUse: [{ hooks: [node('barrier'), node('barrier'), node('barrier')] }] })
     await hooks.emit('tools/pre-execute', exec(fakeAgent(), 'read', { file_path: 'a' }), allow)
-    expect(Date.now() - started).toBeLessThan(1900)
     expect(hooks.seen()).toHaveLength(3)
+    expect(readFileSync(join(hooks.root, 'met.txt'), 'utf8')).toBe('xxx')
   })
 
   it('skips a handler whose `if` does not match, and never runs `if` handlers on other events', async () => {

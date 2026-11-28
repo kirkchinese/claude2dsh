@@ -120,7 +120,7 @@
     "typecheck:client": "tsc -p tsconfig.client.json",
     "test": "vitest run",
     "clean": "node --eval \"import('node:fs/promises').then(({ rm }) => Promise.all(['lib'].map((path) => rm(path, { force: true, recursive: true }))))\"",
-    "prepack": "pnpm run build && pnpm run build:client"
+    "prepack": "pnpm run clean && pnpm run build && pnpm run build:client"
   },
   "dependencies": {
     "@kirkchinese/harness-forge-core": "workspace:*",

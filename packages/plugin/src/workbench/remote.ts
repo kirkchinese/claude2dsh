@@ -14,7 +14,7 @@
  * @module @kirkchinese/harness-forge
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { assess, type ForeignPlugin } from '@kirkchinese/harness-forge-core'
+import { assess, dialects, type ForeignPlugin, type SourceId } from '@kirkchinese/harness-forge-core'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { HarnessForge, InstallReport } from '../forge/service.js'
 import { Workbench } from './workbench.js'
@@ -28,6 +28,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     /** A workbench operation failed; the message says why, for the person. */
     'harness-forge/failed': { readonly operation: string }
+    /** A session above the import ceiling (`size` when known: a compressed one is cut off while decoding); the browser words it in the person's language. */
+    'harness-forge/session-too-large': { readonly operation: string; readonly limit: number; readonly size?: number }
+    /** A stored session may already hold the one being imported; the browser offers to open it or import as new. */
+    'harness-forge/session-maybe-imported': { readonly operation: string; readonly existingId: string }
   }
 }
 
@@ -35,6 +39,13 @@ type Source = 'claude-code' | 'codex' | 'opencode'
 
 function sourceOf(value: unknown): Source {
   return value === 'codex' || value === 'opencode' ? value : 'claude-code'
+}
+
+/** A Discover section's harness, any dialect Harness Forge reads (Agent Skills too); an unknown one is refused. */
+function dialectOf(value: unknown): SourceId {
+  const dialect = dialects().find(candidate => candidate.id === value)
+  if (dialect === undefined) throw new Error(`unknown harness ${JSON.stringify(value)}`)
+  return dialect.id
 }
 
 function text(request: Record<string, unknown> | undefined, key: string): string {
@@ -54,7 +65,7 @@ function summary(plugin: ForeignPlugin): Record<string, unknown> {
   for (const component of plugin.components) counts.set(component.kind, (counts.get(component.kind) ?? 0) + 1)
   return {
     id: plugin.id,
-    name: plugin.name,
+    name: plugin.displayName ?? plugin.name,
     source: plugin.source,
     version: plugin.version,
     license: plugin.license,
@@ -146,6 +157,14 @@ export class HarnessRemoteService extends TypertRemoteService {
       return plainJson(await run(), operation)
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && (error as { isDSHRemoteError?: unknown }).isDSHRemoteError === true) throw error
+      const code = error instanceof Error ? (error as { code?: unknown }).code : undefined
+      if (code === 'session-too-large') {
+        const { limit, bytes } = error as { limit?: number; bytes?: number }
+        throw new RemoteError('harness-forge/session-too-large', (error as Error).message, { operation, limit: limit ?? 0, ...(bytes !== undefined ? { size: bytes } : {}) }, { cause: error })
+      }
+      if (code === 'session-maybe-imported') {
+        throw new RemoteError('harness-forge/session-maybe-imported', (error as Error).message, { operation, existingId: String((error as { existingId?: unknown }).existingId) }, { cause: error })
+      }
       throw new RemoteError('harness-forge/failed', error instanceof Error ? error.message : String(error), { operation }, { cause: error })
     }
   }
@@ -157,9 +176,17 @@ export class HarnessRemoteService extends TypertRemoteService {
     return this.guard('contextStatus', () => this.forge.lookup('context')?.status() ?? { active: false, files: [] })
   }
 
-  /** The overview, plus the workspaces of open sessions with their trust and the project parts that wait for it. */
+  /**
+   * The overview, plus the workspaces of open sessions with their trust and the project parts that wait for it, and
+   * how many records are still being applied. It starts following the harnesses' changes without waiting for it:
+   * `applying` says it is under way, and the next overview shows the result.
+   */
   overview(): Promise<unknown> {
-    return this.guard('overview', async () => ({ ...await this.workbench.overview(), workspaces: await this.forge.projects.workspaces() }))
+    return this.guard('overview', async () => {
+      void this.forge.follow()
+      const applying = this.forge.applying()
+      return { ...await this.workbench.overview(), workspaces: await this.forge.projects.workspaces(), ...(applying !== undefined ? { applying } : {}) }
+    })
   }
 
   // --- workspace trust ----------------------------------------------------------
@@ -203,7 +230,10 @@ export class HarnessRemoteService extends TypertRemoteService {
   }
 
   discover(): Promise<unknown> {
-    return this.guard('discover', () => this.workbench.discover())
+    return this.guard('discover', () => {
+      void this.forge.follow()
+      return this.workbench.discover()
+    })
   }
 
   diagnostics(): Promise<unknown> {
@@ -227,7 +257,7 @@ export class HarnessRemoteService extends TypertRemoteService {
   }
 
   migrate(request: Record<string, unknown>): Promise<unknown> {
-    return this.guard('migrate', () => this.workbench.migrate(sourceOf(request['source'])))
+    return this.guard('migrate', () => this.workbench.migrate(dialectOf(request['source'])))
   }
 
   setPartEnabled(request: Record<string, unknown>): Promise<unknown> {
@@ -247,44 +277,23 @@ export class HarnessRemoteService extends TypertRemoteService {
     })
   }
 
-  marketplaceScan(request: Record<string, unknown>): Promise<unknown> {
-    return this.guard('marketplaceScan', () => {
-      const index = this.forge.scanMarketplace(required(request, 'path', 'marketplaceScan'))
-      return {
-        name: index.name,
-        description: index.description,
-        owner: index.owner,
-        manifestPath: index.manifestPath,
-        warnings: index.warnings,
-        entries: index.entries.map(entry => ({
-          name: entry.name,
-          description: entry.description,
-          version: entry.version,
-          license: entry.license,
-          category: entry.category,
-          tags: entry.tags,
-          source: {
-            kind: entry.source.kind,
-            ...(entry.source.path !== undefined ? { path: entry.source.path } : {}),
-            ...(entry.source.url !== undefined ? { url: entry.source.url } : {}),
-            ...(entry.source.package !== undefined ? { package: entry.source.package } : {}),
-          },
-        })),
-      }
-    })
-  }
-
-  marketplaceInstall(request: Record<string, unknown>): Promise<unknown> {
-    return this.guard('marketplaceInstall', async () => {
-      return reportOf(await this.forge.installMarketplace(required(request, 'path', 'marketplaceInstall'), required(request, 'name', 'marketplaceInstall')))
+  /** Keep a plugin its harness no longer runs as the person's own copy. */
+  keepPlugin(request: Record<string, unknown>): Promise<unknown> {
+    return this.guard('keepPlugin', async () => {
+      await this.forge.keep(required(request, 'id', 'keepPlugin'))
+      return { kept: true }
     })
   }
 
   // --- plugins from the network ------------------------------------------------
 
-  /** The default marketplaces, the ones the person added, what was installed from the network, and whether git is installed. */
+  /**
+   * The default marketplaces, the ones the person added, the local
+   * marketplaces the harnesses on this computer added, what was installed
+   * from the network, and whether git is installed.
+   */
   remoteSources(): Promise<unknown> {
-    return this.guard('remoteSources', () => this.forge.remote.sources())
+    return this.guard('remoteSources', async () => ({ ...await this.forge.remote.sources(), local: this.workbench.localMarketplaces() }))
   }
 
   /** Open a pasted marketplace or plugin (`owner/repo`, a git URL, a marketplace.json URL, an npm package, a local folder): its entries, fetched now. */
@@ -349,7 +358,14 @@ export class HarnessRemoteService extends TypertRemoteService {
   }
 
   sessions(request: Record<string, unknown> | undefined): Promise<unknown> {
-    return this.guard('sessions', async () => ({ sessions: await this.row('sessions', 'sessions').sessions(undefined, sourceOf(request?.['source'])) }))
+    return this.guard('sessions', () => {
+      const cursor = request?.['cursor']
+      const limit = request?.['limit']
+      return this.row('sessions', 'sessions').sessions(undefined, sourceOf(request?.['source']), {
+        ...(typeof cursor === 'number' && Number.isInteger(cursor) && cursor >= 0 ? { cursor } : {}),
+        ...(typeof limit === 'number' && Number.isInteger(limit) && limit > 0 ? { limit: Math.min(limit, 200) } : {}),
+      })
+    })
   }
 
   importSession(request: Record<string, unknown>): Promise<unknown> {
@@ -359,6 +375,11 @@ export class HarnessRemoteService extends TypertRemoteService {
       sourceOf(request['source']),
       text(request, 'sourceId') || undefined,
     ))
+  }
+
+  /** Open a session an import stored: registered with DSH and out of its archive (`{ id, live, unarchived, archived }`). */
+  openImported(request: Record<string, unknown>): Promise<unknown> {
+    return this.guard('openImported', () => this.row('sessions', 'openImported').open(required(request, 'id', 'openImported')))
   }
 
   /** Who imports sessions (`{ provider: 'harness-forge' | 'dsh-chat-import', canInstall, command }`). */
@@ -545,8 +566,7 @@ export const REMOTE_METHODS: ReadonlyArray<readonly [string, 'unary' | 'stream',
   ['migrate', 'unary', true],
   ['setPartEnabled', 'unary', true],
   ['removePlugin', 'unary', true],
-  ['marketplaceScan', 'unary', true],
-  ['marketplaceInstall', 'unary', true],
+  ['keepPlugin', 'unary', true],
   ['remoteSources', 'unary', false],
   ['remoteOpen', 'unary', true],
   ['remoteForget', 'unary', true],
@@ -559,6 +579,7 @@ export const REMOTE_METHODS: ReadonlyArray<readonly [string, 'unary' | 'stream',
   ['signIn', 'unary', true],
   ['sessions', 'unary', true],
   ['importSession', 'unary', true],
+  ['openImported', 'unary', true],
   ['sessionImport', 'unary', false],
   ['installChatImport', 'unary', false],
   ['modSurfaces', 'stream', true],

@@ -22,7 +22,7 @@ import { lstatSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { codexHome, readCodexConfig } from './dialects/codex/user-assets.js'
-import { isDirectory, isFile, isPlainObject, readJsonObject, readText, realOrLexical, stringArrayField } from './paths.js'
+import { contentPath, isDirectory, isFile, isPlainObject, readJsonObject, readText, realOrLexical, stringArrayField } from './paths.js'
 import type { ForeignComponent, SettingsComponent } from './types.js'
 
 /** Where a workspace's trust comes from. */
@@ -60,16 +60,28 @@ export function repositoryRootOf(dir: string): string | undefined {
  * stand in for the marker (a symbolic-link marker never claims a main checkout).
  */
 function linkedMainCheckout(marker: string): string | undefined {
-  const target = /^gitdir:\s*(.+?)\s*$/mu.exec(readText(marker) ?? '')?.[1]
-  if (target === undefined) return undefined
-  const gitdir = realOrLexical(resolve(dirname(marker), target))
+  const target = gitdirOf(readText(marker) ?? '')
+  // The `.git` file's own content: never followed to a network share the checkout is not on (see `contentPath`).
+  const named = target === undefined ? undefined : contentPath(target, dirname(marker))
+  if (named === undefined) return undefined
+  const gitdir = realOrLexical(named)
   const main = /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/u.exec(gitdir)?.[1]
   if (main === undefined || main.length === 0 || !isDirectory(join(main, '.git'))) return undefined
   const back = readText(join(gitdir, 'gitdir'))?.trim()
   if (back === undefined || back.length === 0) return undefined
-  const backPath = resolve(gitdir, back)
-  if (basename(backPath) !== '.git') return undefined
+  const backPath = contentPath(back, gitdir)
+  if (backPath === undefined || basename(backPath) !== '.git') return undefined
   return samePath(join(realOrLexical(dirname(backPath)), '.git'), marker) ? realOrLexical(main) : undefined
+}
+
+/** The path of the first `gitdir:` line (a scan: `/^gitdir:\s*(.+?)\s*$/m` is quadratic on a long line). */
+function gitdirOf(text: string): string | undefined {
+  for (const line of text.split(/\r?\n|\r/u)) {
+    if (!line.startsWith('gitdir:')) continue
+    const value = line.slice('gitdir:'.length).trim()
+    if (value.length > 0) return value
+  }
+  return undefined
 }
 
 function isSymbolicLink(path: string): boolean {

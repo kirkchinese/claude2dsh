@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { codexMcpComponents, codexRules, scanCodexProjectAssets, scanCodexUserAssets } from '../src/index.js'
+import { assess, codexMcpComponents, codexRules, scanCodexProjectAssets, scanCodexUserAssets } from '../src/index.js'
 
 const temporary: string[] = []
 afterEach(() => {
@@ -53,10 +53,14 @@ describe('Codex user assets', () => {
     expect(byName.get('command:review')).toMatchObject({ invocationName: 'prompts:review', syntax: 'codex', description: 'Review a file' })
     expect(byName.get('mcp:docs')).toMatchObject({ transport: 'streamable-http', headers: { Authorization: 'Bearer ${DOCS_TOKEN}' } })
     expect(byName.get('mcp:local')).toMatchObject({ transport: 'stdio', command: 'node', args: ['server.js'], env: { HOME: '${HOME}', MODE: 'dev' } })
-    expect(byName.has('mcp:off')).toBe(false)
+    expect(byName.get('mcp:off')).toMatchObject({ notStarted: { reason: 'disabled', code: 'disabled-in-config', detail: 'disabled in config.toml' } })
     expect(byName.get('settings:rules')).toMatchObject({ permissions: { allow: ['Bash(pwd:*)'], ask: ['Bash(git push:*)', 'Bash(git fetch:*)'], deny: ['Bash(rm -rf:*)'] } })
     expect(byName.get('other:notify')).toMatchObject({ originalKind: 'codex-notify' })
     expect(byName.get('other:agents-md')).toMatchObject({ originalKind: 'codex-instructions', path: 'AGENTS.md' })
+    // DSH runs both (the hooks row): neither is a part DSH has no equivalent for.
+    const gaps = assess(plugin!).gaps
+    expect(gaps.filter(gap => gap.componentId === byName.get('other:agents-md')?.id)).toEqual([])
+    expect(gaps.filter(gap => gap.componentId === byName.get('other:notify')?.id)).toEqual([])
   })
 
   it('expands rule alternatives and leaves out rules it cannot read', () => {

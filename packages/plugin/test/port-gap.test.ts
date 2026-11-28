@@ -26,7 +26,7 @@ function hud(): string {
 interface Calls { create: unknown[]; prompt: unknown[]; rename: unknown[] }
 
 /** A context whose `sessionController` and `agentPresets` record what they are asked. */
-function host(presets: ReadonlyArray<{ id: string; broken?: unknown }> | undefined = [{ id: 'default' }, { id: CREATOR_PRESET }]): { ctx: never; calls: Calls } {
+function host(presets: ReadonlyArray<{ id: string; broken?: unknown }> | undefined = [{ id: 'default' }, { id: CREATOR_PRESET }], extra: Record<string, unknown> = {}): { ctx: never; calls: Calls } {
   const calls: Calls = { create: [], prompt: [], rename: [] }
   const services: Record<string, unknown> = {
     sessionController: {
@@ -35,6 +35,7 @@ function host(presets: ReadonlyArray<{ id: string; broken?: unknown }> | undefin
       rename: async (request: unknown) => { calls.rename.push(request); return { title: 'x', seq: 1 } },
     },
     ...(presets !== undefined ? { agentPresets: { list: async () => presets } } : {}),
+    ...extra,
   }
   return { ctx: { get: (name: string) => services[name] } as never, calls }
 }
@@ -71,6 +72,26 @@ describe('porting a gap', () => {
       const cwd = join(home, 'dsh-adapters')
       expect(calls.create).toEqual([{ cwd, agentPreset: 'cordis' }])
       expect(readdirSync(cwd)).toEqual([])
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it('puts the session of the adapters directory in a workspace named after the folder, so it is not Ungrouped', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hf-creator-home-'))
+    roots.push(home)
+    vi.stubEnv(process.platform === 'win32' ? 'USERPROFILE' : 'HOME', home)
+    try {
+      const made: string[] = []
+      const workspaces = { create: async (path: string) => { made.push(path); return { id: 'workspace-adapters', path } } }
+      const { ctx, calls } = host(undefined, { workspaceRegistry: workspaces })
+      await startCreatorSession(ctx, 'the brief')
+      await startCreatorSession(ctx, 'another brief')
+      // The registry reuses the workspace of a path it knows; both sessions are made in it.
+      expect(made).toEqual([join(home, 'dsh-adapters'), join(home, 'dsh-adapters')])
+      expect(calls.create).toEqual([{ workspaceId: 'workspace-adapters', agentPreset: 'cordis' }, { workspaceId: 'workspace-adapters', agentPreset: 'cordis' }])
+      // A registry that refuses leaves the session where the directory puts it.
+      const refusing = host(undefined, { workspaceRegistry: { create: async () => { throw new Error('no') } } })
+      await startCreatorSession(refusing.ctx, 'the brief')
+      expect(refusing.calls.create).toEqual([{ cwd: join(home, 'dsh-adapters'), agentPreset: 'cordis' }])
     } finally { vi.unstubAllEnvs() }
   })
 

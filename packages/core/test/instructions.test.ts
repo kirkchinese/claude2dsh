@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { importPaths, instructionDirectories, loadInstructions, MAX_IMPORT_DEPTH, renderInstructions } from '../src/index.js'
+import { importPaths, instructionDirectories, INSTRUCTION_READ_BYTES, INSTRUCTION_PATHS_TRIED, INSTRUCTION_SKIPS_LISTED, loadInstructions, MAX_IMPORT_DEPTH, renderInstructions } from '../src/index.js'
 
 const temporary: string[] = []
 afterEach(() => {
@@ -187,6 +187,87 @@ describe('imports', () => {
       return
     }
     expect(names(loadInstructions({ cwd: join(root, 'home/proj'), home }), root)).toEqual(['home/proj/CLAUDE.md'])
+  })
+
+  it('stops reading at an aggregate budget of bytes and files, and says so', () => {
+    // Many files, each one permitted and well under the per-file cap, together far over the budget.
+    const count = INSTRUCTION_PATHS_TRIED + 50
+    const size = Math.ceil((INSTRUCTION_READ_BYTES * 4) / count)
+    const layout: Record<string, string> = { 'home/proj/.git/HEAD': '' }
+    const chunk = 'x'.repeat(size)
+    for (let index = 0; index < count; index++) layout[`home/proj/docs/f${String(index)}.md`] = chunk
+    layout['home/proj/CLAUDE.md'] = Array.from({ length: count }, (_, index) => `@docs/f${String(index)}.md`).join('\n')
+    const { root, home } = world(layout)
+    const set = loadInstructions({ cwd: join(root, 'home/proj'), home })
+    const read = set.files.reduce((sum, file) => sum + file.bytes, 0)
+    expect(read).toBeLessThanOrEqual(INSTRUCTION_READ_BYTES)
+    expect(set.files.length).toBeLessThan(count)
+    expect(set.stopped).toMatch(/stopped reading/u)
+    expect(renderInstructions(set.files, undefined, set.stopped).text).toContain(set.stopped)
+
+    // Many small files: the number of files opened is bounded too.
+    const small: Record<string, string> = { 'home/proj/.git/HEAD': '' }
+    for (let index = 0; index < count; index++) small[`home/proj/docs/f${String(index)}.md`] = 'y'
+    small['home/proj/CLAUDE.md'] = Array.from({ length: count }, (_, index) => `@docs/f${String(index)}.md`).join('\n')
+    const many = world(small)
+    const smallSet = loadInstructions({ cwd: join(many.root, 'home/proj'), home: many.home })
+    expect(smallSet.files.length).toBeLessThanOrEqual(INSTRUCTION_PATHS_TRIED)
+    expect(smallSet.stopped).toMatch(/stopped reading/u)
+  })
+
+  it('charges every path it tries against the budget, a missing import too, and tries none once it stopped', () => {
+    const count = INSTRUCTION_PATHS_TRIED + 50
+    const { root, home } = world({
+      'home/proj/.git/HEAD': '',
+      'home/proj/real.md': 'REAL',
+      'home/proj/CLAUDE.md': [...Array.from({ length: count }, (_, index) => `@missing${String(index)}.md`), '@real.md'].join('\n'),
+    })
+    const set = loadInstructions({ cwd: join(root, 'home/proj'), home })
+    expect(set.stopped).toMatch(/stopped reading/u)
+    expect(set.files.map(file => file.content)).not.toContain('REAL')
+  })
+
+  it('charges the bytes of a binary file it read against the budget', () => {
+    // Binary files just under the per-file cap, together over the budget, then a text import.
+    const size = 1_000_000
+    const count = Math.ceil(INSTRUCTION_READ_BYTES / size) + 1
+    const layout: Record<string, string> = { 'home/proj/.git/HEAD': '', 'home/proj/real.md': 'REAL' }
+    for (let index = 0; index < count; index++) layout[`home/proj/bin${String(index)}.md`] = '\0'.repeat(size)
+    layout['home/proj/CLAUDE.md'] = [...Array.from({ length: count }, (_, index) => `@bin${String(index)}.md`), '@real.md'].join('\n')
+    const { root, home } = world(layout)
+    const set = loadInstructions({ cwd: join(root, 'home/proj'), home })
+    expect(set.stopped).toMatch(/stopped reading/u)
+    expect(set.files.map(file => file.content)).not.toContain('REAL')
+  })
+
+  it('refuses a project import of a network share before touching it (Windows would sign in to the server)', () => {
+    const { root, home } = world({
+      'home/proj/.git/HEAD': '',
+      'home/proj/real.md': 'REAL',
+      'home/proj/CLAUDE.md': '@//evil/share/x.md\n@\\\\evil\\share\\y.md\n@real.md',
+    })
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    let set: ReturnType<typeof loadInstructions>
+    try {
+      Object.defineProperty(process, 'platform', { value: 'win32' })
+      set = loadInstructions({ cwd: join(root, 'home/proj'), home })
+    } finally {
+      Object.defineProperty(process, 'platform', platform)
+    }
+    expect(set.files.map(file => file.content)).toContain('REAL')
+    // A backslash path is no import at all (`importPaths`); the `//` form is refused unread.
+    expect(set.skipped.map(entry => [entry.path, entry.reason])).toEqual([['//evil/share/x.md', 'an import outside the workspace']])
+  })
+
+  it('lists a bounded number of files it did not use', () => {
+    const count = INSTRUCTION_SKIPS_LISTED * 4
+    const layout: Record<string, string> = { 'home/proj/.git/HEAD': '' }
+    for (let index = 0; index < count; index++) layout[`home/outside/f${String(index)}.md`] = 'z'
+    layout['home/proj/CLAUDE.md'] = Array.from({ length: count }, (_, index) => `@../outside/f${String(index)}.md`).join('\n')
+    const { root, home } = world(layout)
+    const set = loadInstructions({ cwd: join(root, 'home/proj'), home })
+    expect(set.skipped.length).toBe(INSTRUCTION_SKIPS_LISTED)
+    expect(set.skippedUnlisted).toBe(count - INSTRUCTION_SKIPS_LISTED)
   })
 
   it('does not import AGENTS.md references (Codex has no imports)', () => {

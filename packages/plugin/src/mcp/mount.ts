@@ -12,10 +12,11 @@ import { existsSync, statSync } from 'node:fs'
 import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ForeignPlugin, McpComponent } from '@kirkchinese/harness-forge-core'
-import { shortHash } from '@kirkchinese/harness-forge-core'
+import { codexHome, contentPath, LEADS_TO_SHARE, shortHash, stripAround } from '@kirkchinese/harness-forge-core'
 import type { McpAuthStore } from './auth.js'
 import { RemoteMcp, type RemoteMcpState } from './remote.js'
 import { composedCatalog, mountInCatalog } from './catalog.js'
+import { DEFAULT_TOOL_CALL_TIMEOUT_MS } from './policy.js'
 
 /** One mounted MCP server. */
 export interface McpMount {
@@ -32,8 +33,11 @@ export function findProgram(program: string, cwd: string, env: NodeJS.ProcessEnv
   const extensions = process.platform === 'win32'
     ? ['', ...(env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(extension => extension.length > 0)]
     : ['']
-  const candidates = /[\\/]/u.test(program)
-    ? [isAbsolute(program) ? program : resolve(cwd, program)]
+  // A program path the configuration names is checked against the folder it runs in (see `contentPath`).
+  const named = /[\\/]/u.test(program) ? contentPath(program, cwd) : undefined
+  if (/[\\/]/u.test(program) && named === undefined) return undefined
+  const candidates = named !== undefined
+    ? [named]
     : (env['PATH'] ?? env['Path'] ?? '').split(delimiter).filter(entry => entry.length > 0).map(entry => join(entry, program))
   for (const candidate of candidates) {
     for (const extension of extensions) {
@@ -53,7 +57,7 @@ export class UnsupportedMcpTransportError extends Error {
   }
 }
 
-/** How long a server may take to connect and list its tools. */
+/** How long a server may take to connect and list its tools when its configuration does not say. */
 const READY_TIMEOUT_MS = 120_000
 
 /** Variables a plugin's MCP configuration may reference. */
@@ -62,6 +66,24 @@ export interface McpVariables {
   readonly dataDir: string
   /** The `env` of imported harness settings: servers inherit it, `${VAR}` reads it. */
   readonly env?: Readonly<Record<string, string>>
+  /**
+   * Variables the foreign harness itself sets for its servers, read by
+   * `${VAR}` when neither the settings nor the environment set them; see
+   * {@link harnessVariables}.
+   */
+  readonly provided?: Readonly<Record<string, string>>
+}
+
+/**
+ * The variables a harness provides to its plugins' MCP servers. Codex sets
+ * `CODEX_HOME` (its configuration directory) and, for plugin servers,
+ * `CODEX_MCP_NODE_PATH`, the Node.js it bundles (the openai-bundled plugins
+ * start their servers as `exec "$CODEX_MCP_NODE_PATH" ./server.mjs`). DSH
+ * provides the Node.js running it instead. They reach a server only through
+ * its configuration (`env_vars`, `env`, `${VAR}` in its command or arguments).
+ */
+export function harnessVariables(plugin: Pick<ForeignPlugin, 'source'>): Readonly<Record<string, string>> {
+  return plugin.source === 'codex' ? { CODEX_HOME: codexHome(), CODEX_MCP_NODE_PATH: process.execPath } : {}
 }
 
 /**
@@ -95,15 +117,38 @@ export function projectRootOf(plugin: { readonly manifest?: Readonly<Record<stri
 /**
  * Expand `${CLAUDE_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_DATA}`, `${PLUGIN_ROOT}`,
  * `${PLUGIN_DATA}`, `${VAR}` and `${VAR:-default}` the way Claude Code expands
- * `.mcp.json`. Unknown variables without a default expand to empty text.
+ * `.mcp.json`; then what the harness provides ({@link McpVariables.provided}).
+ * Unknown variables without a default expand to empty text; a stdio server
+ * whose command or arguments need one does not start (`missingVariables`).
+ * The value goes in as plain text, as in Claude Code: expanded into an
+ * explicit `sh -c '… ${VAR} …'` argument it becomes part of that script. The
+ * values are the plugin author's and the user's own environment, so this
+ * keeps the original harness's meaning instead of quoting them.
  */
 export function expandVariables(value: string, vars: McpVariables, env: NodeJS.ProcessEnv = process.env): string {
-  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/gu, (_match, name: string, fallback: string | undefined) => {
+  const expand = (name: string, fallback: string | undefined): string => {
     if (name === 'CLAUDE_PLUGIN_ROOT' || name === 'PLUGIN_ROOT') return vars.pluginRoot
     if (name === 'CLAUDE_PLUGIN_DATA' || name === 'PLUGIN_DATA') return vars.dataDir
-    const resolved = vars.env?.[name] ?? env[name]
-    return resolved !== undefined && resolved.length > 0 ? resolved : fallback ?? ''
-  })
+    const resolved = [vars.env?.[name], env[name], vars.provided?.[name]].find(value => value !== undefined && value.length > 0)
+    return resolved ?? fallback ?? ''
+  }
+  // A scan: `/\$\{(NAME)(?::-([^}]*))?\}/g` reads to the end from every unclosed `${NAME:-`, quadratic.
+  let out = ''
+  let index = 0
+  let close = -1
+  for (;;) {
+    const start = value.indexOf('${', index)
+    if (close < start + 2) close = value.indexOf('}', start + 2)
+    if (start === -1 || close === -1) return out + value.slice(index)
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)(?::-(.*))?$/su.exec(value.slice(start + 2, close))
+    if (match === null) {
+      out += value.slice(index, start + 2)
+      index = start + 2
+      continue
+    }
+    out += value.slice(index, start) + expand(match[1] ?? '', match[2])
+    index = close + 1
+  }
 }
 
 /** Build the official mcp-client config for one component. */
@@ -113,6 +158,11 @@ export function mcpClientConfig(component: McpComponent, serverName: string, var
     Object.fromEntries(Object.entries(record ?? {}).map(([key, value]) => [key, expand(value)]))
   if (component.transport === 'stdio') {
     if (component.command === undefined) throw new Error(`MCP server "${component.name}" has no command`)
+    const env = expandRecord(component.env)
+    const missing = missingVariables(component, env, vars)
+    if (missing.length > 0) {
+      throw new Error(`MCP server "${component.name}" needs ${missing.join(', ')}, which DSH does not provide; set ${missing.length > 1 ? 'them' : 'it'} in the environment DSH starts in`)
+    }
     const command = resolveCommand(expand(component.command), vars.pluginRoot)
     return {
       serverName,
@@ -121,15 +171,16 @@ export function mcpClientConfig(component: McpComponent, serverName: string, var
       args: (component.args ?? []).map(expand),
       env: {
         ...vars.env,
-        ...expandRecord(component.env),
+        ...env,
         CLAUDE_PLUGIN_ROOT: vars.pluginRoot,
         CLAUDE_PLUGIN_DATA: vars.dataDir,
         PLUGIN_ROOT: vars.pluginRoot,
         PLUGIN_DATA: vars.dataDir,
       },
-      cwd: component.cwd === undefined ? vars.pluginRoot : resolvePath(expand(component.cwd), vars.pluginRoot),
+      cwd: component.cwd === undefined ? vars.pluginRoot : workingDirectory(component, expand(component.cwd), vars.pluginRoot),
       failOnStartupError: true,
-      toolCallTimeoutMs: 600_000,
+      toolCallTimeoutMs: component.toolTimeoutMs ?? DEFAULT_TOOL_CALL_TIMEOUT_MS,
+      ...(component.startupTimeoutMs !== undefined ? { startupTimeoutMs: component.startupTimeoutMs } : {}),
     }
   }
   if (component.transport === 'streamable-http') {
@@ -140,16 +191,54 @@ export function mcpClientConfig(component: McpComponent, serverName: string, var
       url: expand(component.url),
       headers: expandRecord(component.headers),
       failOnStartupError: true,
-      toolCallTimeoutMs: 600_000,
+      toolCallTimeoutMs: component.toolTimeoutMs ?? DEFAULT_TOOL_CALL_TIMEOUT_MS,
+      ...(component.startupTimeoutMs !== undefined ? { startupTimeoutMs: component.startupTimeoutMs } : {}),
     }
   }
   throw new UnsupportedMcpTransportError(component.transport)
+}
+
+/**
+ * The variables a stdio server's command or arguments reference that would
+ * be empty: a `${VAR}` without a default that nothing sets, and a shell
+ * `$VAR` the server's `env` passes through (`env_vars`) but nothing sets.
+ * Started anyway, such a server runs an empty program
+ * (`exec "$CODEX_MCP_NODE_PATH"` fails with `exec: : Permission denied`).
+ * A shell variable the server does not declare may be the script's own, so
+ * it is left alone.
+ */
+function missingVariables(component: McpComponent, env: Readonly<Record<string, string>>, vars: McpVariables): string[] {
+  const missing = new Set<string>()
+  const declared = component.env ?? {}
+  for (const text of [component.command ?? '', ...(component.args ?? [])]) {
+    for (const match of text.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/gu)) {
+      const name = match[1] ?? ''
+      if (expandVariables(match[0], vars) === '') missing.add(name)
+    }
+    for (const match of text.matchAll(/\$([A-Za-z_][A-Za-z0-9_]*)/gu)) {
+      const name = match[1] ?? ''
+      const passed = declared[name]
+      if (passed !== undefined && /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/u.test(passed) && env[name] === '') missing.add(name)
+    }
+  }
+  return [...missing]
 }
 
 /** What a remote mount needs beyond the component. */
 export interface RemoteMcpHost {
   readonly auth: McpAuthStore
   onState(server: RemoteMcp, state: RemoteMcpState): void
+}
+
+/**
+ * Whether `mountMcp` serves a server through the capability catalog: with the
+ * catalog composed, a stdio server is listed in its compact index and started
+ * on demand instead of putting every tool schema in every request. Remote
+ * servers keep the direct path, which adds OAuth; `options.catalog: false`
+ * (a session's own server) keeps it direct too.
+ */
+export function servedByCatalog(ctx: object, component: McpComponent, options: { readonly catalog?: boolean } = {}): boolean {
+  return options.catalog !== false && component.transport === 'stdio' && composedCatalog(ctx) !== undefined
 }
 
 /**
@@ -160,18 +249,15 @@ export interface RemoteMcpHost {
  * that state.
  */
 export async function mountMcp(ctx: Context, component: McpComponent, serverName: string, vars: McpVariables, remoteHost: RemoteMcpHost, options: { readonly catalog?: boolean } = {}): Promise<McpMount> {
-  // With the capability catalog composed, a stdio server is listed in its
-  // compact index and started on demand instead of putting every tool schema
-  // in every request. Remote servers keep the direct path, which adds OAuth.
-  const catalog = options.catalog === false ? undefined : composedCatalog(ctx)
-  if (catalog !== undefined && component.transport === 'stdio') {
+  const catalog = servedByCatalog(ctx, component, options) ? composedCatalog(ctx) : undefined
+  if (catalog !== undefined) {
     const config = mcpClientConfig(component, serverName, vars)
     const program = String(config['command'])
     const resolved = findProgram(program, String(config['cwd']))
     if (resolved === undefined) {
       throw new Error(`MCP server "${component.name}" needs the program "${program}", which is not installed or not on PATH`)
     }
-    return { serverName, catalog: true, dispose: await mountInCatalog(ctx, catalog, component, serverName, config, program, resolved, READY_TIMEOUT_MS) }
+    return { serverName, catalog: true, dispose: await mountInCatalog(ctx, catalog, component, serverName, config, program, resolved, component.startupTimeoutMs ?? READY_TIMEOUT_MS) }
   }
   if (component.transport === 'streamable-http' || component.transport === 'sse') {
     if (component.url === undefined) throw new Error(`MCP server "${component.name}" has no url`)
@@ -196,7 +282,8 @@ export async function mountMcp(ctx: Context, component: McpComponent, serverName
   const module = await import('@deepseek-ai/dsh-mcp-client')
   const fiber = ctx.plugin(module as never, config as never)
   try {
-    await withTimeout(fiber as unknown as Promise<unknown>, `MCP server "${component.name}" did not become ready within ${READY_TIMEOUT_MS / 1000}s`)
+    const readyMs = component.startupTimeoutMs ?? READY_TIMEOUT_MS
+    await withTimeout(fiber as unknown as Promise<unknown>, readyMs, `MCP server "${component.name}" did not become ready within ${readyMs / 1000}s`)
   } catch (error: unknown) {
     await fiber.dispose()
     throw new Error(`MCP server "${component.name}" failed to start: ${rootCause(error)}`)
@@ -204,12 +291,27 @@ export async function mountMcp(ctx: Context, component: McpComponent, serverName
   return { serverName, dispose: async () => { await fiber.dispose() } }
 }
 
-/** A DSH-safe server name (`[A-Za-z0-9_-]{1,32}`), stable for the same input. */
+/** The longest server name DSH's MCP client accepts. */
+const MAX_SERVER_NAME_LENGTH = 32
+/** Hex characters of the hash that keeps a shortened or collapsed server name apart from the others. */
+const SERVER_NAME_HASH_LENGTH = 8
+/** Characters kept before that hash: the name, `_` and the hash fit {@link MAX_SERVER_NAME_LENGTH}. */
+const SERVER_NAME_KEPT_LENGTH = MAX_SERVER_NAME_LENGTH - SERVER_NAME_HASH_LENGTH - 1
+
+/**
+ * A DSH-safe server name (`[A-Za-z0-9_-]{1,32}`), stable for the same input.
+ * It never holds `__` nor starts or ends with `_`: a model-facing tool name
+ * `mcp__<server>__<tool>` then names one server only (with servers `app` and
+ * `app__reports`, `mcp__app__reports__x` would name either). A name that had
+ * `__` is collapsed to single `_` and keeps a hash of the original, so it
+ * stays apart from a server that was named that way to begin with.
+ */
 export function mcpServerName(name: string): string {
-  const base = name.replace(/[^A-Za-z0-9_-]+/gu, '_').replace(/^_+|_+$/gu, '')
-  if (base.length > 0 && base.length <= 32) return base
-  if (base.length > 32) return `${base.slice(0, 23).replace(/[_-]+$/u, '')}_${shortHash(base, 8)}`
-  return `mcp_${shortHash(name, 8)}`
+  const base = stripAround(name.replace(/[^A-Za-z0-9_-]+/gu, '_'), '_')
+  const collapsed = base.replace(/_{2,}/gu, '_')
+  if (collapsed === base && base.length > 0 && base.length <= MAX_SERVER_NAME_LENGTH) return base
+  const kept = collapsed.slice(0, SERVER_NAME_KEPT_LENGTH).replace(/[_-]+$/u, '')
+  return `${kept.length > 0 ? kept : 'mcp'}_${shortHash(base.length > 0 ? base : name, SERVER_NAME_HASH_LENGTH)}`
 }
 
 /** The per-plugin data directory under a profile-local root. */
@@ -222,8 +324,11 @@ function resolveCommand(command: string, root: string): string {
   return command
 }
 
-function resolvePath(path: string, root: string): string {
-  return isAbsolute(path) ? path : resolve(root, path)
+/** A server's configured working directory, resolved against its plugin; one on a network share the plugin is not on is refused. */
+function workingDirectory(component: McpComponent, path: string, root: string): string {
+  const resolved = contentPath(path, root)
+  if (resolved === undefined) throw new Error(`MCP server "${component.name}" would run in ${path}, which ${LEADS_TO_SHARE}; Harness Forge does not start servers there`)
+  return resolved
 }
 
 function rootCause(error: unknown): string {
@@ -236,11 +341,11 @@ function rootCause(error: unknown): string {
   return message
 }
 
-function withTimeout(promise: Promise<unknown>, message: string): Promise<unknown> {
+function withTimeout(promise: Promise<unknown>, ms: number, message: string): Promise<unknown> {
   return Promise.race([
     promise,
     new Promise((_resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(message)), READY_TIMEOUT_MS)
+      const timer = setTimeout(() => reject(new Error(message)), ms)
       timer.unref?.()
     }),
   ])

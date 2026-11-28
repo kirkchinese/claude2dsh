@@ -25,8 +25,7 @@ const METHODS: ReadonlyArray<readonly [string, 'unary' | 'stream', boolean]> = [
   ['migrate', 'unary', true],
   ['setPartEnabled', 'unary', true],
   ['removePlugin', 'unary', true],
-  ['marketplaceScan', 'unary', true],
-  ['marketplaceInstall', 'unary', true],
+  ['keepPlugin', 'unary', true],
   ['remoteSources', 'unary', false],
   ['remoteOpen', 'unary', true],
   ['remoteForget', 'unary', true],
@@ -39,6 +38,7 @@ const METHODS: ReadonlyArray<readonly [string, 'unary' | 'stream', boolean]> = [
   ['signIn', 'unary', true],
   ['sessions', 'unary', true],
   ['importSession', 'unary', true],
+  ['openImported', 'unary', true],
   ['sessionImport', 'unary', false],
   ['installChatImport', 'unary', false],
   ['modSurfaces', 'stream', true],
@@ -106,9 +106,9 @@ async function namespace(): Promise<Namespace> {
   return ready
 }
 
-/** A failed call: the Host's reason, and the Remote error code when there is one. */
+/** A failed call: the Host's reason, and the Remote error code and its details when there are. */
 export class CallError extends Error {
-  constructor(message: string, readonly code?: string) {
+  constructor(message: string, readonly code?: string, readonly details?: Readonly<Record<string, unknown>>) {
     super(message)
     this.name = 'CallError'
   }
@@ -131,6 +131,10 @@ export function isWorkbenchOff(error: unknown): boolean {
     || /harnessCompat\/\w+.*(?:no active Remote method|active Service .* is unavailable|has no callable method|definition was withdrawn)/u.test(error.message)
 }
 
+function recordOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
 /** Call one workbench method; a failure throws a CallError carrying the Host's reason. */
 export async function call<T>(method: string, request?: Record<string, unknown>): Promise<T> {
   const target = (await namespace())[method]
@@ -139,12 +143,12 @@ export async function call<T>(method: string, request?: Record<string, unknown>)
   try {
     result = await (request === undefined ? target() : target(request)) as unknown
   } catch (error: unknown) {
-    const code = (error as { code?: unknown } | null)?.code
-    throw new CallError(error instanceof Error ? error.message : String(error), typeof code === 'string' ? code : undefined)
+    const { code, details } = (error ?? {}) as { code?: unknown; details?: unknown }
+    throw new CallError(error instanceof Error ? error.message : String(error), typeof code === 'string' ? code : undefined, recordOf(details))
   }
   if (typeof result === 'object' && result !== null && 'ok' in result) {
-    const outcome = result as { ok: boolean; value?: unknown; error?: { message?: string; code?: string } }
-    if (!outcome.ok) throw new CallError(outcome.error?.message ?? outcome.error?.code ?? `${method} failed`, outcome.error?.code)
+    const outcome = result as { ok: boolean; value?: unknown; error?: { message?: string; code?: string; details?: unknown } }
+    if (!outcome.ok) throw new CallError(outcome.error?.message ?? outcome.error?.code ?? `${method} failed`, outcome.error?.code, recordOf(outcome.error?.details))
     return outcome.value as T
   }
   return result as T

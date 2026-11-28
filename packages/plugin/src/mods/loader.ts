@@ -10,6 +10,7 @@ import { createHash, getRandomValues, randomUUID, subtle } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, extname, isAbsolute } from 'node:path'
 import vm from 'node:vm'
+import { leadsToShare } from '@kirkchinese/harness-forge-core'
 import { CLAUDE_CODE_MODULE, Fragment, h } from './runtime.js'
 
 /** One bundled module: CommonJS text over the virtual `claude-code` imports. */
@@ -204,6 +205,8 @@ export function scanBundleRefusal(bundle: Bundle, parseAst: Bundler['parseAst'])
     const ext = extname(file).toLowerCase()
     const lang = ext === '.tsx' ? 'tsx' : ext === '.ts' || ext === '.mts' || ext === '.cts' ? 'ts' : ext === '.jsx' ? 'jsx' : 'js'
     let text: string
+    // A file on a link to a network share it is not on is unreadable (see `leadsToShare`).
+    if (leadsToShare(file)) continue
     try {
       text = readFileSync(file, 'utf8')
     } catch {

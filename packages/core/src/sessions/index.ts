@@ -9,6 +9,7 @@
 export * from './model.js'
 export * from './adapter.js'
 export * from './synthesize.js'
+export * from './lines.js'
 export { claudeCodeAdapter } from '../dialects/claude-code/sessions/adapter.js'
 export { readClaudeSession, type ClaudeReadOptions } from '../dialects/claude-code/sessions/parse.js'
 export { discoverClaudeCodeSessions } from '../dialects/claude-code/sessions/discover.js'

@@ -23,7 +23,7 @@ function codexHome(): string {
 describe('Codex rollout migration', () => {
   it('discovers, normalizes and imports a rollout from the Codex sessions folder', async () => {
     const root = defaultCodexSessionsRoot(codexHome())
-    const sessions = await discoverCodexSessions(root, 1)
+    const { sessions } = await discoverCodexSessions(root, { limit: 1 })
     expect(sessions.length).toBeGreaterThan(0)
     const parsed = await readCodexSession(sessions[0]!.path)
     expect(parsed.session.source.tool).toBe('codex')

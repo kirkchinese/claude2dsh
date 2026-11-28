@@ -43,6 +43,16 @@ describe('server names', () => {
     expect(long.length).toBeLessThanOrEqual(32)
     expect(mcpServerName('plugin_a-very-long-plugin-name_and-a-long-server')).toBe(long)
   })
+
+  it('never puts "__" in a name, so mcp__<server>__<tool> names one server', () => {
+    for (const name of ['app__reports', 'a b__c', `${'x'.repeat(22)}__${'y'.repeat(20)}`, '-__-', '__']) {
+      const server = mcpServerName(name)
+      expect(server).toMatch(/^[A-Za-z0-9_-]{1,32}$/u)
+      expect(server).not.toContain('__')
+      expect(server).not.toMatch(/^_|_$/u)
+    }
+    expect(mcpServerName('app__reports')).not.toBe(mcpServerName('app_reports'))
+  })
 })
 
 describe('mcpClientConfig', () => {
@@ -58,7 +68,8 @@ describe('mcpClientConfig', () => {
     expect(config['command']).toBe(join(ROOT, 'bin/server.js'))
     expect(config['args']).toEqual(['--root', `${ROOT}/data`])
     expect(config['env']).toMatchObject({ TOKEN: `${DATA}/token`, CLAUDE_PLUGIN_ROOT: ROOT })
-    expect(config['cwd']).toBe(`${ROOT}/work`)
+    // The working directory is a resolved path, in this platform's spelling.
+    expect(config['cwd']).toBe(join(ROOT, 'work'))
   })
 
   it('translates a streamable HTTP server', () => {

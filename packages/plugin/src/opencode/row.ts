@@ -2,14 +2,16 @@
  * The OpenCode row: OpenCode code plugins, each in its own Bun host, their
  * hooks raised where DSH does the same work. It adds `shell.env` to the hooks
  * row and `command.execute.before` to the commands row while those run, and
- * its plugins' added commands through the commands row.
+ * its plugins' added commands through the commands row while both the plugin
+ * and that row run.
  * @module @kirkchinese/harness-forge/opencode
  */
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@kirkchinese/harness-forge-core'
 import { onDsh } from '../dsh/host.js'
-import type { Disposer } from '../forge/contract.js'
+import type { Disposer, MountScope } from '../forge/contract.js'
+import type { OpenCodeCommand } from './runtime/types.js'
 import { FORGE_SERVICE, type HarnessForge } from '../forge/service.js'
 import { OpenCodeRuntime } from './runtime.js'
 import { mounted, Parts, rowEffect } from '../forge/row.js'
@@ -48,26 +50,17 @@ export function startOpenCode(ctx: Context, forge: HarnessForge): Disposer {
       if (component.kind !== 'code') throw new HarnessError('component-failed', `action expects code: ${component.id}`)
       const mount = await opencode.mount(component, plugin)
       for (const tool of mount.tools) tools.set(tool, component.id)
-      // Commands the plugin's `config` hook added run like the project's own OpenCode commands.
-      const withdraw: Array<() => void> = []
-      const commandNames: string[] = []
-      const commands = forge.lookup('commands')
-      if (commands !== undefined) {
-        const taken = takenNames()
-        for (const command of mount.commands) {
-          const added = commands.registerAdded({ component: command.component, name: command.name, foreignName: command.name, pluginId: plugin.id, pluginRoot: plugin.root, dataDir }, scope, taken)
-          if (added === undefined) continue
-          taken.add(added.name)
-          withdraw.push(added.dispose)
-          commandNames.push(added.name)
-        }
-        opencode.recordAddedCommands(component.id, mount.commands.map((command, index) => ({ name: commandNames[index] ?? command.name, foreignName: command.name, template: command.component.body })))
-      }
+      // Commands the plugin's `config` hook added run like the project's own OpenCode commands, while the commands row runs.
+      let commandNames: readonly string[] = []
+      const unbind = bindAddedCommands(forge, mount.commands, { pluginId: plugin.id, pluginRoot: plugin.root, dataDir, scope, takenNames }, (names) => {
+        commandNames = names
+        opencode.recordAddedCommands(component.id, mount.commands.map((command, index) => ({ name: names[index] || command.name, foreignName: command.name, template: command.component.body })))
+      })
       const summary = [
         `opencode-plugin hooks [${mount.hooks.join(', ')}]`,
         `tools [${mount.tools.join(', ')}]`,
         // The names they are typed under in DSH.
-        ...(commandNames.length > 0 ? [`commands [${commandNames.join(', ')}]`] : []),
+        ...(commandNames.some(name => name.length > 0) ? [`commands [${commandNames.filter(name => name.length > 0).join(', ')}]`] : []),
         // What its config hook changed: only `command` is applied in DSH.
         ...(mount.configChanged.length > 0 ? [`config [${mount.configChanged.join(', ')}]`] : []),
       ].join('; ')
@@ -75,11 +68,42 @@ export function startOpenCode(ctx: Context, forge: HarnessForge): Disposer {
         outcome: mounted(component, 'L1b', summary),
         disposer: async () => {
           for (const tool of mount.tools) if (tools.get(tool) === component.id) tools.delete(tool)
-          for (const dispose of withdraw) dispose()
+          unbind()
           await mount.dispose()
         },
       }
     },
   }))
   return () => parts.dispose()
+}
+
+/**
+ * Register a mounted plugin's added commands for as long as both the plugin and the commands row run: again each
+ * time the commands row starts, withdrawn when it stops or `dispose` runs. `record` gets, at each registration, the
+ * DSH name of each command in order (empty where none was given).
+ */
+export function bindAddedCommands(
+  forge: Pick<HarnessForge, 'watch'>,
+  commands: readonly OpenCodeCommand[],
+  owner: { readonly pluginId: string; readonly pluginRoot: string; readonly dataDir: string; readonly scope: MountScope; takenNames(): Set<string> },
+  record: (names: readonly string[]) => void,
+): Disposer {
+  if (commands.length === 0) return () => undefined
+  const unwatch = forge.watch('commands', (api) => {
+    const taken = owner.takenNames()
+    const names: string[] = []
+    const withdraw: Array<() => void> = []
+    for (const command of commands) {
+      const added = api.registerAdded({ component: command.component, name: command.name, foreignName: command.name, pluginId: owner.pluginId, pluginRoot: owner.pluginRoot, dataDir: owner.dataDir }, owner.scope, taken)
+      names.push(added?.name ?? '')
+      if (added === undefined) continue
+      taken.add(added.name)
+      withdraw.push(added.dispose)
+    }
+    record(names)
+    return () => {
+      for (const dispose of withdraw) dispose()
+    }
+  })
+  return unwatch
 }

@@ -97,7 +97,9 @@ export function foreignTool(dialect: HookDialect, dshName: string, args: unknown
  */
 export function dshToolsFor(foreignName: string, dialect?: 'claude-code' | 'codex'): string[] {
   if (foreignName.startsWith('mcp__')) return [foreignName, ...CATALOG_TOOLS]
-  const bare = foreignName.replace(/\(.*\)$/u, '').trim()
+  // `Name(specifier)`: drop the specifier (a scan; `/\(.*\)$/` is quadratic on a run of `(`).
+  const open = foreignName.indexOf('(', foreignName.lastIndexOf('\n') + 1)
+  const bare = (open !== -1 && foreignName.endsWith(')') ? foreignName.slice(0, open) : foreignName).trim()
   const names: string[] = []
   for (const [dsh, entry] of Object.entries(TABLE)) {
     // In one dialect a name means that dialect's tool only: Claude's `Write` is not Codex's patch-writer that also edits.

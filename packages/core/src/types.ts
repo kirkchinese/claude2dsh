@@ -59,6 +59,8 @@ export interface ForeignPlugin {
   readonly id: string
   readonly source: SourceId
   readonly name: string
+  /** The plugin's own name, when `name` carries a suffix that tells it from another installed plugin of the same name. What people see. */
+  readonly displayName?: string
   readonly version?: string
   readonly description?: string
   readonly license?: string
@@ -133,6 +135,11 @@ export interface SkillComponent extends ComponentBase {
 /** One MCP server entry. */
 export interface McpComponent extends ComponentBase {
   readonly kind: 'mcp'
+  /**
+   * The server's name as its plugin or configuration declares it (`cua_repl`), which `name` (the name Forge
+   * registers it under, `cua-repl`) may differ from: what the plugin's own hooks call it by.
+   */
+  readonly declaredName?: string
   readonly transport: 'stdio' | 'streamable-http' | 'sse' | 'unknown'
   readonly command?: string
   readonly args?: readonly string[]
@@ -140,7 +147,31 @@ export interface McpComponent extends ComponentBase {
   readonly cwd?: string
   readonly url?: string
   readonly headers?: Readonly<Record<string, string>>
+  /** Only these tools may run (Codex `enabled_tools`). */
+  readonly enabledTools?: readonly string[]
+  /** These tools never run, applied after {@link enabledTools} (Codex `disabled_tools`). */
+  readonly disabledTools?: readonly string[]
+  /**
+   * Which tool calls ask the user first (Codex `default_tools_approval_mode`
+   * and `tools.<tool>.approval_mode`): `askByDefault` for every tool, `tools`
+   * overriding it per tool.
+   */
+  readonly toolApproval?: { readonly askByDefault: boolean; readonly tools: Readonly<Record<string, boolean>> }
+  /** How long the server may take to start and list its tools (Codex `startup_timeout_sec`). */
+  readonly startupTimeoutMs?: number
+  /** How long one tool call may run (Codex `tool_timeout_sec`). */
+  readonly toolTimeoutMs?: number
+  /**
+   * Why DSH does not start this server: the configuration switched it off
+   * (`disabled`), or it needs something DSH cannot provide (`unsupported`,
+   * reported as a gap). `code` is what screens translate; `detail` is the
+   * same in English, for logs, plans and agents.
+   */
+  readonly notStarted?: { readonly reason: 'disabled' | 'unsupported'; readonly code: McpNotStartedCode; readonly detail: string }
 }
+
+/** Why an MCP server is not started, as a code a screen words in the person's language. */
+export type McpNotStartedCode = 'disabled-in-plugin' | 'disabled-in-config' | 'needs-chatgpt-sign-in'
 
 /** One Markdown slash command. */
 export interface CommandComponent extends ComponentBase {
@@ -230,6 +261,12 @@ export interface SettingsComponent extends ComponentBase {
   /** The settings files the values were read from, lowest precedence first. */
   readonly files: readonly string[]
   readonly permissions: PermissionRules
+  /**
+   * Where a `/path` file rule of these settings anchors, as in Claude Code:
+   * `~/.claude` for user settings, the project root for project and local
+   * settings. Absent: the session's working directory.
+   */
+  readonly ruleRoot?: string
   readonly env: Readonly<Record<string, string>>
   /** `disableAllHooks: true` turns off this scope's hooks. */
   readonly disableAllHooks?: boolean
@@ -274,6 +311,8 @@ export interface Gap {
     | 'unsupported-handler'
     | 'unsupported-event'
     | 'unsupported-component'
+    /** The part needs something outside DSH (an account, a hosted service) that neither DSH nor an adapter can provide. */
+    | 'external-requirement'
     | 'runtime-failure'
     | 'license'
     | 'version'
@@ -349,6 +388,8 @@ export interface ComponentOutcome {
   readonly level: CompatibilityLevel
   readonly evidence: EvidenceLevel
   readonly message?: string
+  /** Why a skipped part was left out, as a code a screen words in the person's language; `message` says it in English. */
+  readonly skippedBy?: 'disabled-in-claude-code'
   /** The latest runtime observation per signal, newest last. */
   readonly observations?: readonly Observation[]
 }

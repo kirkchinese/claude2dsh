@@ -7,6 +7,7 @@
  */
 import type { ForeignPlugin, SourceId } from '../types.js'
 import type { SessionSourceAdapter } from '../sessions/adapter.js'
+import type { PluginIdProblem } from './opencode/plugin-id.js'
 
 /**
  * Something at a directory that says which dialect it speaks. Detection takes
@@ -26,12 +27,45 @@ export interface DialectMarker {
   test(directory: string): boolean
 }
 
-/** One plugin the harness itself has installed, or a marketplace it added offers. */
+/** One plugin the harness itself has installed. */
 export interface HarnessPluginEntry {
   readonly root: string
-  readonly origin: 'installed' | 'marketplace'
+  /**
+   * What the harness knows the install by, stable across its updates: Claude Code and Codex `<name>@<marketplace>`
+   * (a new version goes into a folder of its own), OpenCode the package folder (an update rewrites it in place).
+   */
+  readonly key: string
   readonly enabled?: boolean
+  /** Set instead of `enabled` when whether the harness runs it cannot be told: why (an OpenCode plugin id its source does not settle). */
+  readonly enabledUnknown?: PluginIdProblem
   readonly marketplace?: string
+}
+
+/** An install the harness records whose files are not where the record says: still installed, not readable now. */
+export interface UnresolvedHarnessPlugin {
+  readonly key: string
+  readonly message: string
+}
+
+/**
+ * The plugins a harness records, and how much of its record could be read. A plugin missing from `entries` is not
+ * installed only when `unread` is empty (a complete read) and it is not `unresolved`.
+ */
+export interface HarnessPluginList {
+  readonly entries: readonly HarnessPluginEntry[]
+  readonly unresolved: readonly UnresolvedHarnessPlugin[]
+  /** What of the record could not be read (a malformed or cut-off file, a folder that could not be listed), each saying why. */
+  readonly unread: readonly string[]
+}
+
+/** Whether a harness runs the person's own assets, or why that cannot be told. */
+export type UserEnablement = { readonly enabled: boolean } | { readonly enabledUnknown: PluginIdProblem }
+
+/** A marketplace the harness added that has a local copy: what it offers can be installed one by one. */
+export interface HarnessMarketplace {
+  readonly name: string
+  /** The marketplace's root folder (it holds `.claude-plugin/marketplace.json` or `.agents/plugins/marketplace.json`). */
+  readonly root: string
 }
 
 /** Options of {@link Dialect.scan}. */
@@ -61,16 +95,36 @@ export interface Dialect {
     /** The discovery root that lists them. */
     anchor(home: string): string
     scan(home: string): ForeignPlugin | undefined
+    /**
+     * Whether the harness runs them: off when it switches off every one (OpenCode's `-*`), or not known, with why.
+     * Absent: on. Discovery lists them either way.
+     */
+    enablement?(home: string): UserEnablement
     /** What the directory lacks when `scan` finds nothing, for the error. */
     readonly emptyMessage: string
   }
   /**
-   * Plugins the harness keeps a record of: when `root` is a discovery root it
-   * is read through this list instead of being walked.
+   * The plugins the harness has installed, as it records them. A folder of
+   * `roots` that is a discovery root is read through `list` instead of being
+   * walked, so a cached version or a marketplace offer the person never
+   * installed is not listed (nor migrated). Each plugin is read through this
+   * dialect: the harness that installed it is the one it belongs to.
    */
   readonly harnessPlugins?: {
-    root(home: string): string
-    list(home: string): HarnessPluginEntry[]
+    roots(home: string): string[]
+    /**
+     * The plugins recorded for `root`. A record entry that cannot be read is skipped and reported in `unread`, naming
+     * it: it must not cost the others, nor the other harnesses' plugins.
+     */
+    list(home: string, root: string): HarnessPluginList
+    /** The marketplaces the harness added, with a local copy, to browse under "Get plugins". */
+    marketplaces?(home: string): HarnessMarketplace[]
+    /**
+     * The key ({@link HarnessPluginEntry.key}) a folder of the harness's own install layout stands for, whether or
+     * not the harness still lists it: how a ledger written before installs carried their key learns it.
+     * @param name - the plugin's own name, for a layout that does not spell it.
+     */
+    identify?(home: string, root: string, name: string): string | undefined
   }
   /** The project assets of a session starting in `cwd`, as one plugin. */
   projectAssets?(cwd: string, home: string): ForeignPlugin | undefined

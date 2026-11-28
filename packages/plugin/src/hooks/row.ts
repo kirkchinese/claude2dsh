@@ -39,6 +39,8 @@ export function startHooks(ctx: Context, forge: HarnessForge): Disposer {
     reloadSkills: () => { forge.lookup('skills')?.reload() },
     environment: session => forge.settings.env(session),
     permissionRules: session => forge.settings.permissionRules(session),
+    mcpToolPolicy: call => forge.lookup('mcp')?.toolPolicy(call),
+    mcpHookServer: (pluginId, server, sessionId) => forge.lookup('mcp')?.hookServer(pluginId, server, sessionId),
     hooksDisabled: session => forge.settings.hooksDisabled(session),
     prepareSession: (agent, cwd) => forge.projects.prepare(agent as never, cwd),
     releaseSession: sessionId => forge.projects.release(sessionId),

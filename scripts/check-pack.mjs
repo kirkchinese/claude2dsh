@@ -1,26 +1,33 @@
 // Packs core and plugin the way `pnpm publish` would and checks what would ship:
 // the plugin's manifest names a concrete core version (pnpm rewrites `workspace:*`; `npm publish` would not),
-// every `exports` target of each package is inside its tarball, and no package ships a dependency on a
-// package with platform-specific optional binaries: in a DSH profile (pnpm 11, hoisted) such a package makes later
-// plugin installs hang after "Done". Harness Forge installs its bundler at run time instead (packages/plugin/src/mods/bundler.ts).
+// every `exports` target of each package is inside its tarball, and nothing in their production dependency graph
+// (pnpm-lock.yaml, optional edges included) has platform-specific binaries: see scripts/pack-graph.ts.
+// Every compiled file under lib/ comes from a source file under src/, so output left by a removed module never ships.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { auditProductionGraph, PLATFORM_BOUND, staleImporters } from './pack-graph.ts'
+
+// The workspace root has no dependencies of its own; the testkit (never packed) provides the YAML reader.
+const { parse } = createRequire(join(import.meta.dirname, '..', 'packages', 'testkit', 'package.json'))('yaml')
 
 const packages = [
   { dir: 'packages/core', name: '@kirkchinese/harness-forge-core' },
-  { dir: 'packages/plugin', name: '@kirkchinese/harness-forge' },
+  // `build:client` (tsdown) bundles src/client/index.tsx into lib/client.js: the one compiled file with no same-named source.
+  { dir: 'packages/plugin', name: '@kirkchinese/harness-forge', bundles: ['lib/client.js'] },
 ]
-/** Packages that pull platform-specific binaries in through optional dependencies. */
-const PLATFORM_BOUND = [/^rolldown$/u, /^@rolldown\//u, /^esbuild$/u, /^@esbuild\//u, /^lightningcss/u, /^@img\//u, /^sharp$/u, /^@swc\/core/u, /^@oxc-(parser|transform|resolver)\//u, /^@biomejs\//u]
+/** Compiled outputs of a TypeScript source file, and the source extensions tsc compiles to them. */
+const COMPILED = /\.(?:js|d\.ts|js\.map|d\.ts\.map)$/u
+const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts']
 const out = mkdtempSync(join(tmpdir(), 'harness-forge-pack-'))
 const problems = []
 const manifests = new Map()
 const run = (file, args, options = {}) => execFileSync(file, args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, shell: process.platform === 'win32' && file === 'pnpm', ...options })
 
 try {
-  for (const { dir, name } of packages) {
+  for (const { dir, name, bundles = [] } of packages) {
     run('pnpm', ['pack', '--pack-destination', out], { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] })
     const tarball = readdirSync(out).find(file => file.startsWith(name.replace('@', '').replace('/', '-')) && file.endsWith('.tgz'))
     if (tarball === undefined) {
@@ -31,10 +38,13 @@ try {
     const files = new Set(run('tar', ['-tzf', path]).split(/\r?\n/u).filter(Boolean).map(file => file.replace(/^package\//u, '')))
     const manifest = JSON.parse(run('tar', ['-xzOf', path, 'package/package.json']))
     manifests.set(name, manifest)
-    for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
-      for (const dependency of Object.keys(manifest[field] ?? {})) {
-        if (PLATFORM_BOUND.some(pattern => pattern.test(dependency))) problems.push(`${name}: ${field}.${dependency} brings platform-specific binaries into a DSH profile; load it at run time instead`)
-      }
+    for (const file of [...files].filter(file => file.startsWith('lib/') && COMPILED.test(file) && !bundles.includes(file))) {
+      const stem = join(dir, 'src', file.slice('lib/'.length).replace(COMPILED, ''))
+      if (!SOURCE_EXTENSIONS.some(extension => existsSync(`${stem}${extension}`))) problems.push(`${name}: ${file} has no source in src/ (output of a removed module?)`)
+    }
+    // Peers are the host's (DSH's own packages), not in this lockfile's production graph: their names are checked.
+    for (const dependency of Object.keys(manifest.peerDependencies ?? {})) {
+      if (PLATFORM_BOUND.some(pattern => pattern.test(dependency))) problems.push(`${name}: peerDependencies.${dependency} brings platform-specific binaries into a DSH profile; load it at run time instead`)
     }
     const targets = []
     const walk = (value) => {
@@ -67,6 +77,12 @@ try {
     }
     console.log(`${name}@${manifest.version}: ${files.size} files, ${new Set(targets).size} export targets checked, detail documents: ${[...documents].join(', ') || 'none'}`)
   }
+  const lock = parse(readFileSync('pnpm-lock.yaml', 'utf8'))
+  const sources = packages.map(item => ({ ...item, manifest: JSON.parse(readFileSync(join(item.dir, 'package.json'), 'utf8')) }))
+  problems.push(...staleImporters(lock, sources))
+  const graph = auditProductionGraph(lock, packages)
+  for (const problem of graph.problems) problems.push(`${problem}; a DSH profile would install it, so load it at run time instead`)
+  console.log(`production dependency graph: ${String(graph.packages)} packages, ${graph.problems.length === 0 ? 'nothing platform-specific' : `${String(graph.problems.length)} platform-specific`}`)
   const core = manifests.get(packages[0].name)
   const plugin = manifests.get(packages[1].name)
   if (core !== undefined && plugin !== undefined) {

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { bunPackages, ensureBun, npmLaunch, type BunHost, type BunPlatform } from '../src/opencode/bun.js'
+import { bunPackages, ensureBun, ensureDependencies, npmLaunch, type BunHost, type BunPlatform } from '../src/opencode/bun.js'
 
 const names = (platform: BunPlatform): string[] => bunPackages(platform).map(item => item.name)
 
@@ -116,5 +116,22 @@ describe('npmLaunch', () => {
 
   it('on Windows says so when npm-cli.js cannot be found', () => {
     expect(() => npmLaunch(['view'], { platform: 'win32', execPath: node, exists: () => false })).toThrow(/npm-cli\.js/u)
+  })
+})
+
+describe('ensureDependencies', () => {
+  it('leaves a package OpenCode installed as it is when its dependencies are hoisted beside it', async () => {
+    const cache = mkdtempSync(join(tmpdir(), 'hf-oc-cache-'))
+    try {
+      const plugin = join(cache, 'node_modules', '@acme', 'opencode-plugin')
+      mkdirSync(plugin, { recursive: true })
+      writeFileSync(join(plugin, 'package.json'), JSON.stringify({ name: '@acme/opencode-plugin', dependencies: { zod: '^3' } }))
+      mkdirSync(join(cache, 'node_modules', 'zod'), { recursive: true })
+      // A Bun that cannot run: anything installed would fail.
+      await expect(ensureDependencies(join(cache, 'no-bun'), plugin)).resolves.toBeUndefined()
+      expect(existsSync(join(plugin, 'node_modules'))).toBe(false)
+    } finally {
+      rmSync(cache, { recursive: true, force: true })
+    }
   })
 })

@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isRemoteJsonValue, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
+import { HarnessForge } from '../src/forge/service.js'
 import { HarnessRemoteService, REMOTE_METHODS } from '../src/workbench/remote.js'
 import { call, isWorkbenchOff, setMountedRemote, TYPERT_REMOTE } from '../src/client/typert.js'
 
@@ -98,6 +99,16 @@ describe('harnessCompat Remote namespace', () => {
     await expect(async () => { for await (const _ of remote.adapterSurface({ adapter: 'demo-statusline', session: 's1' })) break }).rejects.toMatchObject({ message: 'no adapter surface "demo-statusline" is registered in this DSH' })
   })
 
+  it('offers marketplace installs only through the confirmation', () => {
+    // The one-step marketplace install skipped the confirmation and the network policy; it is gone, not hidden.
+    for (const method of ['marketplaceInstall', 'marketplaceScan']) {
+      expect(REMOTE_METHODS.map(([name]) => name)).not.toContain(method)
+      expect(Object.keys(TYPERT_REMOTE.methods)).not.toContain(`harnessCompat/${method}`)
+    }
+    for (const method of ['marketplaceInstall', 'marketplaceScan']) expect(method in HarnessRemoteService.prototype).toBe(false)
+    for (const method of ['installMarketplace', 'scanMarketplace']) expect(method in HarnessForge.prototype).toBe(false)
+  })
+
   it('answers every method as lossless JSON, whatever the service hands back', async () => {
     // What a service might return: absent fields as `undefined`, at any depth (an install report's `receipt`, say).
     const dirty = (): Record<string, unknown> => ({
@@ -111,13 +122,13 @@ describe('harnessCompat Remote namespace', () => {
     })
     const service = new Proxy({}, { get: (_target, key) => key === 'then' ? undefined : () => dirty() })
     const remote = remoteOver({
-      install: dirty, installMarketplace: dirty, uninstall: () => true, setPartEnabled: () => true,
-      scanMarketplace: dirty,
+      install: dirty, uninstall: () => true, setPartEnabled: () => true, keep: dirty,
+      follow: async () => undefined, applying: () => ({ done: 0, total: 2, gone: undefined }),
       remote: service,
       projects: { workspaces: () => [dirty()], setTrust: () => ({ stillLive: [dirty()] }), trust: { list: () => [dirty()], state: () => ({ workspace: '/nowhere', trusted: false, sources: [], gone: undefined }), dismiss: () => undefined } },
       ctx: {},
       statePath: join(import.meta.dirname, 'no-such-state'),
-    }, { context: service, mcp: service, sessions: { sessions: () => [dirty()], importSession: dirty }, mods: service })
+    }, { context: service, mcp: service, sessions: { sessions: () => [dirty()], importSession: dirty, open: dirty }, mods: service })
     Object.defineProperty(remote, 'workbench', { value: new Proxy({}, { get: () => () => dirty() }) })
     const request: Record<string, unknown> = {
       path: '/p', token: 't', input: 'i', id: 'claude-code:p', name: 'm', pluginId: 'claude-code:p', componentId: 'c', enabled: true,
@@ -131,7 +142,7 @@ describe('harnessCompat Remote namespace', () => {
       expect(isRemoteJsonValue(answer) || answer === undefined, `${method} answers ${JSON.stringify(answer)}`).toBe(true)
       answered.push(method)
     }
-    expect(answered).toEqual(expect.arrayContaining(['installPlugin', 'marketplaceInstall', 'remoteInstall', 'overview', 'sessions', 'importSession']))
+    expect(answered).toEqual(expect.arrayContaining(['installPlugin', 'remoteInstall', 'overview', 'sessions', 'importSession', 'openImported']))
     // An adapter's surface is the adapter's answer; it is cleaned the same way, read once or streamed.
     remote.registerAdapterSurface('dirty', { read: dirty })
     expect(isRemoteJsonValue(await remote.adapterRead({ adapter: 'dirty' }))).toBe(true)

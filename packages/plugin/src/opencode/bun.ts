@@ -13,7 +13,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { npmInstall, runProcess } from '../forge/npm.js'
 
 export { npmLaunch, type Launch, type NpmEnvironment } from '../forge/npm.js'
@@ -158,6 +158,14 @@ export async function ensureBun(dataRoot: string, host: BunHost = defaultHost): 
   throw new Error(`Bun is needed to run OpenCode plugins and could not be installed automatically (${problems.join('; ')}). Install Bun (https://bun.sh), or set BUN_PATH to a working bun executable, then restart DSH.`)
 }
 
+/** Whether `name` resolves from `root` the way Node and Bun look it up: `node_modules` of `root` and each parent. */
+function resolvableFrom(root: string, name: string): boolean {
+  for (let dir = resolve(root); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, 'node_modules', ...name.split('/')))) return true
+    if (dirname(dir) === dir) return false
+  }
+}
+
 /**
  * Install a plugin's dependencies the way OpenCode installs a plugin package:
  * production dependencies, no lifecycle scripts of the plugin's own repository.
@@ -173,7 +181,10 @@ export async function ensureDependencies(bun: string, root: string): Promise<voi
   } catch {
     return
   }
-  const missing = Object.keys(declared).filter(name => !existsSync(join(root, 'node_modules', ...name.split('/'))))
+  // A package OpenCode installed has its dependencies hoisted beside it (`~/.cache/opencode/node_modules`), where
+  // Bun resolves them from: a dependency found in any parent `node_modules` is there, and nothing is installed
+  // into OpenCode's own folders.
+  const missing = Object.keys(declared).filter(name => !resolvableFrom(root, name))
   if (missing.length === 0) return
   await runProcess(bun, ['install', '--production', '--ignore-scripts'], root, 600_000)
 }

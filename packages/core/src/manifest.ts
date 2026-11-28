@@ -17,6 +17,7 @@ import { childId, kebabCase, pluginId, uniqueName } from './naming.js'
 import { fingerprintPlugin } from './fingerprint.js'
 import { detectLicense } from './license.js'
 import { codexSkillPolicy } from './dialects/codex/skill-policy.js'
+import { codexMcpServer, notStartedBy } from './dialects/codex/mcp-server.js'
 import { usesAgentMcpSchema, usesAgentPluginSchema, validateAgentMcp, validateAgentPlugin } from './schema.js'
 import {
   childDirectories,
@@ -24,6 +25,7 @@ import {
   isFile,
   isInside,
   isPlainObject,
+  leadsToShare,
   readJsonObject,
   readText,
   realOrLexical,
@@ -228,7 +230,7 @@ export function scanPlugin(root: string, options: ScanOptions): ScanResult {
     addAgents(root, id, manifest, manifestKind, push, warn, usedAgentNames)
     addHooks(root, id, manifest, manifestKind, push, warn)
   }
-  addMcp(root, id, manifest, manifestKind, push, warn)
+  addMcp(root, id, manifest, options.source === 'codex' || manifestKind === 'codex', push, warn)
   if (!skillsOnly) addUi(root, id, manifest, manifestKind, push, warn)
   addCode(root, id, manifest, manifestKind, components, push, warn)
   // A hooks file that only lists a mod's modules has no hooks of its own: the modules are the code components.
@@ -682,11 +684,17 @@ function addUnmapped(
 // MCP
 // ---------------------------------------------------------------------------
 
+/**
+ * A plugin's MCP servers. A Codex plugin's entries are read as Codex reads
+ * them ({@link codexMcpServer}); any server marked `enabled: false` is kept,
+ * marked as not started, since no harness starts a server its configuration
+ * switches off.
+ */
 function addMcp(
   root: string,
   plugin: string,
   manifest: Record<string, unknown>,
-  kind: ManifestKind,
+  codex: boolean,
   push: (component: McpComponent) => void,
   warn: (code: string, message: string, extra?: Partial<PluginWarning>) => void,
 ): void {
@@ -738,6 +746,12 @@ function addMcp(
       seenConfigs.add(configKey)
       const serverName = uniqueName(name, seen, `${plugin}:${map.path}:${name}`)
       seen.add(serverName)
+      const id = childId(plugin, 'mcp', serverName)
+      const path = toPosix(relative(root, map.path))
+      if (codex) {
+        push(codexMcpServer(raw, { id, name: serverName, declaredName: name, path, scope: 'plugin', disabledCode: 'disabled-in-plugin' }))
+        continue
+      }
       const transport = mcpTransport(raw)
       const command = stringField(raw, 'command')
       const url = stringField(raw, 'url')
@@ -746,10 +760,11 @@ function addMcp(
       const headers = stringRecord(raw['headers'])
       const cwd = stringField(raw, 'cwd')
       push({
-        id: childId(plugin, 'mcp', serverName),
+        id,
         kind: 'mcp',
         name: serverName,
-        path: toPosix(relative(root, map.path)),
+        declaredName: name,
+        path,
         description: stringField(raw, 'description') ?? `${transport} MCP server`,
         transport,
         ...(command !== undefined ? { command } : {}),
@@ -758,10 +773,10 @@ function addMcp(
         ...(cwd !== undefined ? { cwd } : {}),
         ...(url !== undefined ? { url } : {}),
         ...(headers !== undefined ? { headers } : {}),
+        ...(raw['enabled'] === false ? { notStarted: notStartedBy('disabled-in-plugin') } : {}),
       })
     }
   }
-  void kind
 }
 
 function mcpTransport(raw: Record<string, unknown>): McpComponent['transport'] {
@@ -876,6 +891,8 @@ function addCode(
 // ---------------------------------------------------------------------------
 
 function safeEntries(root: string): Array<{ name: string; isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }> {
+  // On a link to a network share the path is not on: as unreadable (see `leadsToShare`).
+  if (leadsToShare(root)) return []
   try {
     return readdirSync(root, { withFileTypes: true })
   } catch {

@@ -95,9 +95,10 @@ export function python3Shim(shimRoot: string, env: NodeJS.ProcessEnv = process.e
 
 /**
  * Build the executors.
- * @param shimRoot - writable directory for command shims (see {@link python3Shim}).
+ * @param shimRoot - writable directory for command shims (see {@link python3Shim}) and the files that hold hook input.
+ * @param onLeftover - told of a hook input file that could not be removed.
  */
-export function createForeignShell(base: NodeJS.ProcessEnv = process.env, shimRoot?: string): ForeignShell {
+export function createForeignShell(base: NodeJS.ProcessEnv = process.env, shimRoot?: string, onLeftover?: (path: string) => void): ForeignShell {
   const posix = findPosixShell(base)
   const powershell = findPowerShell(base)
   const shims = shimRoot === undefined ? undefined : python3Shim(shimRoot, base)
@@ -123,6 +124,8 @@ export function createForeignShell(base: NodeJS.ProcessEnv = process.env, shimRo
     cwd: options.cwd,
     env: environment(options.env),
     stdin: options.stdin ?? '',
+    ...(shimRoot !== undefined ? { stdinDir: join(shimRoot, 'stdin'), stdinRoot: shimRoot } : {}),
+    ...(onLeftover !== undefined ? { onLeftover } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.signal !== undefined ? { signal: options.signal } : {}),
   })

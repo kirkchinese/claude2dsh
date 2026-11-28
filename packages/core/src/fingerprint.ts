@@ -9,6 +9,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import type { ForeignComponent, ForeignPlugin } from './types.js'
 import type { SourceFingerprint } from './contracts.js'
+import { LEADS_TO_SHARE, leadsToShare } from './paths.js'
 
 const MAX_HASH_BYTES = 8 * 1024 * 1024
 
@@ -22,6 +23,8 @@ export function fingerprintPlugin(plugin: ForeignPlugin): SourceFingerprint {
     hash.update(relativePath)
     hash.update('\0')
     try {
+      // A file on a link to a network share the path is not on is hashed as unreadable (see `leadsToShare`).
+      if (leadsToShare(path)) throw new Error(LEADS_TO_SHARE)
       const stat = statSync(path)
       if (stat.size <= MAX_HASH_BYTES) hash.update(readFileSync(path))
       else hash.update(`${String(stat.size)}:${String(stat.mtimeMs)}`)
@@ -80,6 +83,8 @@ function sha256(value: string | Buffer): string {
 }
 
 function safeStat(path: string): ReturnType<typeof statSync> | undefined {
+  // On a link to a network share the path is not on: as unreadable (see `leadsToShare`).
+  if (leadsToShare(path)) return undefined
   try {
     return statSync(path)
   } catch {

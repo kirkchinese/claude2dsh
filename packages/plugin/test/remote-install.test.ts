@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { treeDigest } from '../src/forge/remote/archive.js'
 import { SYSTEM_DEPS, type FetchDeps } from '../src/forge/remote/fetch.js'
 import { HarnessForge } from '../src/forge/service.js'
 
@@ -217,6 +218,26 @@ describe('plugins from the network', { timeout: 120_000 }, () => {
     expect(readFileSync(join(forge.list()[0]!.root, 'skills/s/SKILL.md'), 'utf8')).toContain('V3')
   })
 
+  it('binds an update check to the copy it compared, so an older check cannot be prepared over a newer install', async () => {
+    const market = repo({
+      '.claude-plugin/marketplace.json': JSON.stringify({ name: 'm', plugins: [{ name: 'p', source: './p' }] }),
+      'p/.claude-plugin/plugin.json': '{"name":"p"}',
+      'p/skills/s/SKILL.md': skill('s', 'V1'),
+    })
+    const forge = forgeIn(tempRoot())
+    await forge.start()
+    await forge.remote.install((await forge.remote.prepare(market.url, 'p')).token)
+    const id = forge.list()[0]!.id
+    market.commit({ 'p/skills/s/SKILL.md': skill('s', 'V2') })
+    const older = (await forge.remote.checkUpdates())[0]!.token!
+    market.commit({ 'p/skills/s/SKILL.md': skill('s', 'V3') })
+    await forge.remote.install((await forge.remote.prepareUpdate(id, (await forge.remote.checkUpdates())[0]!.token!)).token)
+    // V2 was found against V1; V3 is installed now, which that check never compared.
+    await expect(forge.remote.prepareUpdate(id, older)).rejects.toThrow(/changed since the check/u)
+    expect(readFileSync(join(forge.list()[0]!.root, 'skills/s/SKILL.md'), 'utf8')).toContain('V3')
+    expect(staged(forge.remote.root.replace(/[/\\]data[/\\]remote$/u, ''))).toEqual([])
+  })
+
   it('keys what is installed by the marketplace\'s source, not by the names it gives itself', async () => {
     const files = (body: string): Record<string, string> => ({
       '.claude-plugin/marketplace.json': JSON.stringify({ name: 'claude-plugins-official', plugins: [{ name: 'p', source: './p' }] }),
@@ -251,6 +272,88 @@ describe('plugins from the network', { timeout: 120_000 }, () => {
     expect(again.list().map(record => record.name)).toEqual(['solo'])
     expect(again.remote.installs()).toHaveLength(1)
     expect((await again.remote.checkUpdates())[0]).toMatchObject({ update: false })
+  })
+
+  it('names the local marketplace a plugin from this computer came from', async () => {
+    const market = tempRoot()
+    write(market, {
+      '.claude-plugin/marketplace.json': JSON.stringify({ name: 'home-market', plugins: [{ name: 'near', source: './near' }] }),
+      'near/.claude-plugin/plugin.json': '{"name":"near"}',
+      'near/skills/n/SKILL.md': skill('n', 'N'),
+    })
+    const plugin = repo({ '.claude-plugin/plugin.json': '{"name":"far"}', 'skills/f/SKILL.md': skill('f', 'F') })
+    const forge = forgeIn(tempRoot())
+    await forge.start()
+    await forge.remote.install((await forge.remote.prepare(market, 'near')).token)
+    await forge.remote.install((await forge.remote.prepare(plugin.url)).token)
+    const installs = (await forge.remote.sources()).installs
+    expect(installs.find(install => install.name === 'near')).toMatchObject({ localMarketplace: 'home-market' })
+    expect(installs.find(install => install.name === 'far')?.localMarketplace).toBeUndefined()
+  })
+
+  it('installs a copy of a plugin in a marketplace on this computer, taken when it was shown', async () => {
+    const market = tempRoot()
+    const outside = tempRoot()
+    write(outside, { '.claude-plugin/plugin.json': '{"name":"elsewhere"}', 'skills/e/SKILL.md': skill('e', 'OUTSIDE'), 'secret.txt': 'SECRET' })
+    write(market, {
+      '.claude-plugin/marketplace.json': JSON.stringify({
+        name: 'home-market',
+        plugins: [
+          { name: 'near', source: './near', skills: ['./extra'] },
+          { name: 'jump', source: './jump' },
+          { name: 'through', source: './jump/skills' },
+          { name: 'file-url', source: { source: 'url', url: pathToFileURL(outside).href } },
+        ],
+      }),
+      'near/.claude-plugin/plugin.json': '{"name":"near"}',
+      'near/skills/n/SKILL.md': skill('n', 'SHOWN'),
+      'near/extra/SKILL.md': skill('extra', 'EXTRA'),
+    })
+    symlinkSync(join(outside, 'secret.txt'), join(market, 'near', 'leak.txt'))
+    symlinkSync(outside, join(market, 'jump'), 'dir')
+    const before = treeDigest(market)
+    const root = tempRoot()
+    const forge = forgeIn(root)
+    await forge.start()
+
+    const plan = await forge.remote.prepare(market, 'near')
+    expect(plan.parts.map(part => part.name).sort()).toEqual(['extra', 'n'])
+    expect(plan.warnings.join('\n')).toMatch(/left out: leak\.txt/u)
+    // The harness that owns the marketplace refreshes it between the confirmation and the install.
+    write(market, { 'near/skills/n/SKILL.md': skill('n', 'REFRESHED'), 'near/skills/late/SKILL.md': skill('late', 'LATE') })
+    await forge.remote.install(plan.token)
+    const [record] = forge.list()
+    expect(record?.root.startsWith(join(root, 'data', 'remote', 'plugins'))).toBe(true)
+    expect(readFileSync(join(record!.root, 'skills/n/SKILL.md'), 'utf8')).toContain('SHOWN')
+    expect(existsSync(join(record!.root, 'skills/late'))).toBe(false)
+    expect(existsSync(join(record!.root, 'leak.txt'))).toBe(false)
+    expect((await forge.remote.sources()).installs[0]).toMatchObject({ localMarketplace: 'home-market', revision: 'local' })
+    // The marketplace's folder is left as the harness keeps it: the entry's manifest is combined in the copy only.
+    write(market, { 'near/skills/n/SKILL.md': skill('n', 'SHOWN') })
+    rmSync(join(market, 'near/skills/late'), { recursive: true })
+    expect(treeDigest(market)).toBe(before)
+
+    // A path that is, or passes through, a link out of the marketplace is not followed.
+    await expect(forge.remote.prepare(market, 'jump')).rejects.toThrow(/link/u)
+    await expect(forge.remote.prepare(market, 'through')).rejects.toThrow(/link/u)
+    // An entry naming a source of its own takes the network policy of any marketplace entry.
+    await expect(forge.remote.prepare(market, 'file-url')).rejects.toThrow(/only https/u)
+    expect(forge.list()).toHaveLength(1)
+    expect(staged(root)).toEqual([])
+  })
+
+  it('installs a copy of a plugin folder on this computer, taken when it was shown', async () => {
+    const folder = tempRoot()
+    write(folder, { '.claude-plugin/plugin.json': '{"name":"here"}', 'skills/h/SKILL.md': skill('h', 'SHOWN') })
+    const root = tempRoot()
+    const forge = forgeIn(root)
+    await forge.start()
+    const plan = await forge.remote.prepare(folder)
+    write(folder, { 'skills/h/SKILL.md': skill('h', 'CHANGED') })
+    await forge.remote.install(plan.token)
+    const [record] = forge.list()
+    expect(record?.root.startsWith(join(root, 'data', 'remote', 'plugins'))).toBe(true)
+    expect(readFileSync(join(record!.root, 'skills/h/SKILL.md'), 'utf8')).toContain('SHOWN')
   })
 
   it('reads a marketplace.json served over HTTP; its relative entries cannot be installed', async () => {
